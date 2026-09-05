@@ -96,3 +96,28 @@ controls.endFrame()
 - Do not add `uniform`s that Three already injects (`modelMatrix`, `viewMatrix`,
   `projectionMatrix`, `normalMatrix`, `cameraPosition`) — redeclaring them fails
   to compile.
+
+## Post-processing and colour management
+The frame goes through an `EffectComposer` in `postfx.ts`: render → bloom →
+raw copy to the canvas. Two rules fell out of a bug that only reproduced on
+real GPUs, never under headless software rendering:
+
+- **Never set `isXRRenderTarget` on a composer target.** It is not a
+  colour-space switch. When the GPU exposes
+  `WEBGL_multisampled_render_to_texture` it routes multisampled targets through
+  the WebXR render-to-texture path, which skips the explicit MSAA resolve the
+  composer's ping-pong buffers depend on. Result on hardware: a mostly black,
+  unresolved frame and colour flicker between frames.
+- **Composer targets are RGBA8 with standard MSAA**, not the composer's default
+  half float. Multisampled half-float targets are not renderable on every GPU;
+  RGBA8 MSAA is core WebGL2. Over-range highlights therefore clamp to 1.0, and
+  the bloom knee is sized for that.
+
+Stock materials (`MeshStandardMaterial`, `PointsMaterial`, `LineBasicMaterial`)
+would lose their sRGB encode inside a linear render target. `postfx.ts` patches
+every non-`ShaderMaterial` in the scene, once, to encode with Three's own
+`sRGBTransferOETF` regardless of which buffer is bound. Hand-written
+`ShaderMaterial`s are left alone: they write raw and were tuned that way. Net
+effect is pixel-equivalent to a direct render, with bloom as the only
+difference. If you add a stock material after the first frame, it will not be
+patched; add it before the first `postFx.render`.

@@ -23,13 +23,14 @@ const BLOOM_RADIUS = 0.6;
 /**
  * Width of the ramp above the threshold, replacing the pass's default 0.01.
  *
- * A near-hard cut makes the threshold a cliff: the brightest ordinary surface
- * in the scene (cloud tops, 0.86) sits only just below it, so any later tweak
- * that lifts clouds or sea over the line would switch the entire deck to
- * glowing at once. A wide knee means anything creeping over the line fades in
- * instead, while the genuinely over-range sources still pass at full weight.
+ * The scene buffer is 8-bit, so every source that should glow (atmosphere rim,
+ * hull neon, town lights) arrives clamped to exactly 1.0, while the brightest
+ * surface that should not (cloud tops) sits at about 0.86. The knee therefore
+ * has to end below 1.0 so clamped sources reach full weight, and start above
+ * 0.86 so clouds stay out. 0.90 to 0.98 does both, and still softens anything
+ * that later creeps over the line instead of switching a whole surface on.
  */
-const BLOOM_KNEE = 0.15;
+const BLOOM_KNEE = 0.08;
 
 /**
  * Cap, in device pixels, on the width the bloom chain runs at.
@@ -57,8 +58,8 @@ const BLOOM_MAX_WIDTH = 1280;
  *
  * Peak channel separates them cleanly, because what should glow here is
  * saturated (blue rim, cyan and magenta hull neon, amber and cyan town lights,
- * all of which run past 1.0 in one channel) and what should not is broad
- * spectrum and stays under 0.86 in every channel.
+ * all of which saturate one channel) and what should not is broad spectrum and
+ * stays under 0.86 in every channel.
  *
  * Same uniform names as `LuminosityHighPassShader`, so the pass keeps driving
  * `luminosityThreshold` from `bloomPass.threshold` every frame.
@@ -79,35 +80,102 @@ const PEAK_HIGH_PASS_FRAGMENT = [
   '}',
 ].join('\n');
 
+/* ------------------------------------------------------------------ */
+/* Colour management under the composer                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Why stock materials are patched to encode themselves.
+ *
+ * This scene mixes two kinds of material. `land`, `ship`, the grid and the
+ * starfield are stock Three materials: when drawn straight to the canvas they
+ * get an sRGB encode on the way out. `water`, `sky`, `clouds`, `citylights` and
+ * `wake` are hand written `ShaderMaterial`s that write `gl_FragColor` raw and
+ * were tuned against exactly that raw output. Rendering direct to the canvas,
+ * both kinds land on screen as their authors tuned them.
+ *
+ * A composer breaks that balance: Three hardcodes linear output for anything
+ * drawn into an ordinary render target, so the stock materials lose their
+ * encode and go a stop darker than everything beside them. An `OutputPass` at
+ * the end gives it back to them but also encodes the raw shaders, which were
+ * never linear, and the ocean lifts into white haze.
+ *
+ * An earlier version fixed this by marking the composer targets as WebXR
+ * targets, the one flag that makes Three honour a target's own colour space.
+ * That flag is not a colour-space switch. It also routes multisampled targets
+ * through the XR render-to-texture path whenever the GPU exposes
+ * WEBGL_multisampled_render_to_texture, which skips the explicit resolve the
+ * composer's ping-pong buffers depend on. Software rendering lacks that
+ * extension so the bug never showed in headless tests; on real hardware it
+ * produced an unresolved, mostly black frame and colour flicker. Never set
+ * `isXRRenderTarget` on a non-XR target.
+ *
+ * So instead the stock materials are patched, once, to encode with the same
+ * function Three uses for the canvas regardless of which buffer is bound. The
+ * composer targets stay ordinary linear targets on the standard MSAA path, and
+ * the final blit is a plain copy that converts nothing. The result is pixel
+ * equivalent to a direct render for both kinds of material, with bloom as the
+ * only difference.
+ */
+const SELF_ENCODE_KEY = 'pirate-world/srgb-self-encode';
+
+function selfEncodeToSRGB(material: THREE.Material): void {
+  if (material.userData[SELF_ENCODE_KEY] === true) return;
+  // Raw shaders are excluded: they never had an encode and are tuned without one.
+  const raw = material as unknown as { isShaderMaterial?: boolean; isRawShaderMaterial?: boolean };
+  if (raw.isShaderMaterial === true || raw.isRawShaderMaterial === true) return;
+  if (material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) {
+    throw new Error(`postfx: material "${material.name || material.type}" already has onBeforeCompile; refusing to clobber it`);
+  }
+
+  material.onBeforeCompile = (shader): void => {
+    // `sRGBTransferOETF` is declared by <colorspace_pars_fragment>, which every
+    // stock fragment shader includes. This replaces the target-dependent
+    // `linearToOutputTexel` with an unconditional sRGB encode.
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <colorspace_fragment>',
+      'gl_FragColor = sRGBTransferOETF( gl_FragColor );',
+    );
+  };
+  material.customProgramCacheKey = (): string => SELF_ENCODE_KEY;
+  material.userData[SELF_ENCODE_KEY] = true;
+  material.needsUpdate = true;
+}
+
+function patchSceneMaterials(scene: THREE.Scene): number {
+  let count = 0;
+  scene.traverse((obj) => {
+    const holder = obj as unknown as { material?: THREE.Material | THREE.Material[] };
+    const mat = holder.material;
+    if (!mat) return;
+    for (const m of Array.isArray(mat) ? mat : [mat]) {
+      const before = m.userData[SELF_ENCODE_KEY] === true;
+      selfEncodeToSRGB(m);
+      if (!before && m.userData[SELF_ENCODE_KEY] === true) count++;
+    }
+  });
+  return count;
+}
+
+/* ------------------------------------------------------------------ */
+/* Composer                                                            */
+/* ------------------------------------------------------------------ */
+
 /**
  * Composer chain: render -> bloom -> raw copy to the canvas.
  *
- * The last pass is a plain copy rather than an `OutputPass`, and the working
- * buffers are marked as holding sRGB, because this scene mixes materials that
- * colour manage with materials that do not. `land`, `ship` and the starfield
- * are stock Three materials and get an sRGB encode on the way out; `water`,
- * `sky` and `citylights` are hand written `ShaderMaterial`s that write
- * `gl_FragColor` raw, with no encode. Rendering straight to the canvas, both
- * land on screen exactly as their authors tuned them.
- *
- * A composer normally breaks that. Three forces `LinearSRGBColorSpace` output
- * for anything drawn into an ordinary render target, so the stock materials
- * lose their encode; putting an `OutputPass` at the end gives it back to them
- * but then also applies it to the raw shaders, which were never linear, and the
- * ocean lifts from near black to mid blue. Measured: an `OutputPass` chain
- * takes mean frame luminance from 23 to 117 and turns the sea into white haze.
- *
- * So instead the render targets declare sRGB and the final blit does nothing at
- * all, which reproduces the direct-to-canvas result for both kinds of material
- * and leaves bloom as the only difference. Verified by A/B: with the bloom
- * threshold above every source, composer output matches a direct render to
- * within 0.1 of a luminance level.
+ * Targets are RGBA8 with standard multisampling. 8-bit rather than the
+ * composer's default half float because multisampled half float targets are
+ * not renderable on every GPU, whereas RGBA8 MSAA is core WebGL2. The only
+ * cost is that over-range highlights clamp to 1.0, which the bloom knee above
+ * is sized for.
  */
 export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
   let composer: EffectComposer | null = null;
   let renderPass: RenderPass | null = null;
   let bloomPass: UnrealBloomPass | null = null;
   let copyPass: ShaderPass | null = null;
+  let patchedScene: THREE.Scene | null = null;
 
   const size = renderer.getSize(new THREE.Vector2());
   let width = size.x;
@@ -127,28 +195,27 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
   }
 
   function build(scene: THREE.Scene, camera: THREE.Camera): EffectComposer {
-    const built = new EffectComposer(renderer);
-    composer = built;
-
     // `main.ts` asks for an antialiased context. Composer targets default to no
     // multisampling, so without this the composer silently drops MSAA and the
     // ocean's wave detail starts to crawl. Costs nothing when AA is off.
     const attributes = renderer.getContext().getContextAttributes();
     const samples = attributes?.antialias ? Math.min(4, renderer.capabilities.maxSamples) : 0;
 
-    for (const target of [built.renderTarget1, built.renderTarget2]) {
-      target.samples = samples;
-      // Three decides a draw's output colour space from the bound target, and
-      // for an ordinary target the answer is hardcoded to linear -- the
-      // target's own `texture.colorSpace` is ignored. `isXRRenderTarget` is the
-      // one flag that makes it read `texture.colorSpace` instead, which is what
-      // keeps stock materials encoding exactly as they do to the canvas (see
-      // `WebGLPrograms.getParameters`). The buffers are RGBA16F, so nothing
-      // else changes: sRGB is not a valid half float internal format, and the
-      // same flag tells `getInternalFormat` to keep the linear one.
-      target.texture.colorSpace = THREE.SRGBColorSpace;
-      (target as unknown as { isXRRenderTarget: boolean }).isXRRenderTarget = true;
-    }
+    const pixelRatio = renderer.getPixelRatio();
+    const target = new THREE.WebGLRenderTarget(
+      Math.max(1, Math.round(width * pixelRatio)),
+      Math.max(1, Math.round(height * pixelRatio)),
+      {
+        type: THREE.UnsignedByteType,
+        samples,
+        depthBuffer: true,
+        stencilBuffer: false,
+      },
+    );
+    target.texture.name = 'postfx.scene';
+
+    const built = new EffectComposer(renderer, target);
+    composer = built;
 
     renderPass = new RenderPass(scene, camera);
     built.addPass(renderPass);
@@ -179,6 +246,13 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
 
   return {
     render(dt: number, scene: THREE.Scene, camera: THREE.Camera): void {
+      // Materials must be patched before their first compile, and the scene is
+      // only known here. Patching is idempotent, so a scene swap re-runs it.
+      if (patchedScene !== scene) {
+        patchSceneMaterials(scene);
+        patchedScene = scene;
+      }
+
       // The composer needs the scene and camera up front but they only arrive
       // per frame, so it is built on the first draw. A later swap of either is
       // a field write on the existing pass, never a rebuild -- rebuilding would
@@ -211,6 +285,7 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
       renderPass = null;
       bloomPass = null;
       copyPass = null;
+      patchedScene = null;
     },
   };
 }
