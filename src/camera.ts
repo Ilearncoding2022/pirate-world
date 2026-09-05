@@ -1,0 +1,132 @@
+import { PerspectiveCamera, Vector3 } from 'three';
+import type { InputState, ShipState } from './types';
+import { GLOBE_RADIUS } from './geo';
+
+/* ------------------------------------------------------------------ */
+/* Tuning                                                              */
+/* ------------------------------------------------------------------ */
+
+/** Matches ship.ts's HULL_OFFSET so the camera targets the actual hull. */
+const SHIP_ALTITUDE = 0.6;
+
+/** Closest framing: tight over-the-shoulder chase view. */
+const NEAR_DISTANCE = 21;
+const NEAR_HEIGHT = 9.5;
+/** Furthest framing: high, near-orbital look at the planet. */
+const FAR_DISTANCE = 90;
+const FAR_HEIGHT = 55;
+
+/** How far ahead of the bow the camera aims, and how far above the deck. */
+const LOOK_AHEAD = 6;
+const LOOK_UP = 1.5;
+
+/** Exponential damping rates (higher = snappier). */
+const POSITION_DAMP = 4.5;
+const TARGET_DAMP = 6;
+const UP_DAMP = 6;
+const ZOOM_DAMP = 8;
+
+/** Zoom units gained per wheel notch. Full near->far sweep takes ~8 notches. */
+const ZOOM_SENSITIVITY = 0.12;
+
+/* ------------------------------------------------------------------ */
+/* Scratch                                                             */
+/* ------------------------------------------------------------------ */
+
+const _shipWorld = new Vector3();
+const _desiredPos = new Vector3();
+const _desiredTarget = new Vector3();
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v;
+}
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+export interface FollowCamera {
+  camera: PerspectiveCamera;
+  update(dt: number, ship: ShipState, input: InputState): void;
+  resize(aspect: number): void;
+}
+
+/**
+ * Chase camera that rides the sphere with the ship: it sits behind and above
+ * the hull, aims slightly ahead of the bow, and keeps its own `up` locked to
+ * the local surface normal so the horizon never flips near the poles.
+ */
+export function createFollowCamera(aspect: number): FollowCamera {
+  const safeAspect = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
+  const camera = new PerspectiveCamera(55, safeAspect, 0.1, 6000);
+
+  // Smoothed state.
+  const smoothPos = new Vector3();
+  const smoothTarget = new Vector3();
+  const smoothUp = new Vector3(0, 1, 0);
+
+  /** 0 = closest framing, 1 = furthest. */
+  let zoomTarget = 0.18;
+  let zoom = zoomTarget;
+  let initialized = false;
+
+  function update(dt: number, ship: ShipState, input: InputState): void {
+    if (!(dt > 0)) dt = 0;
+    if (dt > 0.1) dt = 0.1;
+
+    // ---- Zoom (input.zoomDelta is reset by controls.endFrame, not here) ---
+    const notches = input?.zoomDelta ?? 0;
+    if (Number.isFinite(notches) && notches !== 0) {
+      // zoomDelta is already in wheel notches (see InputState in types.ts).
+      zoomTarget = clamp(zoomTarget + notches * ZOOM_SENSITIVITY, 0, 1);
+    }
+    zoom += (zoomTarget - zoom) * (dt > 0 ? 1 - Math.exp(-ZOOM_DAMP * dt) : 1);
+
+    // Distance and height interpolate together, so the camera tilts more
+    // top-down as it pulls back.
+    const distance = lerp(NEAR_DISTANCE, FAR_DISTANCE, zoom);
+    const height = lerp(NEAR_HEIGHT, FAR_HEIGHT, zoom);
+
+    // ---- Frame vectors, guarded against degenerate input -----------------
+    const up = ship.up.lengthSq() > 1e-8 ? ship.up : ship.position;
+    _shipWorld.copy(ship.position).multiplyScalar(GLOBE_RADIUS + SHIP_ALTITUDE);
+
+    const forward = ship.forward;
+    const hasForward = forward.lengthSq() > 1e-8;
+
+    _desiredPos.copy(_shipWorld).addScaledVector(up, height);
+    if (hasForward) _desiredPos.addScaledVector(forward, -distance);
+
+    _desiredTarget.copy(_shipWorld).addScaledVector(up, LOOK_UP);
+    if (hasForward) _desiredTarget.addScaledVector(forward, LOOK_AHEAD);
+
+    if (!initialized) {
+      // Snap on the first update so there is no fly-in shot.
+      smoothPos.copy(_desiredPos);
+      smoothTarget.copy(_desiredTarget);
+      smoothUp.copy(up);
+      initialized = true;
+    } else if (dt > 0) {
+      smoothPos.lerp(_desiredPos, 1 - Math.exp(-POSITION_DAMP * dt));
+      smoothTarget.lerp(_desiredTarget, 1 - Math.exp(-TARGET_DAMP * dt));
+      smoothUp.lerp(up, 1 - Math.exp(-UP_DAMP * dt));
+      if (smoothUp.lengthSq() < 1e-8) smoothUp.copy(up);
+      smoothUp.normalize();
+    }
+
+    camera.position.copy(smoothPos);
+    camera.up.copy(smoothUp);
+    // Degenerate lookAt (camera sitting on its target) would produce NaNs.
+    if (camera.position.distanceToSquared(smoothTarget) > 1e-8) {
+      camera.lookAt(smoothTarget);
+    }
+  }
+
+  function resize(newAspect: number): void {
+    if (!(newAspect > 0) || !Number.isFinite(newAspect)) return;
+    camera.aspect = newAspect;
+    camera.updateProjectionMatrix();
+  }
+
+  return { camera, update, resize };
+}
