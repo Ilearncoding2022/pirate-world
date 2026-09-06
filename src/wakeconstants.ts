@@ -21,13 +21,26 @@ import { MODEL_SCALE } from './ship';
 /**
  * Lift of the ribbon above the water sphere.
  *
+ * Was 0.1, which cleared the sphere's facet sag and nothing else, because the
+ * sea was flat. It is not any more: `waterpatch.ts` displaces the surface near
+ * the ship by up to DISPLACE_AMPLITUDE (0.3) at a full gale, so a ribbon at
+ * 0.1 would be swallowed by every crest in heavy weather. This clears the
+ * highest crest the sea can raise.
+ *
+ * The cost is that in a dead calm -- where the displacement is only
+ * `CALM_INTENSITY` of that, about 0.05 -- the ribbon sits a little proud of
+ * the water. The honest fix is to displace each rib by the wave field as it is
+ * laid, which `wavefield.ts` now makes possible and which nothing else needed
+ * before; it is deliberately left as a follow-up rather than folded into an
+ * integration pass.
+ *
  * The water mesh is a 256x128 sphere, so its facets sag
  * `GLOBE_RADIUS * (1 - cos(PI / 256))` below the true surface -- about 0.015 at
  * the current radius. This has to clear that plus the ribbon's own much smaller
  * sag. Absolute rather than radius-scaled on purpose: the sag grows with the
  * radius but the segment counts grow with it too, so it stays put.
  */
-export const SURFACE_LIFT = 0.1;
+export const SURFACE_LIFT = 0.4;
 
 /** Radius the ribbon is drawn at: the water surface plus its lift. */
 export const WAKE_RADIUS = GLOBE_RADIUS + SURFACE_LIFT;

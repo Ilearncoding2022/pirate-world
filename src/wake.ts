@@ -101,6 +101,13 @@ const SPRAY_MIN_SPEED = 2.5;
 const SPRAY_GRAVITY = 15;
 /** Droplet diameter in world units, before the age-based growth factor. */
 const SPRAY_SIZE = 0.42;
+/**
+ * Height above the water sphere that a droplet is thrown from. Like the
+ * ribbon's SURFACE_LIFT, it has to clear the displaced sea (up to 0.3 at a
+ * full gale) rather than the flat sphere it used to spawn against, or spray
+ * erupts from inside a wave. Was 0.12.
+ */
+const SPRAY_SPAWN_LIFT = 0.42;
 
 /* ------------------------------------------------------------------ */
 /* Module-scope scratch (this runs every frame; nothing allocates here) */
@@ -511,7 +518,7 @@ export function createWake(wakeMapSize = 512): Wake {
 
     _spawn
       .copy(_bow)
-      .multiplyScalar(GLOBE_RADIUS + 0.12 + r4 * 0.3)
+      .multiplyScalar(GLOBE_RADIUS + SPRAY_SPAWN_LIFT + r4 * 0.3)
       .addScaledVector(_right, side * (0.3 + r1 * 0.55))
       .addScaledVector(forward, (r2 - 0.5) * 0.9);
 

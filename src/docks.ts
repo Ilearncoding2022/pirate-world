@@ -25,7 +25,11 @@ export interface Docks {
  * the radius but the segment counts grow with it too. A fifth of a percent of
  * the ring's own width; nothing reads as floating.
  */
-const RING_LIFT = 0.12;
+// Clears the displaced sea, not just the water sphere: `waterpatch.ts` now
+// raises the surface near the ship by up to 0.3 at a full gale, and a berth
+// ring is exactly where a ship rides out weather. Was 0.12 when the sea was
+// flat.
+const RING_LIFT = 0.42;
 
 /**
  * Segments around a ring, and the radial fractions its vertices sit at.
