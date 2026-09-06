@@ -7,9 +7,13 @@ Vite + Three.js + TypeScript. No external art assets; everything is procedural.
   **World scale** below before changing it — half the constants in the project
   are written relative to it and half are deliberately not.
 - +Y is the north pole. lon 0 = +Z, lon +90 = +X. Use `latLonToDir` / `dirToLatLon`.
-- Heading: radians, 0 = north, clockwise positive (east = PI/2). Use `headingToForward`.
-- `tangentFrame(up)` gives the local `north` and `east` tangents.
-- Ship length is about 5.6 world units, so the ship is ~1/36 of the planet radius.
+- Heading: radians, 0 = north, clockwise positive (east = PI/2). It is a
+  **reading, never state** — see **Frames, and where they stop working**.
+- `tangentFrame(up)` gives the local `north` and `east` tangents. It is
+  degenerate at the poles and near-degenerate around them; do not store
+  anything as an angle in it.
+- Ship length is about 3.1 world units after `MODEL_SCALE`, so the ship is
+  ~1/64 of the planet radius.
 
 ## Units, pinned
 These have bitten us once. Do not reinterpret them in a consumer.
@@ -28,6 +32,10 @@ These have bitten us once. Do not reinterpret them in a consumer.
   direction the wind travels **toward**, in radians on the same 0 = north,
   clockwise-positive convention as `ShipState.heading`, so the two subtract
   directly. `along` / `across` are already in the ship's frame.
+- `WindState.direction` is that bearing as a **world-space unit vector**, and
+  it is the one the wind is actually kept as; `bearing` is derived from it.
+  Prefer the vector for anything geometric. Same rule as `ShipState.forward`
+  against `ShipState.heading`.
 
 ## World scale
 `GLOBE_RADIUS` in `geo.ts` is the one number that sets how big the world feels,
@@ -65,6 +73,15 @@ Top speed is **not** the `MAX_FORWARD` clamp. Thrust and drag balance at
 last fraction of a knot. They were set independently once and disagreed
 silently — the ship topped out at 17.1 while the constant claimed 18 — so
 `ACCEL` is now derived from `MAX_FORWARD * DRAG`. Keep it that way.
+
+That derivation is also why **acceleration is retuned through `DRAG`, not
+`ACCEL`**. Halving `ACCEL` halves the top speed with it, because the top speed
+*is* the ratio; halving `DRAG` (0.7 → 0.35) carries the derived `ACCEL` down
+and leaves the ratio alone, so the ship picks up half as hard and still makes
+15 kn. The price cannot be avoided: the time constant is `1 / DRAG`, so it
+went 1.4 s to 2.9 s in **both** directions and the hull now carries its way
+twice as far. Against constant thrust and linear drag there is no third number
+to spend.
 
 Drag is integrated in **closed form**, not stepped:
 
@@ -114,31 +131,50 @@ shader.
 | `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode`, `WindState` | interfaces only |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
 | `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once |
-| `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts |
+| `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts and the land/water ratio; `useLandMask` re-points collision at the culled raster |
+| `islets.ts` | `cullIslets(heightMap, seaLevel)`, `MIN_ISLAND_AREA` | sinks landmasses too small to see; runs once, before anything reads the map |
 | `waterbodies.ts` | `WaterBodies`, `createWaterBodies(heightMap, seaLevel, spawnDir)` | built once; ocean vs. inland mask, texture + CPU `sample` |
 | `land.ts` | `createLand(terrain, heightMap)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water |
-| `water.ts` | `createWater(terrain, heightMap, waterBodies)` | full sphere at `GLOBE_RADIUS` |
+| `water.ts` | `createWater(terrain, heightMap, waterBodies)` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind)` — the only module that reads the weather |
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()` | atmosphere shell + starfield |
 | `daynight.ts` | `createDayNight()` | lights, writes `WorldEnv` |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
-| `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement + berth eligibility; built once |
+| `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
 | `energy.ts` | `createEnergy(towns)` | burn / solar / dock charge; owns `EnergyState` |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE` | calm/event weather; owns `WindState`; probes the shared height map for the coast |
 | `wake.ts` | `createWake()` | ship wake and spray |
 | `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
-| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env) }` | orchestrator only |
+| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env, wind) }` | orchestrator only; culls islets and installs the land mask before anything reads the map |
 | `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud()` | compass needle, speed, heading, lat/long, power |
+| `hud.ts` | `createHud()` | compass needle, speed, power; heading and lat/long live on the radar panel |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
 | `main.ts` | — | bootstrap and frame loop |
 
 ## Land / water split
+The world is **25% land, 75% water**, and that is one constant: `HEIGHT_BIAS`
+in `terrain.ts`, tuned against the figure *after* the islet cull below.
+
+`HEIGHT_GAIN` and `HEIGHT_BIAS` are **not two knobs**. Land is
+`raw * GAIN + BIAS > SEA_LEVEL`, i.e. `raw > (SEA_LEVEL - BIAS) / GAIN`, so the
+pair only ever expresses one number — a threshold on the raw noise — and every
+(GAIN, BIAS) yielding the same land fraction yields a bit-identical coastline.
+Reach for `BIAS`; moving `SEA_LEVEL` instead would work identically on the
+shape of the world while silently retuning every constant written as a height
+*above* sea level (`SHORE_MARGIN`, `CENTRE_CEILING`, `BEACH_BAND`,
+`CULL_MARGIN`, the water shader's depth ramp).
+
+The split between open ocean and enclosed water is **not tunable here at all**.
+It follows from that same threshold: lower the sea and deeper flooding joins
+more basins to it. At 33% land the world's lakes were 1.3% of its water; at 25%
+they are 0.66%, and no choice of `GAIN` recovers the difference. Only a
+different noise field would.
+
 `land.ts` builds an icosphere, drops every face lying entirely below
 `seaLevel - CULL_MARGIN`, and displaces the rest. Kept vertices below sea level
 are pushed *under* the water sphere so shores run into the sea instead of
@@ -147,6 +183,32 @@ forming floating plates.
 `water.ts` is one smooth full sphere at `GLOBE_RADIUS`. Dry parts are simply
 hidden by the land above. All coastal detail (shallows, foam) is computed per
 pixel from the height map, so the water mesh stays cheap.
+
+## Islands small enough to be invisible
+`islets.ts` flood-fills land components over the height map grid and sinks
+every one under `MIN_ISLAND_AREA` — 24.6 u², a disc 5.6 units across, a little
+under two ship lengths. 160 of the world's 253 islands go, and they take 0.63%
+of its land with them.
+
+It has to be a **raster** pass. Whether a point belongs to a speck or to a
+continent is a fact about its neighbours, and no closed form over
+`terrain.heightAt` can answer it. Editing the map rather than the noise also
+means the land mesh, the water shader, the berth search and the scope inherit
+the answer without being told, which is why the cull runs in `globe.ts` before
+`waterbodies.ts` — the flood fill then sees the sunk islets as plain ocean and
+never strands a lagoon inside one that no longer exists.
+
+**The trap, and it is the whole reason the fix works.** Collision does not read
+the map. `ship.ts` asks `terrain.isLand`, which reads the noise field directly,
+so culling the raster alone would have left the hull snagging on islets nothing
+draws any more — the original bug wearing a hat. `globe.ts` therefore hands the
+culled map back via `terrain.useLandMask`, which makes collision, the land mesh
+and the water shader three readings of one field instead of two.
+
+Sink depth is pinned by two consumers at once: past `land.ts`'s `CULL_MARGIN`
+(0.10) so the mesh drops the face, and past the water shader's 0.11 shallow
+band so the patch reads as ordinary shelf rather than ringing every former
+islet in a bright shoal. 0.12 is the first depth that satisfies both.
 
 ## Reachable water
 `waterbodies.ts` flood-fills the height map grid from the spawn point and marks
@@ -201,7 +263,7 @@ energy.update(dt, shipState, env)          // burn / solar / dock, on last frame
 wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
 ship.update(dt, input, energyState, windState)  // thrust gated on energy.canThrust
 camera.update(dt, shipState, input)
-globe.update(dt, env)      // daynight first, then water, land, citylights, clouds, sky
+globe.update(dt, env, wind.state)  // daynight first, then water (reads wind), land, citylights, clouds, sky
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env)
 hud.update(shipState, energyState, windState)
@@ -281,6 +343,53 @@ it to about a minute, and full ahead west reverses the sun outright. Only a
 shorter day, a slower ship or a larger `GLOBE_RADIUS` moves that ratio — the
 last because it slows the ship in degrees without slowing the sun.
 
+## Frames, and where they stop working
+A tangent frame exists at a point. `tangentFrame(up)` is degenerate at the
+poles and *near*-degenerate around them: the meridians converge, so a few
+metres of travel can swing `north` through ninety degrees. Anything stored as
+an angle in that frame therefore means something different a moment later.
+
+Both `ship.ts` and `wind.ts` made that mistake, and together they made a ship
+in high latitudes twist on the spot:
+
+- `ship.ts` kept `heading` — a compass bearing — as its orientation and rebuilt
+  `forward` from it against the frame at the new position every frame. Holding
+  the heading constant **swung the bow**.
+- `wind.ts` held `bearing` for the length of an event and re-resolved it the
+  same way, so the push swung too. The two then drove each other in a circle.
+
+Neither module's arithmetic was wrong. Both were storing a reading and treating
+it as the truth. **The vectors are the truth; the angles are read off them.**
+
+- The bow turns about the surface normal by the helm and is carried across each
+  step by **parallel transport** — rotated by exactly the rotation that carried
+  the hull — so a ship with its helm amidships runs a great circle, which is
+  what sailing straight ahead means on a sphere.
+- The wind is resolved from a bearing once, when its event is authored, and
+  transported the same way after that. Its angle to the bow is measured between
+  two world vectors rather than subtracted between two compass readings, so the
+  number deciding which way the hull is shoved never passes through a chart.
+- Both re-orthogonalise against `position` after transporting. Rounding walks a
+  tangent vector off the plane, and over a long passage it is visible.
+- `heading` and `bearing` survive as derived readings for the compass, the HUD
+  and the scope. They still spin at the pole. That is what a compass does there,
+  and it is now cosmetic.
+
+Measured over 90 s of simulation, bow rotation relative to the path with no helm
+input — the ship turning when it should not:
+
+| | before | after |
+|---|---|---|
+| equator, no wind | 180.0° | 0.0000° |
+| over the pole, no wind | 180.0° | 0.0000° |
+| over the pole, with wind | 180.0° | 0.0000° |
+| at 89.97° N, with wind | 180.0° | 0.0000° |
+
+The wind's angle to the bow within one event holds to 0.00° where it swung by
+up to 34.8°. Before the fix every one of those runs ended pinned at 89.97° N —
+the ship reached the pole and stayed there, spinning. It now sails over the top
+and down the far side.
+
 ## HUD text sizing
 Browsers carry a **minimum font size** preference (Chrome: Settings →
 Appearance → Customize fonts). It clamps the *computed* `font-size`, so any
@@ -297,6 +406,16 @@ key as narrow as 42px — so it is sized from `--key-size` and drawn through a
 layout box is therefore ten times wider than its ink and reaches over the
 neighbouring keys, which is why it carries `pointer-events: none`. Do not
 "simplify" that back to a plain `font-size`.
+
+A second sizing rule, learned the same way. **Type on a fluid element belongs
+in container units, not pixels.** The scope runs from 118px to 158px, and the
+position fix was first placed inside the glass in px: it fitted at 158 and the
+two coordinate blocks collided in the middle at 118 — a live window between the
+desktop layout and the 720px breakpoint, not a hypothetical. A disc also has no
+corners, so the blocks had to be pushed inward to clear the rim, which is what
+made them meet. They now sit above the scope in a grid with equal flexible
+flanks, so the heading is centred on the *panel* rather than merely placed
+between two neighbours of different widths.
 
 ## The radar
 `radar.ts` paints `#hud-radar`, a 2D canvas, from the height map and the inland
@@ -332,6 +451,18 @@ Stale together is coherent; stale apart is a bug that reads as the radar lying.
 Culling is a dot product against a precomputed cosine, so only the handful of
 towns actually in range ever reach `acos`.
 
+The panel's head row carries **LAT, heading and LON** above the glass. The
+range readout is gone — it never varied, so it was a constant printed every
+frame. The wind arrow rides the rim on the true bearing from the **live** frame,
+not the raster's: it is attached to nothing on the picture, so projecting it
+through a frame up to a tenth of a second old would simply lag the bow through
+every turn. It carries the gust glyph on its **tail**, byte-for-byte the same
+SVG path data the SPD row uses, parsed by `Path2D` so the two cannot drift
+apart by a curve — on the tail because the head is the reading, and a mark laid
+over it would be taken for part of the arrowhead. That glyph is the one thing
+on this canvas authored with a pixel floor rather than purely in scope radii:
+three strokes four viewBox units apart smear together below about 20px.
+
 ## Ship energy
 `energy.ts` owns one `EnergyState`, mutated in place for the life of the run —
 the HUD, the thrust gate, the dock rings and the model's neon all hold that same
@@ -349,14 +480,27 @@ about the *net* result rather than the gross.
 |---|---|
 | Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2` |
 | 15 / 7.5 / 5 kn to dry | 90 s / 5.4 min / 10.5 min |
-| Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 120 s at noon, 4.2 min at 30°, negative after dark |
-| Berth | 10 s, overrides solar rather than stacking |
+| Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 185 s at noon, 6.6 min at 30°, negative after dark |
+| Berth | 40 s, overrides solar rather than stacking |
+| Mooring | 2 s continuously inside the ring — see below |
 | Empty | thrust refused until `RESTART_LEVEL` (3%) |
 
 `MAX_FORWARD` is exported from `ship.ts` and imported here rather than copied,
 so a change to top speed moves the fuel economy with it instead of silently
 rebalancing the game. The burn is quadratic, which is what makes cruising slowly
 a strategy rather than a slower way to arrive equally empty.
+
+**A berth connects on a dwell, not on a speed.** It used to require the ring
+*and* under 3 kn of ground speed, which was a proxy and wrong at both ends:
+true of a hull drifting quietly across the ring on the wind, false of one that
+had genuinely arrived and not yet lost way. Two seconds inside the ring asks
+the question the ring is drawn to ask. It gives the same protection the speed
+limit did — the zone is 16 units across, so a straight run through it lasts
+1.07 s at 15 kn and 1.6 s at 10 — and it drops this file's last reader of
+`groundSpeed`. The clock tracks the *identity* of the berth, so crossing from
+one ring to another restarts it rather than inheriting the time. Anything under
+about 8 kn can now dwell, drifting included: being blown into harbour is an
+arrival, and `wind.ts` shelters what is docked, so the drift ends there.
 
 Three subtleties worth keeping:
 
@@ -436,6 +580,36 @@ the hull visibly snaps sideways. The accepted consequence is that during a
 transition the push is briefly *not* exactly one of the eight table values;
 nothing downstream assumes it is.
 
+### The wind raises the sea
+`water.ts` is the only module that reads `WindState`, handed to it through
+`globe.update(dt, env, wind)` rather than pushed onto `WorldEnv` — `env.ts`
+names `daynight.ts` as its sole writer, and a second writer is a harder thing
+to give up than an extra argument.
+
+The three wave layers drift along `wind.direction` at 1.5 / 1.9 / 2.4 world
+units per second at `OCEAN_CAP`, and wave height runs as `strength²`, where
+`strength` is `speed / OCEAN_CAP` — the same cap the radar arrow scales its
+length by, so a full-length arrow and a full sea arrive together. Height square,
+drift linear: a freshening wind lengthens the swell noticeably before it starts
+throwing it about.
+
+**The trap: the drift offsets are positions, not velocities.** The shader used
+`p + DRIFT * uTime`, which encodes where the field has *always* been — so
+changing the drift rewrites its whole history and every shift of wind would
+teleport the ocean by minutes of travel. They are now integrated on the CPU
+each frame, so a change of wind changes only where the sea goes next. Measured:
+a 90° shift moves the field by one frame's travel, 0.025 world units. The lake
+clock still works because `motion` is constant in time, so scaling an
+integrated offset is the same as integrating a scaled rate.
+
+Two floors, both deliberate departures from strict proportionality. Calms run
+3–15 s, and a sea whose height and drift both go to zero is a mirror — which
+reads as a bug, not as weather. `CALM_DRIFT` (0.2) and `CALM_INTENSITY` (0.16)
+survive a calm, running on the last bearing the wind held, which is roughly
+what real swell does. Between those floors and a full gale the law is exact:
+half the wind gives 25.0% of the height. Coastal foam keeps its own fixed
+drift — surf runs onto the beach, not downwind.
+
 ### The two speeds
 
 This is the split to get right, and the reason `ShipState` carries both.
@@ -511,8 +685,18 @@ the rest — it draws its own PRNG stream from `TOWN_SEED ^ 0x9e3779b9`, so the
 lamps shifted once, deliberately, and are fixed from here. Town positions did not
 move.
 
-Placement is two passes and the split is load bearing: only the first draws from
-the PRNG, so retuning or deleting the berth search can never move a town.
+**Every town is a port.** A candidate that cannot find a berth is not founded
+at all, so `Town.dock` is non-null for every town in `all` and the fleet is the
+map. `CLUSTER_TARGET` came down a quarter with that rule, 76 → **57**, because
+76 towns used to yield 48 berths and leaving the target alone would have handed
+the player half again as many places to charge. It fills in under 6000 of its
+20000 tries.
+
+The berth search still draws **nothing** from the PRNG — only from the height
+map — so the random stream advances exactly once per candidate whatever the
+search decides, and retuning it moves which candidates survive without moving
+which are offered. Keep it that way; a berth test that rolled a die would move
+every town downstream of it.
 
 A town earns a `Dock` only if the ship can actually reach it. `waterbodies.ts`
 is the authority — its flood fill from the spawn point *is* the water the player
@@ -521,8 +705,9 @@ the height map thinks it is. The berth then has to survive a rim test: the
 outward walk only promises water directly seaward, which the head of a creek
 satisfies while its ring lies on the bank, so three quarters of a ring sampled at
 `DOCK_RADIUS` must be over reachable water. Not all of it — a berth inside a
-harbour *should* have land behind it. Of 76 towns, 73 read as coastal and **48**
-end up with a berth.
+harbour *should* have land behind it. Now that a failed search costs the town
+itself, `BERTH_CLEAR` is the sharpest edge in the file: raise it and the map
+empties out, lower it and the fleet starts finding berths in ponds.
 
 Zones are 8 world units against a 19-unit minimum town spacing, so two cannot
 touch; where the geometry conspires anyway — two towns either side of one strait

@@ -30,16 +30,26 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 `tools/build_ship.py` under headless Blender, from the concept art beside it.
 
 - **Terrain.** Seeded 3D simplex noise with domain warping, so continents have
-  irregular coastlines rather than blobby edges. About a third of the sphere is
-  land. The spawn point is guaranteed open ocean. The globe is 200 units across
-  the radius against a 5-unit hull, so a full circumnavigation at the ship's
-  20-knot maximum takes just over a minute.
+  irregular coastlines rather than blobby edges. A quarter of the sphere is
+  land and three quarters is water. The spawn point is guaranteed open ocean.
+  The globe is 200 units across the radius against a 3-unit hull, so a full
+  circumnavigation at the ship's 15-knot maximum takes about 84 seconds.
+- **No islands you cannot see.** Anything smaller than a disc 5.6 units across
+  — a little under two ship lengths — is sunk before the world is handed over.
+  The sea used to be full of specks a fraction of the hull wide, too small to
+  see against the water and too small to steer around, and the ship stopped
+  dead on every one of them. 160 of the world's 253 islands went; they were
+  worth 0.6% of its land.
 - **Land and water are separate meshes.** Land is an icosphere with every
   fully-submerged face removed and the rest displaced outward. Water is one
   smooth sphere beneath it. Coastal detail is computed per pixel from a shared
   height texture rather than from geometry.
 - **Animated ocean** with drifting wave layers, sun glint, depth-graded colour
-  and breaking surf along the coasts.
+  and breaking surf along the coasts. The sea runs with the weather: the wave
+  layers drift the way the wind is blowing, and their height goes as the
+  *square* of its speed, so a gale is four times the sea of half a gale and
+  not twice it. A calm keeps a residue of both, because swell outlives the
+  wind that raised it.
 - **Lakes and inland seas.** Water is flood-filled from the spawn point at
   startup; anything the ship can never reach is shaded as still fresh water —
   green, glassy, a quarter of the sea's motion, and no surf.
@@ -65,8 +75,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   wind carries you sideways off your course while the bow holds its heading.
   The open ocean blows twice as hard as the shoreline, building over the first
   40 units offshore, so hugging the coast is shelter and standing out to sea is
-  a gamble. A berth is dead calm. The weather is seeded, so the same world
-  always blows the same way.
+  a gamble. A berth is dead calm. It raises the sea as well as pushing the
+  hull, so the water tells you what the weather is doing before the panel does.
+  The weather is seeded, so the same world always blows the same way.
 - **Ship wake** that follows the curve of the planet and fades behind you.
 - **The ship**: a glTF hull with textured planking, brass rails, rigging and
   neon thruster pods, floated at its designed waterline. The Jolly Roger
@@ -78,16 +89,23 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   slowly is a real strategy: 90 seconds flat out, or ten and a half minutes at
   5 knots.
   Stop in daylight and the panels charge you back at a rate that follows the
-  sun's height in the sky — nothing at night, two minutes from empty at noon.
-  Run dry and you keep the helm but lose the engines, drifting until the sun
-  comes up.
-- **Ports.** Forty-eight of the world's settlements have a berth: a lit ring on
-  the water under a beacon mast, green while it charges you, amber if you are
-  going too fast to connect. Ten seconds alongside fills the tank. Berths are
-  plotted on the radar, so the scope is also the fuel map.
+  sun's height in the sky — nothing at night, three minutes from empty at
+  noon, and better than six at a low sun. Run dry and you keep the helm but
+  lose the engines, drifting until the sun comes up.
+- **Ports.** Every one of the world's 57 settlements is a port — a town that
+  could not find water the ship can reach is never founded — so a settlement on
+  the scope is always somewhere you can charge. Each has a lit ring on the
+  water under a beacon mast. Stay inside the ring for two seconds and you are
+  moored; drive through it and you are not, which is the whole rule. Forty
+  seconds alongside fills the tank from empty. Berths are plotted on the radar,
+  so the scope is also the fuel map.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   100 units in every direction, drawn on the CPU from the same height field the
-  world is built from. The compass sits in the middle of the helm pad.
+  world is built from. Latitude, longitude and heading sit above the glass; the
+  wind rides the rim as a warm arrow, signed on its tail with the same gust
+  glyph the speed readout uses, so the two marks are legibly one subject.
+  Speeds are whole knots — the tenth only ever flickered. The compass sits in
+  the middle of the helm pad.
 
 ## Structure
 
