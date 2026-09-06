@@ -101,15 +101,22 @@ function formatLon(lonDeg: number): string {
 }
 
 /**
- * "12.4 kn", or "12.4 kn AST" (astern) while reversing.
+ * "12 kn", or "12 kn AST" (astern) while reversing.
  *
  * World units per second are printed as knots one for one -- see **Units,
  * pinned** in `docs/ARCHITECTURE.md`. This is the only place that claim is
  * made, so the wind row prints through here too rather than growing a second
  * conversion that could be retuned on its own.
+ *
+ * Whole knots, rounded half away from zero, so 7.3 reads 7 and 5.5 reads 6.
+ * The tenth was noise: a hull under a gusting wind never held one long enough
+ * to be read, and a digit that only ever flickers is a digit that costs
+ * attention and returns nothing. `Math.round` is exactly half-up on positives,
+ * and the magnitude is taken first so astern rounds the same way ahead does
+ * rather than half-toward-zero the way `Math.round(-5.5)` would.
  */
 function formatSpeed(speed: number): string {
-  const magnitude = Math.abs(speed).toFixed(1);
+  const magnitude = String(Math.round(Math.abs(speed)));
   return speed < -0.05 ? `${magnitude} kn AST` : `${magnitude} kn`;
 }
 
@@ -120,17 +127,22 @@ function formatSpeed(speed: number): string {
 const RAD_TO_DEG = 180 / Math.PI;
 
 /**
- * "+7.5" -- the wind's signed share of the ground speed, or "" for none.
+ * "+8" -- the wind's signed share of the ground speed, or "" for none.
+ *
+ * Whole knots, because it rides directly beside SPD and a tenth here against
+ * an integer there would read as two different instruments. It follows
+ * `formatSpeed` for that reason and not on its own account.
  *
  * The sign is taken off the *rounded* magnitude, the same guard `formatRate`
- * uses, and a share that rounds away prints nothing at all. A permanent
- * "+0.0" hanging off the SPD row would be a value the player has to learn to
- * ignore, and the point of the suffix is that it only appears when the
- * weather is actually doing something.
+ * uses, and a share that rounds away prints nothing at all. Rounding to whole
+ * knots widens that silence from a twentieth of a knot to a half, so a breath
+ * of wind now shows as nothing rather than as "+0.1" -- which is the right
+ * trade for a suffix whose whole point is to appear only when the weather is
+ * actually doing something.
  */
 function formatWindShare(share: number): string {
-  const magnitude = Math.abs(share).toFixed(1);
-  if (magnitude === '0.0') return '';
+  const magnitude = Math.round(Math.abs(share));
+  if (magnitude === 0) return '';
   return `${share > 0 ? '+' : '-'}${magnitude}`;
 }
 
@@ -234,7 +246,7 @@ export function createHud(): {
       // engine's share subtracted out beside it. Printing engine speed here
       // instead would leave the panel flatly contradicting the sea, and the
       // difference is the only place the 0.35 grip rule becomes visible: 8 kn
-      // of engine under a 10 kn tailwind reads "11.5 kn +3.5".
+      // of engine under a 10 kn tailwind reads "12 kn +4".
       writeSpeed(formatSpeed(ship.groundSpeed));
       writeSpeedWind(formatWindShare(ship.groundSpeed - ship.speed));
 
