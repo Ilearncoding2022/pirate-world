@@ -21,6 +21,19 @@ import { cullIslets } from '../../src/islets';
 import { createWaterBodies } from '../../src/waterbodies';
 import { createTowns } from '../../src/towns';
 import { latLonToDir } from '../../src/geo';
+import { createLand, landRadius } from '../../src/land';
+
+/**
+ * Eight fixed terrain heights `landRadius` is sampled at for the golden
+ * below (Stream C, docs/RENDER_PLAN.md): deep water past the shore-dip's own
+ * clamp, a shallower depth and two points inside the unsaturated dip ramp
+ * (`landRadius`'s `below` term saturates at `seaLevel - 0.08`), exactly
+ * `terrain.seaLevel`, the beach band, mid relief, and a height past the
+ * eased ramp's `a * a` ceiling. Fixed numbers rather than offsets from
+ * `seaLevel` so the golden is a pure function of `landRadius` and the (also
+ * pinned) `SEA_LEVEL` constant.
+ */
+const LAND_RADIUS_TEST_HEIGHTS = [-1, -0.3, 0.02, 0.06, 0.08, 0.15, 0.4, 1.0];
 
 /**
  * 64 points spread evenly over the sphere by the Fibonacci-lattice
@@ -74,6 +87,17 @@ export interface WorldGolden {
   waterBodyCount: number;
   islandsBefore: number;
   islandsRemoved: number;
+  /**
+   * Land mesh vertex count after `createLand`'s coastal face filter --
+   * Stream C (docs/RENDER_PLAN.md) added this and the field below. Pins the
+   * land mesh's own extent alongside the height-field fractions above:
+   * the bake reads the height field but must never write to it, so this
+   * moving would mean the terrain itself moved, not just its shading.
+   */
+  landMeshVertexCount: number;
+  /** `landRadius` at LAND_RADIUS_TEST_HEIGHTS, fixed points spanning deep
+   * water to a height past the relief ramp's ceiling. */
+  landRadiusAtHeights: number[];
 }
 
 /**
@@ -98,6 +122,15 @@ export function buildWorldGolden(): WorldGolden {
     if (heightMap.data[i] > terrain.seaLevel) landCells++;
   }
 
+  // Stream C (docs/RENDER_PLAN.md): the land mesh itself, built the same way
+  // globe.ts does -- after the cull and the land-mask install above, so the
+  // startup bake this also runs sees the same culled map it would in the
+  // real game. The bake reads the height field and never writes it, so
+  // nothing here should move the fractions computed above.
+  const land = createLand(terrain, heightMap);
+  const landMeshVertexCount = (land.mesh.geometry.attributes.position as { count: number }).count;
+  const landRadiusAtHeights = LAND_RADIUS_TEST_HEIGHTS.map((h) => landRadius(h, terrain.seaLevel));
+
   return {
     seed: DEFAULT_SEED,
     heightMapWidth: heightMap.width,
@@ -110,5 +143,7 @@ export function buildWorldGolden(): WorldGolden {
     waterBodyCount: waterBodies.bodyCount,
     islandsBefore: cull.islandsBefore,
     islandsRemoved: cull.islandsRemoved,
+    landMeshVertexCount,
+    landRadiusAtHeights,
   };
 }
