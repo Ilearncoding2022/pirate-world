@@ -1,6 +1,6 @@
 # Wind system — implementation plan
 
-Status: **implemented**, on branch `claude/wind-system-clarification-97hqa1`.
+Status: **implemented**, and landed on `main`.
 
 This document is kept as the record of what was approved. It is deliberately
 NOT updated to follow later tuning — `docs/ARCHITECTURE.md` is the current

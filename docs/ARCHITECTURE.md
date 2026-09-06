@@ -472,6 +472,25 @@ speed when both are blocked. A beam wind pinning the hull against a coast must
 not also stop it sailing *along* that coast — without the retry, a player with
 a shore to leeward loses the helm entirely until the wind drops.
 
+**`groundSpeed` is written from what the hull committed, never from what it
+attempted.** The velocity is built before the land gets a vote, so the obvious
+ordering — build it, report it, then move — leaves a ship hard aground still
+reading a knot and a half. Found by running the game, not by building it; the
+types are identical either way. It matters well beyond the HUD, because
+`energy.ts` decides whether a berth may connect on this number, so a phantom
+speed is a berth silently refused. Each of the three outcomes writes its own
+answer: the combined velocity when the course is clear, `forward × speed` when
+only the engine got through, and zero when the ship is beached.
+
+**`COAST_CAP` is never actually reached.** The innermost probe ring is 5 world
+units, so the probe can never report land closer than that, and the ramp floors
+at `8 + 8 × (5/40)` = **9.0 kn** — confirmed in a live run, where the lowest cap
+observed anywhere was exactly 9.00. The 8 is what the ramp extrapolates to at a
+coast distance of zero, which no reading can produce. Both numbers are
+implemented as specified rather than one being quietly bent to fit the other; if
+a true 8 kn at the shoreline is ever wanted, either add a ring at 0 or treat a
+hit on the innermost ring as distance zero.
+
 **Feedback.** The HUD carries a `WND` row (arrow relative to the bow, matching
 the bow-up scope, or `CALM`) and breaks the `SPD` row down into ground speed
 plus the wind's signed contribution, which is what makes the grip rule legible.
