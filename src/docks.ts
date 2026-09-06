@@ -56,7 +56,12 @@ const RING_LAYERS = [0.0, 0.5, 0.82, 1.0];
  * sided mast keep it cheap; a fourteen triangle beacon costs nothing at 48 of
  * them and there is no reason for it to be round.
  */
-const MAST_HEIGHT = 16;
+// Halved from 16. The masts read as landmarks from a distance either way,
+// and at the old height they cut across the sky from the chase camera and
+// stood taller than the hills behind them. The lamp rides on top, so it
+// comes down with this; LAMP_RADIUS is deliberately unchanged, since the
+// light is what has to stay findable.
+const MAST_HEIGHT = 8;
 const MAST_RADIUS_BASE = 0.85;
 const MAST_RADIUS_TOP = 0.45;
 const MAST_SIDES = 3;
