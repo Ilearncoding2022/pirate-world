@@ -184,7 +184,10 @@ body {
 .panel--telemetry {
   top: var(--hud-pad);
   left: var(--hud-pad);
-  min-width: 190px;
+  /* Wide enough for the longest power tag, "IDLE - SOLAR CHARGING", beside
+     its rate on one line. The panel is shrink-to-fit, so this is the floor
+     that keeps the status line from wrapping under the bar. */
+  min-width: 246px;
 }
 
 .readout {
@@ -241,9 +244,55 @@ body {
 /* hud.ts clears the text when the wind contributes nothing, and this is what
    makes that a real disappearance: an empty span still carries its margin, and
    the row is right-aligned, so a stale 7px would shunt the speed off the
-   column that LAT and LON line up on. */
+   column the readings line up on. */
 .spd__wind:empty {
   display: none;
+}
+
+/*
+ * The gust glyph, in front of the share.
+ *
+ * The grey figure says how many knots are not the engine's; the glyph says
+ * whose they are. It matters more now that AST is gone from the reading: the
+ * big number is a bare magnitude, so anything qualifying it has to be
+ * unmistakably about the weather and not about the helm.
+ *
+ * Sized in em off the share it labels, so the two shrink together at the
+ * breakpoint instead of the glyph having to be re-tuned there.
+ */
+.spd__gust {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 7px;
+  width: 1.5em;
+  color: var(--ink-mute);
+}
+
+.spd__gust svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.spd__gust-stroke {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+
+/* The glyph belongs to the number: one modifier on the wrapper takes both
+   away, so a stale icon can never sit beside a share that is not there. */
+.spd--calm .spd__gust,
+.spd--calm .spd__wind {
+  display: none;
+}
+
+/* It sits between the speed and the share, so the share's own left margin
+   would double the gap. */
+.spd:not(.spd--calm) .spd__wind {
+  margin-left: 4px;
 }
 
 /* ---------------------------------------------------------------------
@@ -384,9 +433,12 @@ body {
   gap: 10px;
 }
 
+/* Tighter tracking than the other keys on the panel, because the tag now
+   carries a phrase rather than a word and 0.22em of it would not fit beside
+   the rate at any sane panel width. */
 .pwr__tag {
-  font-size: 9.5px;
-  letter-spacing: 0.22em;
+  font-size: 9px;
+  letter-spacing: 0.1em;
   color: var(--pwr-accent);
   text-shadow: 0 0 9px var(--pwr-glow);
 }
@@ -432,11 +484,10 @@ body {
 
 .radar {
   position: relative;
-  /* Sizing context for the position fix inside it, which is written in cqw so
-     it tracks the scope through the clamp below instead of being re-guessed at
-     each breakpoint. `container-type` also implies layout containment, which
-     this already had via `position: relative`. */
-  container-type: inline-size;
+  /* Clear of the head row above it. The scope is the instrument; the numbers
+     are its caption, and a caption that crowds the glass reads as part of the
+     plot. */
+  margin-top: 6px;
   width: clamp(118px, 12vw, 158px);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
@@ -460,85 +511,69 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   Position fix — LAT and LON, in the scope's upper corners
+   Radar head — LAT, heading, LON, in a row above the scope
+
+   These lived inside the disc for one revision and came back out. Two
+   reasons, both structural rather than cosmetic: the scope is a circle, so
+   its "corners" are outside it and the blocks had to be pushed toward the
+   middle to stay in; and the disc is fluid from 118px to 158px, at the low
+   end of which the two coordinates met in the centre. Out here they have the
+   panel's whole width, the plot has its glass back, and nothing has to be
+   re-checked at each breakpoint.
    ------------------------------------------------------------------- */
 
 /*
- * Geometry, since the scope is a disc and its "corners" are not in it.
- *
- * At 15% down from the top the circle spans 15.7%..84.3% of the box, so the
- * blocks are inset 16% and centred on that: the first line clears the rim at
- * its narrowest, and the second sits where the disc has already widened. Both
- * are centred rather than edge-aligned so the short label stays over the
- * middle of the long value instead of hanging off one end of it.
- *
- * Everything here is in cqw -- percent of the scope's own width -- because the
- * scope is fluid (118px to 158px) and the two blocks very nearly meet in the
- * middle at any size. Fixed px type fits at 158 and collides at 118, which is
- * a live window between the desktop layout and the 720px breakpoint rather
- * than a hypothetical: the numbers have to shrink WITH the disc, not at the
- * points where someone remembered to check.
+ * Three columns with equal flexible flanks, so the heading is centred on the
+ * PANEL and not merely placed between its neighbours -- LAT and LON are
+ * different widths, and under space-between that difference would show up as
+ * an off-centre heading directly under a centred title.
  */
+.radar__head {
+  align-self: stretch;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
 .radar__fix {
-  position: absolute;
-  top: 15%;
   display: flex;
   flex-direction: column;
   align-items: center;
   line-height: 1.2;
-  /* The scope is the instrument; this is an annotation on it. */
-  pointer-events: none;
-  /*
-   * The plot runs bright green land under these numbers as the ship moves, and
-   * magenta on green is the one pairing this palette cannot carry on contrast
-   * alone. A halo alone left the glyphs legible but muddy, so the text sits on
-   * its own dimming plate: enough to hold the tube's colour down behind the
-   * digits, not enough to read as a label stuck on the glass.
-   */
-  padding: 0.5cqw 2cqw 1cqw;
-  border-radius: 2cqw;
-  background: rgba(2, 9, 17, 0.62);
-  text-shadow:
-    0 0 3px var(--bg-deep),
-    0 0 6px var(--bg-deep);
 }
 
-.radar__fix--lat {
-  left: 16%;
+.radar__head > .radar__fix:first-child {
+  justify-self: start;
 }
 
-.radar__fix--lon {
-  right: 16%;
+.radar__head > .radar__fix:last-child {
+  justify-self: end;
 }
 
 .radar__fix-key {
-  font-size: 4.4cqw;
-  letter-spacing: 0.14em;
+  font-size: 8px;
+  letter-spacing: 0.18em;
   color: var(--ink-mute);
 }
 
-/* Magenta, as these read on the telemetry panel, so the fix stays the same
-   colour it has always been while changing where it lives. Tabular figures
-   keep the value from shuffling under its own label as the digits change. */
+/* Magenta, as the fix has always read, and tabular so the value does not
+   shuffle under its own label as the digits change. */
 .radar__fix-val {
-  font-size: 5.6cqw;
+  font-size: 11.5px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
   color: var(--magenta);
+  text-shadow: 0 0 10px rgba(255, 79, 216, 0.35);
   white-space: nowrap;
 }
 
-.radar__readout {
+.radar__hdg {
   display: flex;
   align-items: baseline;
-  gap: 7px;
+  gap: 6px;
 }
 
-.radar__range {
-  font-size: 8.5px;
-  letter-spacing: 0.18em;
-  color: var(--cyan-dim);
-}
 
 /* ---------------------------------------------------------------------
    Compass instrument — lives in the hole in the middle of the D-pad
@@ -667,7 +702,10 @@ body {
 }
 
 .hdg__value {
-  font-size: 20px;
+  /* 16px: a fifth off the 20 it read at when it sat under the scope with the
+     range beside it. It is a heading above a compass rose, not the panel's
+     headline. */
+  font-size: 16px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
   color: var(--cyan);
@@ -951,10 +989,24 @@ kbd {
   .radar {
     width: 104px;
   }
-  /* Nothing for .radar__fix here: it is sized in cqw off the scope, so the
-     narrower disc below already carries it. */
+  /* The head row is what sets the panel's width now, so it is what has to
+     come in when the panel does. */
+  .radar__head {
+    gap: 6px;
+  }
+  .radar__fix-key {
+    font-size: 7px;
+    letter-spacing: 0.14em;
+  }
+  .radar__fix-val {
+    font-size: 9.5px;
+  }
   .hdg__value {
-    font-size: 16px;
+    font-size: 12.8px;
+  }
+  .hdg__label {
+    font-size: 8px;
+    letter-spacing: 0.18em;
   }
   /* The panel is content-width here, so the status line is what could widen
      it; trim the pair rather than let the tag and the rate crowd each other. */
@@ -962,8 +1014,8 @@ kbd {
     height: 6px;
   }
   .pwr__tag {
-    font-size: 9px;
-    letter-spacing: 0.18em;
+    font-size: 8px;
+    letter-spacing: 0.06em;
   }
   .pwr__rate {
     font-size: 9.5px;

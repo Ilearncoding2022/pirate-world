@@ -28,8 +28,19 @@
              looked. -->
         <div class="readout">
           <span class="readout__key">SPD</span>
-          <span class="spd">
+          <span class="spd spd--calm" id="hud-spd">
             <span class="readout__val" id="hud-speed">0 kn</span>
+            <!-- The gust glyph labels the grey figure beside it as the wind's
+                 doing rather than the engine's. It ships hidden, with the
+                 wrapper calm, because the sim starts in a calm and hud.ts
+                 reads that class back rather than assuming it. -->
+            <span class="spd__gust" aria-hidden="true">
+              <svg viewBox="0 0 24 16" xmlns="http://www.w3.org/2000/svg" focusable="false">
+                <path class="spd__gust-stroke" d="M2 4h11a2.6 2.6 0 1 0-2.6-2.6" />
+                <path class="spd__gust-stroke" d="M2 8h15a2.9 2.9 0 1 1-2.9 2.9" />
+                <path class="spd__gust-stroke" d="M2 12h8" />
+              </svg>
+            </span>
             <span class="spd__wind" id="hud-speed-wind"></span>
           </span>
         </div>
@@ -104,26 +115,28 @@
         <!-- radar.ts repaints this every frame. Bow-up: own ship is always at
              dead centre pointing at 12 o'clock, and the magenta pip on the rim
              is north. -->
-        <!-- The fix rides in the scope's own upper corners rather than in a
-             telemetry row: position is what the plot is about, so the numbers
-             belong on the plot. Inset off the rim, because the bezel ring and
-             the magenta north pip both live out there. -->
-        <div class="radar">
-          <canvas class="radar__scope" id="hud-radar" aria-hidden="true"></canvas>
-          <div class="radar__fix radar__fix--lat">
+        <!-- Heading between the two halves of the fix, all three above the
+             scope. They were tried inside the glass and taken back out: the
+             disc is where the plot is, and at 118px the two coordinate blocks
+             met in the middle of it. Out here they get the panel's full width
+             and the plot gets its own back. -->
+        <div class="radar__head">
+          <div class="radar__fix">
             <span class="radar__fix-key">LAT</span>
             <span class="radar__fix-val" id="hud-lat">00.0&deg; N</span>
           </div>
-          <div class="radar__fix radar__fix--lon">
+          <div class="radar__hdg">
+            <span class="hdg__value" id="hud-heading">000&deg;</span>
+            <span class="hdg__label">HDG</span>
+          </div>
+          <div class="radar__fix">
             <span class="radar__fix-key">LON</span>
             <span class="radar__fix-val" id="hud-lon">000.0&deg; E</span>
           </div>
         </div>
 
-        <div class="radar__readout">
-          <span class="hdg__value" id="hud-heading">000&deg;</span>
-          <span class="hdg__label">HDG</span>
-          <span class="radar__range" id="hud-radar-range">RNG</span>
+        <div class="radar">
+          <canvas class="radar__scope" id="hud-radar" aria-hidden="true"></canvas>
         </div>
       </section>
 

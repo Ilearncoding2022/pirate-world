@@ -222,11 +222,6 @@ export function createRadar(
   seaLevel: number,
   towns: Towns,
 ): Radar {
-  // Single source of truth for the range: the panel label is written from the
-  // same constant the projection uses.
-  const rangeLabel = document.getElementById('hud-radar-range');
-  if (rangeLabel) rangeLabel.textContent = `${RADAR_RANGE} KN`;
-
   const noop: Radar = { update: (): void => undefined };
 
   const element = document.getElementById('hud-radar');

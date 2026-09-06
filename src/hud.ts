@@ -101,7 +101,7 @@ function formatLon(lonDeg: number): string {
 }
 
 /**
- * "12 kn", or "12 kn AST" (astern) while reversing.
+ * "12 kn" -- a magnitude, whichever way the ship is pointed.
  *
  * World units per second are printed as knots one for one -- see **Units,
  * pinned** in `docs/ARCHITECTURE.md`. This is the only place that claim is
@@ -114,10 +114,13 @@ function formatLon(lonDeg: number): string {
  * attention and returns nothing. `Math.round` is exactly half-up on positives,
  * and the magnitude is taken first so astern rounds the same way ahead does
  * rather than half-toward-zero the way `Math.round(-5.5)` would.
+ *
+ * The AST suffix that used to mark a sternway reading is gone. Nothing else
+ * prints it, so going astern now reads as a bare speed on the panel and the
+ * sea outside is what tells the player which way they are moving.
  */
 function formatSpeed(speed: number): string {
-  const magnitude = String(Math.round(Math.abs(speed)));
-  return speed < -0.05 ? `${magnitude} kn AST` : `${magnitude} kn`;
+  return `${Math.round(Math.abs(speed))} kn`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -185,6 +188,23 @@ function powerState(energy: EnergyState): PwrState {
 }
 
 /**
+ * What the tag reads, per state.
+ *
+ * The two charging states say so in as many words. They are the states the
+ * player is waiting out rather than reacting to, and "SOLAR" alone named the
+ * source without answering the question actually being asked of the panel --
+ * is this thing filling up? The other three are self-evident and stay a word.
+ *
+ * The state itself is still what drives the colour, through the modifier class
+ * on the wrapper, so this map only ever decides wording. A state missing from
+ * it falls back to its own name upper-cased, which is what the tag always did.
+ */
+const PWR_TAG: Partial<Record<PwrState, string>> = {
+  solar: 'IDLE - SOLAR CHARGING',
+  docked: 'DOCKED - CHARGING',
+};
+
+/**
  * Segments to light. Ceil rather than round, so that any charge at all holds
  * one notch lit and a wholly dark bar means exactly one thing: dead.
  */
@@ -213,6 +233,10 @@ export function createHud(): {
   const writeNeedle = transformWriter(document.getElementById('hud-compass-needle'));
   const writeSpeed = textWriter(document.getElementById('hud-speed'));
   const writeSpeedWind = textWriter(document.getElementById('hud-speed-wind'));
+  // One modifier on the SPD wrapper hides both the icon and the number, the
+  // same way the WND row hides its dart: the glyph and the figure it labels
+  // cannot end up disagreeing about whether the wind is doing anything.
+  const writeSpdState = modifierWriter(document.getElementById('hud-spd'), 'spd');
   const writeLat = textWriter(document.getElementById('hud-lat'));
   const writeLon = textWriter(document.getElementById('hud-lon'));
 
@@ -248,7 +272,9 @@ export function createHud(): {
       // difference is the only place the 0.35 grip rule becomes visible: 8 kn
       // of engine under a 10 kn tailwind reads "12 kn +4".
       writeSpeed(formatSpeed(ship.groundSpeed));
-      writeSpeedWind(formatWindShare(ship.groundSpeed - ship.speed));
+      const share = formatWindShare(ship.groundSpeed - ship.speed);
+      writeSpeedWind(share);
+      writeSpdState(share === '' ? 'calm' : 'wind');
 
       // A calm holds its last bearing rather than clearing it, so the arrow is
       // hidden by the class instead of being pointed anywhere, and its
@@ -274,7 +300,7 @@ export function createHud(): {
       writePwrValue(`${percent}%`);
       writePwrAria(percent);
       writePwrSegments(litSegments(clamped));
-      writePwrMode(state.toUpperCase());
+      writePwrMode(PWR_TAG[state] ?? state.toUpperCase());
       writePwrRate(formatRate(energy.rate));
       // `energy.canThrust` is deliberately not read: `empty` holds for exactly
       // as long as thrust is refused, so a second indicator would say the same
