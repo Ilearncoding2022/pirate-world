@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
+import { LAYER_REFLECTED } from './layers';
 
 export interface Sky {
   group: THREE.Group;
@@ -91,6 +92,10 @@ function buildAtmosphere(): THREE.Mesh {
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'atmosphere';
+  // Docs/RENDER_PLAN.md Phase 1 Stream D: the sky shell is one of the four
+  // things the water's reflection cube renders. Layer flag only -- Stream E
+  // owns this file's shader body in parallel.
+  mesh.layers.enable(LAYER_REFLECTED);
   return mesh;
 }
 

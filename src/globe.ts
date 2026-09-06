@@ -6,7 +6,10 @@ import type { HeightMap } from './heightmap';
 import type { WaterBodies } from './waterbodies';
 import { createLand } from './land';
 import { createWater } from './water';
+import type { WaterPlugin } from './water';
 import { createWaterBodies } from './waterbodies';
+import type { Reflection } from './reflection';
+import { createWaterReflectPlugin } from './waterreflect';
 import { cullIslets } from './islets';
 import { createGrid } from './grid';
 import { createSky } from './sky';
@@ -39,8 +42,14 @@ export interface Globe {
  *
  * Ordering matters: the day/night rig writes the environment, then every other
  * module reads it, so all shaders agree on sun direction within a frame.
+ *
+ * @param reflection Stream D's cube, built by `main.ts` (it needs the
+ *   renderer, which this module never sees). Its own per-frame render pass is
+ *   driven separately, straight from `main.ts`'s frame loop -- see
+ *   `reflection.ts` -- this function only wires its texture into the water's
+ *   plugin list.
  */
-export function createGlobe(terrain: Terrain): Globe {
+export function createGlobe(terrain: Terrain, reflection: Reflection): Globe {
   const group = new THREE.Group();
   group.name = 'world';
 
@@ -68,7 +77,13 @@ export function createGlobe(terrain: Terrain): Globe {
   const towns = createTowns(heightMap, waterBodies, terrain.seaLevel);
 
   const dayNight = createDayNight();
-  const water = createWater(terrain, heightMap, waterBodies);
+  // Docs/RENDER_PLAN.md Phase 1 Stream D: registered only when the cube
+  // actually exists (`quality.reflectionSize > 0`) -- on `?quality=low` this
+  // list stays empty and the water shader compiles and runs with reflections
+  // simply absent, never present-but-idle.
+  const waterPlugins: WaterPlugin[] = [];
+  if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
+  const water = createWater(terrain, heightMap, waterBodies, waterPlugins);
   const land = createLand(terrain, heightMap);
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();

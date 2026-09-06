@@ -4,6 +4,7 @@ import type { WorldEnv } from './env';
 import type { HeightMap } from './heightmap';
 import { landRadius } from './land';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
+import { LAYER_REFLECTED } from './layers';
 import { SHORE_MARGIN, TOWN_SEED, mulberry32, oceanFraction, randomDirection } from './towns';
 
 export interface CityLights {
@@ -333,6 +334,11 @@ export function createCityLights(
     flicker: 0.14,
   });
   glow.renderOrder = 4;
+  // Docs/RENDER_PLAN.md Phase 1 Stream D: a town's glow appears in the
+  // water's own reflection cube, same as its individual lamps below. Three
+  // does not inherit layers to children, so both Points objects need this,
+  // not just the group they sit in.
+  glow.layers.enable(LAYER_REFLECTED);
 
   const lamps = buildLayer('city-lamps', positions, colors, sizes, twinkles, {
     sizeScale: 430,
@@ -343,6 +349,7 @@ export function createCityLights(
     flicker: 0.34,
   });
   lamps.renderOrder = 5;
+  lamps.layers.enable(LAYER_REFLECTED);
 
   const object = new THREE.Group();
   object.name = 'city-lights';

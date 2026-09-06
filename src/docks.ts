@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { Dock, EnergyState, ShipState, Towns } from './types';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
+import { LAYER_REFLECTED } from './layers';
 
 export interface Docks {
   object: THREE.Object3D;
@@ -489,6 +490,10 @@ export function createDocks(towns: Towns): Docks {
 
   const beacons = new THREE.Mesh(beaconGeo, beaconMaterial);
   beacons.name = 'dock-beacons';
+  // Docs/RENDER_PLAN.md Phase 1 Stream D: findable in the water's own
+  // reflection cube. The rings are not -- they are painted flat on the sea
+  // itself and would add nothing seen from inside a 128-256px cube.
+  beacons.layers.enable(LAYER_REFLECTED);
   group.add(beacons);
 
   const materials = [ringMaterial, beaconMaterial];

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
+import { LAYER_REFLECTED } from './layers';
 
 export interface Clouds {
   object: THREE.Object3D;
@@ -457,6 +458,10 @@ export function createClouds(): Clouds {
     // front. Three cannot sort these itself -- they are concentric, so every
     // slice has the same centroid distance.
     slice.renderOrder = 2 + i;
+    // Docs/RENDER_PLAN.md Phase 1 Stream D: every slice of the deck is one of
+    // the four things the water's reflection cube renders. Three does not
+    // inherit layers to children, so each slice needs this individually.
+    slice.layers.enable(LAYER_REFLECTED);
     object.add(slice);
   }
 
