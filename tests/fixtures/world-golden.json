@@ -9,5 +9,16 @@
   "allDocksNonNull": true,
   "waterBodyCount": 103,
   "islandsBefore": 253,
-  "islandsRemoved": 160
+  "islandsRemoved": 160,
+  "landMeshVertexCount": 866547,
+  "landRadiusAtHeights": [
+    195.84,
+    195.84,
+    196.94,
+    199.14000000000001,
+    200.24,
+    200.37611111111113,
+    203.08444444444444,
+    210.24
+  ]
 }

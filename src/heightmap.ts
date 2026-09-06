@@ -3,6 +3,22 @@ import type { Terrain } from './types';
 
 export interface HeightMap {
   /**
+   * Baked ambient occlusion (R channel, 0-1; G/B/A unused, filled 255).
+   *
+   * Additive field: `createHeightMap` leaves it `null`. `land.ts` fills it
+   * in (via `terrainbake.ts`'s `bakeTerrain`) once `globe.ts` has run
+   * `cullIslets` and flushed the map -- baking earlier would bake occlusion
+   * for islands about to be sunk. Nothing else writes it, and the existing
+   * `texture`/`data`/`sample` above are untouched by any of this.
+   */
+  aux: DataTexture | null;
+  /**
+   * Baked horizon angles, two RGBA8 textures of four azimuths each (eight
+   * total, 45 degrees apart, 0 = north and clockwise -- see `terrainbake.ts`).
+   * Same lifecycle as `aux`: `null` until `land.ts`'s bake fills it in.
+   */
+  horizon: [DataTexture, DataTexture] | null;
+  /**
    * Equirectangular terrain height, R16F, linear-filterable in WebGL2.
    *
    * Mapping, matching the latLonToDir convention in geo.ts:
@@ -109,7 +125,7 @@ export function createHeightMap(terrain: Terrain, width = 2048, height = 1024): 
     texture.needsUpdate = true;
   }
 
-  return { texture, data, width, height, sample, setAt, flush };
+  return { texture, data, width, height, sample, setAt, flush, aux: null, horizon: null };
 }
 
 /**
