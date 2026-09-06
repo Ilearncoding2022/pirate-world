@@ -3,7 +3,7 @@ import type { Terrain } from './types';
 import type { WorldEnv } from './env';
 import type { HeightMap } from './heightmap';
 import { landRadius } from './land';
-import { tangentFrame } from './geo';
+import { GLOBE_RADIUS, tangentFrame } from './geo';
 
 export interface CityLights {
   object: THREE.Object3D;
@@ -41,13 +41,13 @@ const COAST_PROBE_SAMPLES = 12;
 /**
  * Lift above the land surface, in world units.
  *
- * The land mesh is an icosphere at detail 96, so its triangles are about one
- * world unit across, while the height map this samples is finer than that.
- * A light placed at the exact sampled radius can therefore end up a fraction
- * of a unit inside a face. Half a percent of the globe radius clears that
- * without the lights reading as floating.
+ * The land mesh's triangles are a couple of world units across, while the
+ * height map this samples is finer than that, so a light placed at the exact
+ * sampled radius can end up a fraction of a unit inside a face. Four tenths of
+ * a percent of the globe radius clears that without the lights reading as
+ * floating -- and it has to track the radius, because the triangles do.
  */
-const LIGHT_LIFT = 0.4;
+const LIGHT_LIFT = GLOBE_RADIUS * 0.004;
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */

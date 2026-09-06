@@ -33,7 +33,7 @@ const WAKE_LIFE = 4.0;
 const BREAK_GAP = 2.5;
 
 /** Matches MAX_FORWARD in ship.ts; only used to normalise speed. */
-const MAX_SHIP_SPEED = 18;
+const MAX_SHIP_SPEED = 20;
 /** Below this the ship leaves no wake at all. Reverse (negative) never does. */
 const MIN_WAKE_SPEED = 1.2;
 
@@ -43,9 +43,14 @@ const STERN_BACK = 2.3;
 const BOW_FORWARD = 2.5;
 
 /**
- * Lift above the water sphere. The water mesh is a 256x128 sphere whose facets
- * sag ~0.03 below GLOBE_RADIUS, so this only has to clear that plus the
- * ribbon's own (much smaller) sag. Invisible at any camera distance.
+ * Lift above the water sphere.
+ *
+ * The water mesh is a 256x128 sphere, so its facets sag
+ * GLOBE_RADIUS * (1 - cos(PI / 256)) below the true surface -- about 0.015 at
+ * the current radius. This has to clear that plus the ribbon's own (much
+ * smaller) sag. Absolute rather than radius-scaled on purpose: the sag grows
+ * with the radius but the segment counts grow with it too, so it stays put.
+ * Invisible at any camera distance.
  */
 const SURFACE_LIFT = 0.1;
 const WAKE_RADIUS = GLOBE_RADIUS + SURFACE_LIFT;

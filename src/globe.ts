@@ -3,18 +3,24 @@ import type { Terrain } from './types';
 import type { WorldEnv } from './env';
 import { createHeightMap } from './heightmap';
 import type { HeightMap } from './heightmap';
+import type { WaterBodies } from './waterbodies';
 import { createLand } from './land';
 import { createWater } from './water';
+import { createWaterBodies } from './waterbodies';
 import { createGrid } from './grid';
 import { createSky } from './sky';
 import { createDayNight } from './daynight';
 import { createClouds } from './clouds';
 import { createCityLights } from './citylights';
+import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
+import { latLonToDir } from './geo';
 
 export interface Globe {
   group: THREE.Group;
   /** Shared height field, also used by ship collision debugging and any map view. */
   heightMap: HeightMap;
+  /** Which water the ship can reach. Read by the water shader. */
+  waterBodies: WaterBodies;
   update(dt: number, env: WorldEnv): void;
 }
 
@@ -29,10 +35,17 @@ export function createGlobe(terrain: Terrain): Globe {
   group.name = 'world';
 
   const heightMap = createHeightMap(terrain);
+  // Flooded from the ship's own spawn point, so "reachable" means reachable
+  // by the player, not merely connected to some arbitrary sea.
+  const waterBodies = createWaterBodies(
+    heightMap,
+    terrain.seaLevel,
+    latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG),
+  );
 
   const dayNight = createDayNight();
-  const water = createWater(terrain, heightMap);
-  const land = createLand(terrain);
+  const water = createWater(terrain, heightMap, waterBodies);
+  const land = createLand(terrain, heightMap);
   const cityLights = createCityLights(terrain, heightMap);
   const clouds = createClouds();
   const sky = createSky();
@@ -48,6 +61,7 @@ export function createGlobe(terrain: Terrain): Globe {
   return {
     group,
     heightMap,
+    waterBodies,
     update(dt: number, env: WorldEnv): void {
       dayNight.update(dt, env);
       water.update(dt, env);

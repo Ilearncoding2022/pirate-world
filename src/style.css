@@ -1,7 +1,7 @@
 /* =====================================================================
    Pirate World — HUD / page shell
    Techno-punk fantasy: neon cyan primary, magenta accents, dark void.
-   Owned by: index.html + style.css + controls.ts + hud.ts
+   Owned by: index.html + style.css + controls.ts + hud.ts + radar.ts
    ===================================================================== */
 
 :root {
@@ -216,28 +216,70 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   Compass instrument (top-right)
+   Radar (top-right) — surface plot, painted by radar.ts
    ------------------------------------------------------------------- */
 
-.panel--compass {
+.panel--radar {
   top: var(--hud-pad);
   right: var(--hud-pad);
-  padding: 12px;
+  padding: 11px 12px 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
 }
 
-.compass {
+.radar {
   position: relative;
-  width: clamp(108px, 11vw, 148px);
+  width: clamp(118px, 12vw, 158px);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
+  /* Under the plot, so the scope still reads as a lit tube where the canvas
+     is transparent — outside the range circle, and before the first paint. */
+  background: radial-gradient(circle at 50% 44%, #072130 0%, #030d17 62%, #01060c 100%);
   box-shadow:
     0 0 0 1px rgba(63, 224, 255, 0.35),
     0 0 22px rgba(63, 224, 255, 0.22),
     inset 0 0 26px rgba(0, 0, 0, 0.8);
+}
+
+/* radar.ts sizes the backing store from clientWidth; this owns the CSS size. */
+.radar__scope {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
+.radar__readout {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.radar__range {
+  font-size: 8.5px;
+  letter-spacing: 0.18em;
+  color: var(--cyan-dim);
+}
+
+/* ---------------------------------------------------------------------
+   Compass instrument — lives in the hole in the middle of the D-pad
+   ------------------------------------------------------------------- */
+
+.compass {
+  position: relative;
+  /* Exactly its grid cell, so the widened gap stays visible as clear air all
+     the way around the bezel. */
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 1px rgba(63, 224, 255, 0.35),
+    0 0 14px rgba(63, 224, 255, 0.22),
+    inset 0 0 16px rgba(0, 0, 0, 0.8);
 }
 
 .compass__rose,
@@ -264,9 +306,9 @@ body {
   stroke-width: 1;
 }
 
+/* A 1.4/2.6 dash pattern on a 50px circle is a grey smear; drop it. */
 .rose__ring--faint {
-  stroke: rgba(63, 224, 255, 0.13);
-  stroke-dasharray: 1.4 2.6;
+  display: none;
 }
 
 .tick {
@@ -284,16 +326,23 @@ body {
   stroke-width: 1.5;
 }
 
+/*
+ * At hub size the rose is about 50px across, so a 9-unit glyph lands near 4.5
+ * device-independent pixels: unreadable, and enough of them to muddy the
+ * ticks. Only north is kept, at a size that survives the reduction. Absolute
+ * heading is read as a number on the radar panel.
+ */
 .rose__label {
-  fill: var(--ink-mute);
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.05em;
+  display: none;
 }
 
 .rose__label--n {
+  display: block;
   fill: var(--magenta);
+  font-family: var(--font-mono);
+  font-size: 15px;
   font-weight: 700;
+  letter-spacing: 0.05em;
 }
 
 /* the needle: rotated by hud.ts via style.transform */
@@ -331,24 +380,18 @@ body {
 /* fixed index mark at 12 o'clock */
 .compass__lubber {
   position: absolute;
-  top: -3px;
+  top: -2px;
   left: 50%;
   width: 0;
   height: 0;
   transform: translateX(-50%);
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 8px solid var(--magenta);
-  filter: drop-shadow(0 0 5px var(--magenta));
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  border-top: 5.5px solid var(--magenta);
+  filter: drop-shadow(0 0 4px var(--magenta));
 }
 
-.compass__readout {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-
-.compass__heading {
+.hdg__value {
   font-size: 20px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
@@ -356,7 +399,7 @@ body {
   text-shadow: 0 0 14px rgba(63, 224, 255, 0.6);
 }
 
-.compass__hdglabel {
+.hdg__label {
   font-size: 9px;
   letter-spacing: 0.24em;
   color: var(--ink-mute);
@@ -372,9 +415,16 @@ body {
   left: 50%;
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(3, clamp(56px, 6vw, 74px));
-  grid-template-rows: repeat(3, clamp(56px, 6vw, 74px));
-  gap: 7px;
+  /* Key size is the original scaled by 0.75, so the whole control shrinks as
+     one piece. The gap is that 0.75 scale plus half again, which is what opens
+     up the middle cell far enough to seat the compass in it.
+
+     One source of truth: the label size below is derived from --key-size, so
+     the longest word cannot outgrow its key at any viewport width. */
+  --key-size: clamp(42px, 4.5vw, 55.5px);
+  grid-template-columns: repeat(3, var(--key-size));
+  grid-template-rows: repeat(3, var(--key-size));
+  gap: 7.875px;
   place-items: stretch;
 }
 
@@ -387,7 +437,7 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 2px;
+  gap: 1.5px;
 
   margin: 0;
   padding: 0;
@@ -399,7 +449,7 @@ body {
   background:
     linear-gradient(180deg, rgba(16, 36, 54, 0.7), rgba(6, 14, 24, 0.7));
   border: 1px solid var(--panel-border);
-  border-radius: 12px;
+  border-radius: 9px;
   box-shadow:
     0 0 12px rgba(63, 224, 255, 0.1),
     inset 0 1px 0 rgba(63, 224, 255, 0.18),
@@ -424,13 +474,47 @@ body {
 }
 
 .dbtn__glyph {
-  font-size: clamp(15px, 1.6vw, 19px);
+  /* 0.6x the original clamp(15px, 1.6vw, 19px): a 40% cut, as with the label. */
+  font-size: clamp(9px, 0.96vw, 11.4px);
   line-height: 1;
   text-shadow: 0 0 10px rgba(63, 224, 255, 0.5);
 }
 
+/*
+ * Rendered size is font-size x --label-scale, not font-size on its own.
+ *
+ * Two things have to hold at once here, and the obvious spelling satisfies
+ * neither.
+ *
+ * The label must fit its key. STARBOARD is nine characters in a key that is
+ * only 42px wide on a narrow window, so the size has to come from the key
+ * rather than from a number picked once and hoped over: 0.128 key-widths per
+ * character puts the longest word at about 85% of the key at every step of the
+ * clamp.
+ *
+ * And the size asked for has to be the size delivered. Browsers carry a
+ * "minimum font size" preference (Chrome: Settings -> Appearance -> Customize
+ * fonts) that clamps the *computed* font-size, so a rule asking for 7px is
+ * silently raised to the floor -- commonly 12px -- and STARBOARD at 12px
+ * spills off its key and over its neighbours. Transforms are applied after
+ * layout and are never clamped, so the label is laid out at 10x the size
+ * wanted, far above any floor a browser can impose (24px is the ceiling on
+ * Chrome's slider), and scaled back down.
+ *
+ * Keep font-size, height and transform in step if this is retuned: the first
+ * two are written in terms of --label-scale so that happens by itself.
+ */
 .dbtn__label {
-  font-size: 7.5px;
+  --label-scale: 0.1;
+  font-size: calc(var(--key-size) * 0.128 / var(--label-scale));
+  line-height: 1;
+  height: calc(1em * var(--label-scale));
+  transform: scale(var(--label-scale));
+  transform-origin: center top;
+  white-space: nowrap;
+  /* Laid out ten times wider than it draws, so its box reaches over the keys
+     on either side. It must never be a hit target; the key under it is. */
+  pointer-events: none;
   letter-spacing: 0.14em;
   color: var(--ink-mute);
   transition: color 130ms ease;
@@ -487,15 +571,6 @@ body {
   display: grid;
   place-items: center;
   pointer-events: none;
-}
-
-.dpad__hub-ring {
-  width: 46%;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  border: 1px solid rgba(63, 224, 255, 0.28);
-  background: radial-gradient(circle, rgba(255, 79, 216, 0.28), transparent 70%);
-  box-shadow: 0 0 14px rgba(255, 79, 216, 0.2);
 }
 
 /* ---------------------------------------------------------------------
@@ -597,10 +672,11 @@ kbd {
   .panel--telemetry {
     min-width: 0;
   }
-  .compass {
-    width: 92px;
+  /* The compass now tracks its D-pad cell, so only the radar needs a cap. */
+  .radar {
+    width: 104px;
   }
-  .compass__heading {
+  .hdg__value {
     font-size: 16px;
   }
   .legend {

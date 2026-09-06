@@ -12,21 +12,57 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three';
-import type { Object3D } from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { BufferGeometry, Material, Object3D } from 'three';
 import type { InputState, ShipState, Terrain } from './types';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
+import shipModelUrl from '../assets/pirateship_beginner.glb?url';
 
 /* ------------------------------------------------------------------ */
 /* Tuning constants                                                    */
 /* ------------------------------------------------------------------ */
 
-/** Height of the hull waterline above the globe surface. */
+/**
+ * Height of the ship's local origin above the globe surface.
+ *
+ * `camera.ts` mirrors this in SHIP_ALTITUDE to aim at the hull, so the two
+ * have to move together. It is a mounting height, not the waterline -- see
+ * MODEL_WATERLINE_Y for where the sea actually cuts the glTF hull.
+ */
 const HULL_OFFSET = 0.6;
 
-const ACCEL = 12; // world units / s^2 while a throttle key is held
-const MAX_FORWARD = 18; // world units / s
-const MAX_REVERSE = 7; // world units / s (magnitude)
-const DRAG = 0.7; // linear drag coefficient (1/s)
+/**
+ * Model-space Y at which the glTF hull is meant to meet the water.
+ *
+ * `tools/build_ship.py` puts y = 0 on the deck reference plane: the keel
+ * bottoms out around -0.49 (appendages reach -0.69) and the gunwale runs
+ * +0.44 amidships to +0.90 at the ends. Floating it therefore means sinking
+ * the model into the group rather than standing it on the origin, which is
+ * what MODEL_MOUNT_Y below does. Raise this number to sit deeper in the
+ * water, lower it to ride lighter.
+ */
+const MODEL_WATERLINE_Y = -0.2;
+
+/** Where the glTF root hangs inside the ship group, so its waterline lands on the sea. */
+const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y;
+
+/**
+ * Top speed, world units per second, which `hud.ts` reads out as 20.0 kn.
+ *
+ * Drag, not the clamp below, is what actually decides this. Thrust and drag
+ * balance at ACCEL / DRAG, so that ratio *is* the top speed and the clamp only
+ * ever catches the last fraction of a knot -- which is why ACCEL is derived
+ * from this rather than typed. Set independently they disagree silently: at
+ * ACCEL 12 and DRAG 0.7 the ship topped out at 17.1 however high the clamp was
+ * set, and the number in this constant was simply never reached.
+ */
+const MAX_FORWARD = 20;
+/** Linear drag coefficient, 1/s. Also sets how long the ship coasts. */
+const DRAG = 0.7;
+/** Thrust while a throttle key is held, world units / s^2. */
+const ACCEL = MAX_FORWARD * DRAG;
+
+const MAX_REVERSE = 7; // world units / s (magnitude); clamp-limited, not drag-limited
 const STOP_EPSILON = 0.02; // speeds below this snap to a dead stop
 
 const TURN_RATE = 1.2; // rad / s at full speed
@@ -64,15 +100,19 @@ function clamp(v: number, lo: number, hi: number): number {
 }
 
 /* ------------------------------------------------------------------ */
-/* Placeholder techno-punk pirate ship, primitives only                */
+/* Stand-in hull, primitives only, shown while the glTF streams in     */
 /* ------------------------------------------------------------------ */
 
 /**
- * Builds the ship model. Convention: the bow points along local -Z, the deck
+ * Builds a rough stand-in hull, used for the fraction of a second before
+ * `pirateship_beginner.glb` finishes loading -- and kept on screen if that
+ * load ever fails, so a missing asset costs detail rather than the ship.
+ *
+ * Convention, shared with the glTF: the bow points along local -Z, the deck
  * normal is local +Y and starboard is local +X, matching
  * `makeBasis(right, up, back)`. Overall length ~5.6 units (globe radius 100).
  */
-function buildShipModel(): Group {
+function buildStandInHull(): Group {
   const group = new Group();
 
   const hullMat = new MeshStandardMaterial({
@@ -224,7 +264,51 @@ interface MutableShipState {
 export interface Ship {
   object: Object3D;
   state: ShipState;
+  /**
+   * Settles once the glTF hull has replaced the stand-in, or once that load
+   * has failed and the stand-in is staying. Never rejects. `main.ts` waits on
+   * it to hand the new materials to the post-processing chain.
+   */
+  ready: Promise<void>;
   update(dt: number, input: InputState): void;
+}
+
+/** Frees a subtree's GPU resources. Only ever used on the discarded stand-in. */
+function disposeTree(root: Object3D): void {
+  root.traverse((node) => {
+    const holder = node as unknown as {
+      geometry?: BufferGeometry;
+      material?: Material | Material[];
+    };
+    holder.geometry?.dispose();
+    const material = holder.material;
+    if (!material) return;
+    for (const m of Array.isArray(material) ? material : [material]) m.dispose();
+  });
+}
+
+/**
+ * Swaps the stand-in for `assets/pirateship_beginner.glb`.
+ *
+ * The glTF is authored to this module's axis convention already (see the
+ * module docstring in `tools/build_ship.py`), so it needs no rotation and no
+ * scaling -- only the vertical mount that puts its waterline on the sea.
+ */
+function loadHull(object: Group, standIn: Group): Promise<void> {
+  return new GLTFLoader()
+    .loadAsync(shipModelUrl)
+    .then((gltf) => {
+      const model = gltf.scene;
+      model.name = 'ship-hull';
+      model.position.y = MODEL_MOUNT_Y;
+      object.add(model);
+      object.remove(standIn);
+      disposeTree(standIn);
+    })
+    .catch((error: unknown) => {
+      // A ship that is ugly still sails; a ship that throws does not.
+      console.error('ship: could not load the glTF hull, keeping the stand-in', error);
+    });
 }
 
 export function createShip(
@@ -237,7 +321,9 @@ export function createShip(
 
   const object = new Group();
   object.name = 'ship';
-  object.add(buildShipModel());
+  const standIn = buildStandInHull();
+  object.add(standIn);
+  const ready = loadHull(object, standIn);
 
   const state: MutableShipState = {
     position: latLonToDir(startLat, startLon).normalize(),
@@ -342,11 +428,19 @@ export function createShip(
     refreshForward();
 
     // ---- Throttle --------------------------------------------------------
-    if (input.forward) state.speed += ACCEL * dt;
-    if (input.backward) state.speed -= ACCEL * dt;
+    let thrust = 0;
+    if (input.forward) thrust += ACCEL;
+    if (input.backward) thrust -= ACCEL;
 
-    // Linear drag, always on, so releasing the keys coasts to a stop.
-    state.speed -= state.speed * DRAG * dt;
+    // Exact solution of  ds/dt = thrust - DRAG * s  over dt, rather than a
+    // step of each in turn. Two reasons it has to be integrated in closed
+    // form. It makes the top speed exactly thrust / DRAG: stepping thrust and
+    // then drag lands on (ACCEL / DRAG) * (1 - DRAG * dt) instead, which is
+    // 19.8 kn at 60fps and 18.6 at 10 -- a top speed that depends on the frame
+    // rate. And with no throttle it decays cleanly to zero, so releasing the
+    // keys still coasts the ship to a stop.
+    const terminal = thrust / DRAG;
+    state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
     state.speed = clamp(state.speed, -MAX_REVERSE, MAX_FORWARD);
     if (!input.forward && !input.backward && Math.abs(state.speed) < STOP_EPSILON) {
       state.speed = 0;
@@ -388,5 +482,5 @@ export function createShip(
   syncStateGeo();
   applyTransform();
 
-  return { object, state: state as ShipState, update };
+  return { object, state: state as ShipState, ready, update };
 }

@@ -3,12 +3,70 @@ import type { Terrain } from './types';
 import type { WorldEnv } from './env';
 import type { HeightMap } from './heightmap';
 import { HEIGHTMAP_GLSL } from './heightmap';
+import type { WaterBodies } from './waterbodies';
 import { GLOBE_RADIUS } from './geo';
 
 export interface Water {
   mesh: THREE.Mesh;
   update(dt: number, env: WorldEnv): void;
 }
+
+/* ------------------------------------------------------------------ */
+/* Sea surface, authored in world units                                */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The shader samples noise over the unit direction, so its frequencies are in
+ * units of 1/radian and its drifts in direction-units per second -- neither of
+ * which means anything next to a hull. Both are therefore authored here as the
+ * world-unit sizes and speeds actually wanted and converted below.
+ *
+ * That conversion is the only reason the sea still looks like the sea after
+ * GLOBE_RADIUS doubled: hard-coded 1/radian frequencies would have doubled
+ * every wavelength along with the globe, leaving the ship sailing through
+ * swell twice its own length.
+ */
+
+/** Wavelengths in world units. The ship is ~5.6 long, so WAVE is hull sized. */
+const SWELL_WAVELENGTH = 22;
+const WAVE_WAVELENGTH = 5.9;
+const CHOP_WAVELENGTH = 1.7;
+
+/** Drift of each layer over the surface, world units per second. */
+const SWELL_DRIFT: [number, number, number] = [1.3, 0.6, -1.0];
+const WAVE_DRIFT: [number, number, number] = [-0.9, 1.4, 0.7];
+const CHOP_DRIFT: [number, number, number] = [0.6, -0.5, 1.7];
+
+/** Coastal foam: wavelength in world units, drift in world units per second. */
+const FOAM_COARSE_WAVELENGTH = 4.55;
+const FOAM_COARSE_DRIFT: [number, number, number] = [1.0, 0.0, -0.8];
+const FOAM_SPECK_WAVELENGTH = 0.85;
+const FOAM_SPECK_DRIFT: [number, number, number] = [0.0, 3.0, 1.6];
+
+/**
+ * Step used for the finite difference that reconstructs the wave normal, in
+ * world units. Held at a fixed fraction of the shortest wavelength so the
+ * gradient -- and therefore the surface tilt -- is identical at any radius.
+ */
+const NORMAL_STEP = 0.16;
+
+/** Frequency in 1/radian for a wavelength given in world units. */
+function freq(wavelengthWorld: number): string {
+  return (GLOBE_RADIUS / wavelengthWorld).toFixed(4);
+}
+
+/** Direction-space drift vector for a speed given in world units per second. */
+function drift(speedWorld: [number, number, number]): string {
+  const [x, y, z] = speedWorld.map((v) => (v / GLOBE_RADIUS).toFixed(7));
+  return `vec3(${x}, ${y}, ${z})`;
+}
+
+/**
+ * Surface motion on unreachable inland water, as a fraction of the open sea:
+ * a 75% reduction. It scales the wave field's drift and its ripple height
+ * together, which is what separates "a pond" from "the ocean in slow motion".
+ */
+const LAKE_CALM = 0.25;
 
 /**
  * Ashima / Stefan Gustavson 3D simplex noise, inlined.
@@ -88,13 +146,25 @@ const NOISE_GLSL = [
  *   4. a coastal foam band whose outer edge breathes on a per-place phase, with
  *      a breaker line running shoreward.
  *   5. the whole thing crossfades to a near-black ambient on the night side.
+ *
+ * Every one of those steps is then crossfaded against `waterbodies.ts`'s
+ * inland mask, so lakes and landlocked seas -- water the ship can never sail
+ * to -- come out green, glassy and nearly still instead of reading as more
+ * ocean. See LAKE_CALM for what "nearly still" means numerically.
  */
-export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
+export function createWater(
+  terrain: Terrain,
+  heightMap: HeightMap,
+  waterBodies: WaterBodies,
+): Water {
   // Detail is fragment-side; the geometry only needs a smooth silhouette.
-  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, 192, 96);
+  // Segment counts track the radius: the chords have to sag less than
+  // `wake.ts`'s SURFACE_LIFT clears, and the silhouette has to stay round.
+  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS, 256, 128);
 
   const uniforms = {
     uHeightMap: { value: heightMap.texture },
+    uInlandMask: { value: waterBodies.texture },
     uSeaLevel: { value: terrain.seaLevel },
     uTime: { value: 0 },
     uDayFactor: { value: 1 },
@@ -115,6 +185,19 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     uOcean: { value: new THREE.Color('#04243a') },
     uDeep: { value: new THREE.Color('#02101c') },
     uAbyss: { value: new THREE.Color('#01070c') },
+    /*
+     * Fresh water, in the same presented-colour space as the ocean ramp above.
+     * Deliberately green rather than cyan: it is the one cue that reads as
+     * "lake" at a glance, from the deck and from orbit alike. The ramp is also
+     * far shorter than the ocean's -- a pond bottoms out at pond colour rather
+     * than running on down to abyssal navy.
+     */
+    uLakeShallow: { value: new THREE.Color('#46ad84') },
+    uLakeDeep: { value: new THREE.Color('#0e3b35') },
+    /** How far below sea level an inland body reaches its deepest colour. */
+    uLakeDepthRange: { value: 0.22 },
+    /** Wave drift and ripple height on inland water, as a fraction of the sea. */
+    uLakeCalm: { value: LAKE_CALM },
     // Surf and reflected sky.
     uFoamColor: { value: new THREE.Color('#e8fbff') },
     uSkyColor: { value: new THREE.Color('#3d74b4') },
@@ -139,6 +222,7 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
 
   const fragmentShader = [
     'uniform sampler2D uHeightMap;',
+    'uniform sampler2D uInlandMask;',
     'uniform float uSeaLevel;',
     'uniform float uTime;',
     'uniform float uDayFactor;',
@@ -149,6 +233,10 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     'uniform vec3 uOcean;',
     'uniform vec3 uDeep;',
     'uniform vec3 uAbyss;',
+    'uniform vec3 uLakeShallow;',
+    'uniform vec3 uLakeDeep;',
+    'uniform float uLakeDepthRange;',
+    'uniform float uLakeCalm;',
     'uniform vec3 uFoamColor;',
     'uniform vec3 uSkyColor;',
     'uniform vec3 uHorizonColor;',
@@ -160,17 +248,14 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     'varying vec3 vWorldPos;',
     NOISE_GLSL,
     HEIGHTMAP_GLSL,
-    // Frequencies are in units of 1/radian, so a feature spans about
-    // GLOBE_RADIUS / FREQ world units: 22, 5.9 and 1.7 respectively. The ship
-    // is ~5.6 units long, so the middle layer is roughly hull-sized.
-    'const float FREQ_SWELL = 4.5;',
-    'const float FREQ_WAVE = 17.0;',
-    'const float FREQ_CHOP = 58.0;',
-    // Drifts are in direction-units per second; times GLOBE_RADIUS that is
-    // about 1.3 to 1.9 world units per second, in three different directions.
-    'const vec3 DRIFT_SWELL = vec3(0.0130, 0.0060, -0.0100);',
-    'const vec3 DRIFT_WAVE = vec3(-0.0090, 0.0140, 0.0070);',
-    'const vec3 DRIFT_CHOP = vec3(0.0060, -0.0050, 0.0170);',
+    // Derived from the world-unit wavelengths and speeds at the top of the
+    // file; see the note there for why they are not written literally.
+    `const float FREQ_SWELL = ${freq(SWELL_WAVELENGTH)};`,
+    `const float FREQ_WAVE = ${freq(WAVE_WAVELENGTH)};`,
+    `const float FREQ_CHOP = ${freq(CHOP_WAVELENGTH)};`,
+    `const vec3 DRIFT_SWELL = ${drift(SWELL_DRIFT)};`,
+    `const vec3 DRIFT_WAVE = ${drift(WAVE_DRIFT)};`,
+    `const vec3 DRIFT_CHOP = ${drift(CHOP_DRIFT)};`,
     // Two fixed world axes the noise domain is stretched along. A plain 3x3
     // scale is continuous over the whole sphere, so unlike a tangent-frame
     // stretch it introduces no pole singularity, and the two axes crossing
@@ -186,14 +271,17 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     'float ridge(float v, float sharp) {',
     '  return 0.5 - sqrt(v * v + mix(0.11, 0.0005, sharp));',
     '}',
-    'float waveField(vec3 p, float mid, float fine) {',
+    '// `t` is passed in rather than read from uTime because inland water runs',
+    '// on a slowed clock. The two clocks only ever meet over the strip of bank',
+    '// between a lake and the sea, so the crossfade is hidden under land.',
+    'float waveField(vec3 p, float t, float mid, float fine) {',
     '  // Swell: smooth, long undulation. The two layers above it are ridged,',
     '  // which is what makes the glint run in streaks like real sun glitter.',
-    '  float s = snoise((p + DRIFT_SWELL * uTime) * FREQ_SWELL) * 0.55;',
-    '  vec3 pw = stretch((p + DRIFT_WAVE * uTime) * FREQ_WAVE, AXIS_WAVE, 1.7);',
+    '  float s = snoise((p + DRIFT_SWELL * t) * FREQ_SWELL) * 0.55;',
+    '  vec3 pw = stretch((p + DRIFT_WAVE * t) * FREQ_WAVE, AXIS_WAVE, 1.7);',
     '  s += ridge(snoise(pw), mid) * 0.90 * mid;',
     '  if (fine > 0.004) {',
-    '    vec3 pc = stretch((p + DRIFT_CHOP * uTime) * FREQ_CHOP, AXIS_CHOP, 1.3);',
+    '    vec3 pc = stretch((p + DRIFT_CHOP * t) * FREQ_CHOP, AXIS_CHOP, 1.3);',
     '    s += ridge(snoise(pc), fine) * 0.44 * fine;',
     '  }',
     '  return s;',
@@ -204,6 +292,11 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     '  float camDist = length(toCam);',
     '  vec3 viewDir = toCam / max(camDist, 1e-4);',
     '  vec3 sunDir = normalize(uSunDirection);',
+    '',
+    '  // 1 on water the ship can never reach, 0 on the open ocean.',
+    '  float inland = texture2D(uInlandMask, dirToEquirect(n)).r;',
+    '  float motion = mix(1.0, uLakeCalm, inland);',
+    '  float lakeTime = uTime * motion;',
     '',
     '  // Poor-man LOD. A pixel covers more surface both with distance and at',
     '  // grazing angles, so fade the high octaves out on both counts; without',
@@ -221,13 +314,14 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     '  vec3 tanU = normalize(cross(ref, n));',
     '  vec3 tanV = cross(n, tanU);',
     '',
-    '  const float EPS = 0.0016;',
-    '  float w0 = waveField(n, fadeMid, fadeFine);',
-    '  float wu = waveField(n + tanU * EPS, fadeMid, fadeFine);',
-    '  float wv = waveField(n + tanV * EPS, fadeMid, fadeFine);',
+    `  const float EPS = ${(NORMAL_STEP / GLOBE_RADIUS).toFixed(8)};`,
+    '  float w0 = waveField(n, lakeTime, fadeMid, fadeFine);',
+    '  float wu = waveField(n + tanU * EPS, lakeTime, fadeMid, fadeFine);',
+    '  float wv = waveField(n + tanV * EPS, lakeTime, fadeMid, fadeFine);',
     '  // Flatten the surface as it recedes, so the ocean reads calm from orbit',
-    '  // rather than blotchy.',
-    '  float tilt = uWaveStrength * mix(0.22, 1.0, nearMid);',
+    '  // rather than blotchy, and flatten it again over inland water so a pond',
+    '  // is close to a mirror.',
+    '  float tilt = uWaveStrength * mix(0.22, 1.0, nearMid) * motion;',
     '  vec3 N = normalize(n - (tanU * (wu - w0) + tanV * (wv - w0)) * tilt);',
     '',
     '  // ---- depth colour ----------------------------------------------------',
@@ -242,10 +336,16 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     '    else if (t < 0.85) base = mix(uOcean, uDeep, (t - 0.5) / 0.35);',
     '    else base = mix(uDeep, uAbyss, (t - 0.85) / 0.15);',
     '  }',
+    '  // Fresh water: its own short ramp, so even a deep tarn stays lake green',
+    '  // instead of sliding down the ocean palette into abyssal navy.',
+    '  if (inland > 0.002) {',
+    '    float ld = smoothstep(0.0, max(uLakeDepthRange, 1e-4), depth);',
+    '    base = mix(base, mix(uLakeShallow, uLakeDeep, ld), inland);',
+    '  }',
     '  // Shallows keep their glow and pick up a moving caustic ripple, which is',
     '  // what reads as translucency over a sandy bottom.',
     '  float shallowMask = 1.0 - smoothstep(0.0, 0.15, depth);',
-    '  base *= 1.0 + shallowMask * w0 * 0.30;',
+    '  base *= 1.0 + shallowMask * w0 * 0.30 * motion;',
     '',
     '  // ---- lighting --------------------------------------------------------',
     '  float sunGeo = dot(n, sunDir);',
@@ -291,14 +391,14 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     '    // or a coastline seen from far off stipples instead of foaming.',
     '    float foamNear = 1.0 - smoothstep(42.0, 92.0, camDist);',
     '    float foamLod = foamNear * mix(0.35, 1.0, lod);',
-    '    float coarse = snoise(n * 22.0 + vec3(uTime * 0.010, 0.0, uTime * -0.008));',
-    '    float speck = snoise(n * 118.0 + vec3(0.0, uTime * 0.030, uTime * 0.016)) * foamLod;',
+    `    float coarse = snoise(n * ${freq(FOAM_COARSE_WAVELENGTH)} + ${drift(FOAM_COARSE_DRIFT)} * lakeTime);`,
+    `    float speck = snoise(n * ${freq(FOAM_SPECK_WAVELENGTH)} + ${drift(FOAM_SPECK_DRIFT)} * lakeTime) * foamLod;`,
     '    // Per-place phase, so the whole coastline does not pulse in unison.',
-    '    float swell = 0.5 + 0.5 * sin(coarse * 3.4 + uTime * 1.25);',
+    '    float swell = 0.5 + 0.5 * sin(coarse * 3.4 + lakeTime * 1.25);',
     '    float outer = 0.22 + 0.55 * swell + speck * 0.28;',
     '    float band = 1.0 - smoothstep(outer * 0.30, outer, fd);',
     '    // A breaker line running shoreward and dying as it lands.',
-    '    float run = fract(uTime * 0.19 + coarse * 0.5);',
+    '    float run = fract(lakeTime * 0.19 + coarse * 0.5);',
     '    float lineAt = 1.70 - 1.55 * run;',
     '    float dl = (fd - lineAt) / 0.22;',
     '    float breaker = exp(-dl * dl) * (0.30 + 0.70 * run);',
@@ -310,6 +410,9 @@ export function createWater(terrain: Terrain, heightMap: HeightMap): Water {
     '    // nothing at all from orbit. With a floor every island ends up ringed',
     '    // in neon and the planet reads as a wireframe map.',
     '    foam *= foamNear * foamNear * mix(0.35, 1.0, lod);',
+    '    // A lake shore laps; it does not break. Leave a trace of a waterline',
+    '    // and take the surf away entirely.',
+    '    foam *= mix(1.0, 0.12, inland);',
     '    vec3 foamLit = uFoamColor * mix(0.09, 0.52, lightAmt) * mix(vec3(1.0), uSunColor, 0.30);',
     '    col = mix(col, foamLit, clamp(foam, 0.0, 1.0) * 0.85);',
     '  }',

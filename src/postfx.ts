@@ -8,6 +8,13 @@ import { CopyShader } from 'three/examples/jsm/shaders/CopyShader.js';
 export interface PostFx {
   /** Draws the frame. Replaces a direct renderer.render() call. */
   render(dt: number, scene: THREE.Scene, camera: THREE.Camera): void;
+  /**
+   * Applies the colour-encode patch below to a subtree added after the first
+   * frame. The scene is only walked once, on first render, so anything that
+   * arrives later -- the glTF hull, which streams in -- would otherwise render
+   * a stop dark against everything around it. Idempotent.
+   */
+  adopt(root: THREE.Object3D): void;
   resize(width: number, height: number): void;
   dispose(): void;
 }
@@ -142,9 +149,9 @@ function selfEncodeToSRGB(material: THREE.Material): void {
   material.needsUpdate = true;
 }
 
-function patchSceneMaterials(scene: THREE.Scene): number {
+function patchSceneMaterials(root: THREE.Object3D): number {
   let count = 0;
-  scene.traverse((obj) => {
+  root.traverse((obj) => {
     const holder = obj as unknown as { material?: THREE.Material | THREE.Material[] };
     const mat = holder.material;
     if (!mat) return;
@@ -265,6 +272,10 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
         if (renderPass.camera !== camera) renderPass.camera = camera;
       }
       active.render(dt);
+    },
+
+    adopt(root: THREE.Object3D): void {
+      patchSceneMaterials(root);
     },
 
     resize(w: number, h: number): void {

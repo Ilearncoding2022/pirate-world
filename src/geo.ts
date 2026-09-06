@@ -1,7 +1,24 @@
 import { Vector3 } from 'three';
 
-/** Radius of the globe in world units. Everything is scaled relative to this. */
-export const GLOBE_RADIUS = 100;
+/**
+ * Radius of the globe in world units. Everything is scaled relative to this.
+ *
+ * Two families of constant live downstream of it and they scale differently:
+ *
+ *   - World-scale things are written as a fraction of this radius, or are
+ *     angular (terrain noise is a function of the unit direction, settlements
+ *     are placed in radians). They grow with it, so continents, lakes, towns
+ *     and the cloud deck all keep their shape and double in size when it does.
+ *   - Ship-scale things are absolute world units: the hull, its speed, the
+ *     chase camera, the wake, the wave chop alongside it. They stay put.
+ *
+ * Raising the radius therefore makes the world bigger *relative to the ship*,
+ * which is the only sense in which a world can be big: flatter horizon, longer
+ * crossings, larger landmasses next to the same hull. Anything absolute that
+ * belongs to the world rather than the ship has to be scaled by hand -- see
+ * MAX_LAND_RELIEF in `land.ts` and the far end of the zoom in `camera.ts`.
+ */
+export const GLOBE_RADIUS = 200;
 
 const _tmp = new Vector3();
 const WORLD_UP = new Vector3(0, 1, 0);

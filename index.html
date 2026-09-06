@@ -38,84 +38,24 @@
         <p class="panel__note">PIRATE WORLD &#8226; NAV CORE v0.1</p>
       </section>
 
-      <!-- ===================== COMPASS ===================== -->
-      <section class="panel panel--compass" aria-label="Compass">
-        <div class="compass">
-          <!-- Fixed rose: rings, graduations, cardinal letters -->
-          <svg
-            class="compass__rose"
-            viewBox="0 0 100 100"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <defs>
-              <radialGradient id="roseGlass" cx="50%" cy="34%" r="76%">
-                <stop offset="0%" stop-color="#0e2536" stop-opacity="0.95" />
-                <stop offset="62%" stop-color="#050b14" stop-opacity="0.95" />
-                <stop offset="100%" stop-color="#02040a" stop-opacity="0.98" />
-              </radialGradient>
-            </defs>
+      <!-- ===================== RADAR ===================== -->
+      <section class="panel panel--radar" aria-label="Surface radar">
+        <header class="panel__title">
+          <span class="panel__dot"></span>
+          <span>RADAR</span>
+        </header>
 
-            <circle cx="50" cy="50" r="48.5" fill="url(#roseGlass)" />
-            <circle class="rose__ring rose__ring--outer" cx="50" cy="50" r="48" />
-            <circle class="rose__ring" cx="50" cy="50" r="41" />
-            <circle class="rose__ring rose__ring--faint" cx="50" cy="50" r="30" />
-
-            <!-- graduations every 15 degrees -->
-            <g class="rose__ticks">
-              <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(0 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(15 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(30 50 50)" />
-              <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(45 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(60 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(75 50 50)" />
-              <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(90 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(105 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(120 50 50)" />
-              <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(135 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(150 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(165 50 50)" />
-              <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(180 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(195 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(210 50 50)" />
-              <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(225 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(240 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(255 50 50)" />
-              <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(270 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(285 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(300 50 50)" />
-              <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(315 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(330 50 50)" />
-              <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(345 50 50)" />
-            </g>
-
-            <!-- cardinal labels -->
-            <g class="rose__labels" text-anchor="middle" dominant-baseline="central">
-              <text class="rose__label rose__label--n" x="50" y="36.5">N</text>
-              <text class="rose__label" x="63.5" y="50">E</text>
-              <text class="rose__label" x="50" y="63.5">S</text>
-              <text class="rose__label" x="36.5" y="50">W</text>
-            </g>
-          </svg>
-
-          <!-- Rotating needle. hud.ts sets style.transform = rotate(<heading>deg) -->
-          <div class="compass__needle" id="hud-compass-needle">
-            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-              <polygon class="needle__north" points="50,13 55.5,50 50,56 44.5,50" />
-              <polygon class="needle__south" points="50,87 44.5,50 50,44 55.5,50" />
-              <circle class="needle__hub" cx="50" cy="50" r="4.2" />
-              <circle class="needle__hub-core" cx="50" cy="50" r="1.5" />
-            </svg>
-          </div>
-
-          <!-- Fixed lubber line on the bezel -->
-          <div class="compass__lubber"></div>
+        <!-- radar.ts repaints this every frame. Bow-up: own ship is always at
+             dead centre pointing at 12 o'clock, and the magenta pip on the rim
+             is north. -->
+        <div class="radar">
+          <canvas class="radar__scope" id="hud-radar" aria-hidden="true"></canvas>
         </div>
 
-        <div class="compass__readout">
-          <span class="compass__heading" id="hud-heading">000&deg;</span>
-          <span class="compass__hdglabel">HDG</span>
+        <div class="radar__readout">
+          <span class="hdg__value" id="hud-heading">000&deg;</span>
+          <span class="hdg__label">HDG</span>
+          <span class="radar__range" id="hud-radar-range">RNG</span>
         </div>
       </section>
 
@@ -129,7 +69,81 @@
           <span class="dbtn__glyph">&#9664;</span>
           <span class="dbtn__label">Port</span>
         </button>
-        <div class="dpad__hub"><span class="dpad__hub-ring"></span></div>
+        <!-- The hole in the middle of the pad is the compass bezel. -->
+        <div class="dpad__hub">
+          <div class="compass" aria-hidden="true">
+            <!-- Fixed rose: rings, graduations, cardinal letters -->
+            <svg
+              class="compass__rose"
+              viewBox="0 0 100 100"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+              focusable="false"
+            >
+              <defs>
+                <radialGradient id="roseGlass" cx="50%" cy="34%" r="76%">
+                  <stop offset="0%" stop-color="#0e2536" stop-opacity="0.95" />
+                  <stop offset="62%" stop-color="#050b14" stop-opacity="0.95" />
+                  <stop offset="100%" stop-color="#02040a" stop-opacity="0.98" />
+                </radialGradient>
+              </defs>
+
+              <circle cx="50" cy="50" r="48.5" fill="url(#roseGlass)" />
+              <circle class="rose__ring rose__ring--outer" cx="50" cy="50" r="48" />
+              <circle class="rose__ring" cx="50" cy="50" r="41" />
+              <circle class="rose__ring rose__ring--faint" cx="50" cy="50" r="30" />
+
+              <!-- graduations every 15 degrees -->
+              <g class="rose__ticks">
+                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(0 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(15 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(30 50 50)" />
+                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(45 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(60 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(75 50 50)" />
+                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(90 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(105 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(120 50 50)" />
+                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(135 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(150 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(165 50 50)" />
+                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(180 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(195 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(210 50 50)" />
+                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(225 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(240 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(255 50 50)" />
+                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(270 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(285 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(300 50 50)" />
+                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(315 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(330 50 50)" />
+                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(345 50 50)" />
+              </g>
+
+              <!-- cardinal labels -->
+              <g class="rose__labels" text-anchor="middle" dominant-baseline="central">
+                <text class="rose__label rose__label--n" x="50" y="36.5">N</text>
+                <text class="rose__label" x="63.5" y="50">E</text>
+                <text class="rose__label" x="50" y="63.5">S</text>
+                <text class="rose__label" x="36.5" y="50">W</text>
+              </g>
+            </svg>
+
+            <!-- Rotating needle. hud.ts sets style.transform = rotate(<heading>deg) -->
+            <div class="compass__needle" id="hud-compass-needle">
+              <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+                <polygon class="needle__north" points="50,13 55.5,50 50,56 44.5,50" />
+                <polygon class="needle__south" points="50,87 44.5,50 50,44 55.5,50" />
+                <circle class="needle__hub" cx="50" cy="50" r="4.2" />
+                <circle class="needle__hub-core" cx="50" cy="50" r="1.5" />
+              </svg>
+            </div>
+
+            <!-- Fixed lubber line on the bezel -->
+            <div class="compass__lubber"></div>
+          </div>
+        </div>
         <button id="btn-right" class="dbtn dbtn--right" type="button" aria-label="Turn to starboard">
           <span class="dbtn__glyph">&#9654;</span>
           <span class="dbtn__label">Starboard</span>

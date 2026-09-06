@@ -7,9 +7,19 @@ export interface Sky {
   update(dt: number, env: WorldEnv): void;
 }
 
+/**
+ * Height of the rim glow shell, as a multiple of GLOBE_RADIUS.
+ *
+ * It has to sit above everything the world puts in the sky, or that thing
+ * appears outside the planet's own air at the limb. The binding constraint is
+ * the cloud deck in `clouds.ts`, which tops out at SHELL_BASE + SHELL_DEPTH =
+ * 1.060; this clears it.
+ */
+const ATMOSPHERE_SCALE = 1.068;
+
 /** Fresnel rim glow shell around the planet. */
 function buildAtmosphere(): THREE.Mesh {
-  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS * 1.055, 96, 64);
+  const geometry = new THREE.SphereGeometry(GLOBE_RADIUS * ATMOSPHERE_SCALE, 96, 64);
 
   const vertexShader = [
     'varying vec3 vNormalV;',

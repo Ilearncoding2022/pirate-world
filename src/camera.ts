@@ -9,12 +9,24 @@ import { GLOBE_RADIUS } from './geo';
 /** Matches ship.ts's HULL_OFFSET so the camera targets the actual hull. */
 const SHIP_ALTITUDE = 0.6;
 
-/** Closest framing: tight over-the-shoulder chase view. */
+/**
+ * Closest framing: tight over-the-shoulder chase view.
+ *
+ * Ship-scale, so these are absolute and do not move with GLOBE_RADIUS. The
+ * hull should look the same up close on any size of world.
+ */
 const NEAR_DISTANCE = 21;
 const NEAR_HEIGHT = 9.5;
-/** Furthest framing: high, near-orbital look at the planet. */
-const FAR_DISTANCE = 90;
-const FAR_HEIGHT = 55;
+/**
+ * Furthest framing: high, near-orbital look at the planet.
+ *
+ * World-scale: pulling back a fixed 90 units from a globe twice the size would
+ * frame half as much of it and lose the orbital shot entirely. Tracking the
+ * radius keeps the same view of the planet, which now holds four times the
+ * surface -- and the ship, four times smaller in it.
+ */
+const FAR_DISTANCE = GLOBE_RADIUS * 0.9;
+const FAR_HEIGHT = GLOBE_RADIUS * 0.55;
 
 /** How far ahead of the bow the camera aims, and how far above the deck. */
 const LOOK_AHEAD = 6;
@@ -65,8 +77,16 @@ export function createFollowCamera(aspect: number): FollowCamera {
   const smoothTarget = new Vector3();
   const smoothUp = new Vector3(0, 1, 0);
 
-  /** 0 = closest framing, 1 = furthest. */
-  let zoomTarget = 0.18;
+  /**
+   * 0 = closest framing, 1 = furthest.
+   *
+   * The opening shot is a fixed *distance*, not a fixed fraction of the range:
+   * the far end tracks GLOBE_RADIUS, so holding the fraction would have pushed
+   * the camera back with the planet and quietly reframed the game. 0.08 of
+   * 21..GLOBE_RADIUS*0.9 is the same 33 units back and 17 up the game opened
+   * on before the world grew.
+   */
+  let zoomTarget = 0.08;
   let zoom = zoomTarget;
   let initialized = false;
 

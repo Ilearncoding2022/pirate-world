@@ -21,11 +21,21 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+/**
+ * Where the player starts.
+ *
+ * Single source of truth: `main.ts` places the ship here, the clearing below
+ * guarantees the water under it, and `waterbodies.ts` floods the ocean out
+ * from it to decide what the ship can ever reach.
+ */
+export const SPAWN_LAT_DEG = 0;
+export const SPAWN_LON_DEG = 0;
+
 /** Open-water radius (in radians of arc) guaranteed around the spawn point. */
 const SPAWN_CLEAR_RADIANS = 0.16;
 const SPAWN_FADE_RADIANS = 0.34;
 
-const _spawn = latLonToDir(0, 0, new Vector3());
+const _spawn = latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG, new Vector3());
 const _probe = new Vector3();
 
 export function createTerrain(seed: number = DEFAULT_SEED): Terrain {

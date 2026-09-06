@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { WorldEnv } from './env';
+import { GLOBE_RADIUS } from './geo';
 
 export interface DayNight {
   /** Lights and any sun-following objects. Added to the world group. */
@@ -15,11 +16,29 @@ export interface DayNight {
 /**
  * Real seconds for one full orbit of the sun around the globe.
  *
- * Long enough that the terminator drifts rather than strobes, short enough
- * that a player sees a sunset without waiting for it. Four minutes fits a
- * dawn, a noon, a dusk and a midnight into one sitting.
+ * An hour: thirty minutes of day and thirty of night, for a ship sitting still
+ * on the equator. Away from the equator the split is uneven and drifts with
+ * the season, exactly as it does on Earth, because the sun's latitude wanders
+ * -- see AXIAL_TILT below.
+ *
+ * A moving ship gets a different day entirely, and gets it for free. The sun
+ * is placed in world space from elapsed time alone, and every shader decides
+ * day or night from `dot(surface normal, sunDirection)` at the point being
+ * drawn, so local time is a property of *where the ship is*, not of a clock it
+ * carries. Sail east, into the sunrise, and dawn arrives sooner; sail west and
+ * you chase the sunset and hold it. That is cross-timezone travel, falling out
+ * of the geometry rather than being modelled.
+ *
+ * One caveat worth knowing before retuning this. The terminator sweeps the
+ * ground at 2*PI*GLOBE_RADIUS / DAY_LENGTH, which here is 0.35 world units a
+ * second, while the ship does 20. The ship is about sixty times faster than
+ * the sun -- the reverse of Earth, where the ground beats a ship roughly forty
+ * to one -- so running west at speed does not merely stretch the day, it stops
+ * the sun outright, and running east collapses the hour into about a minute.
+ * Only three things move that ratio: a shorter day, a slower ship, or a larger
+ * GLOBE_RADIUS, which slows the ship in degrees without slowing the sun.
  */
-const DAY_LENGTH = 240;
+const DAY_LENGTH = 3600;
 
 /**
  * Days in one seasonal cycle. The subsolar latitude drifts on this much slower
@@ -33,7 +52,7 @@ const AXIAL_TILT = 0.41;
 const SEASON_PHASE = 0.95;
 
 /** How far out the key light sits. Directional, so only the direction matters. */
-const SUN_DISTANCE = 600;
+const SUN_DISTANCE = GLOBE_RADIUS * 6;
 
 /* Sun tint ramp, from a sun on the horizon up to a sun overhead. */
 const HORIZON_TINT = new THREE.Color('#ff7c3c');

@@ -1,15 +1,21 @@
 import * as THREE from 'three';
 import type { Terrain } from './types';
 import type { WorldEnv } from './env';
+import type { HeightMap } from './heightmap';
 import { GLOBE_RADIUS } from './geo';
 
-/** Outward displacement of the highest land. */
-export const MAX_LAND_RELIEF = 5.0;
+/**
+ * Outward displacement of the highest land.
+ *
+ * World-scale, so it tracks GLOBE_RADIUS: 5% of the radius. Leaving it fixed
+ * while the globe grew would flatten every mountain range into a rise.
+ */
+export const MAX_LAND_RELIEF = GLOBE_RADIUS * 0.05;
 /**
  * Minimum lift of land above the water sphere. Keeps coastal faces from
  * z-fighting with the water surface, which sits at exactly GLOBE_RADIUS.
  */
-export const COAST_LIFT = 0.12;
+export const COAST_LIFT = GLOBE_RADIUS * 0.0012;
 /** Height band above sea level rendered as beach. */
 const BEACH_BAND = 0.055;
 /** Faces whose vertices are all below this are dropped from the land mesh. */
@@ -34,7 +40,7 @@ function colorForLand(h: number, seaLevel: number, out: THREE.Color): THREE.Colo
 }
 
 /** How far below the water surface a fully-submerged kept vertex is pushed. */
-const SHORE_DIP = 2.2;
+const SHORE_DIP = GLOBE_RADIUS * 0.022;
 
 /**
  * Radius at which a vertex of the land mesh sits, given its terrain height.
@@ -65,9 +71,27 @@ export interface Land {
  * discarded, so only continents and islands remain. Everything below is left to
  * the water surface. PolyhedronGeometry is non-indexed, which makes the face
  * filter a simple stride-9 walk over the position buffer.
+ *
+ * Heights come from the shared height map rather than from `terrain.heightAt`.
+ * That is not only far cheaper -- a bilinear read against fifteen octaves of
+ * fBm, three times per face, half a million faces -- it is also more correct:
+ * the water shader reads the same texture, so land and sea agree on exactly
+ * where the coastline is instead of differing by whatever the raster lost. The
+ * map is finer than this mesh by a factor of three, so nothing is given up.
  */
-export function createLand(terrain: Terrain): Land {
-  const source = new THREE.IcosahedronGeometry(GLOBE_RADIUS, 96);
+/**
+ * Icosphere subdivision.
+ *
+ * Sized so a triangle stays about 2.2 world units across -- a little under half
+ * the ship's length -- which is the low-poly look the world is built around.
+ * It is quadratic in cost, both in triangles and in the terrain samples taken
+ * to build them, so it tracks the radius rather than being fixed: at
+ * GLOBE_RADIUS 100 this is 96, the value the look was tuned at.
+ */
+const LAND_DETAIL = Math.round((96 * GLOBE_RADIUS) / 100);
+
+export function createLand(terrain: Terrain, heightMap: HeightMap): Land {
+  const source = new THREE.IcosahedronGeometry(GLOBE_RADIUS, LAND_DETAIL);
   const srcPos = source.attributes.position as THREE.BufferAttribute;
   const faceCount = srcPos.count / 3;
 
@@ -89,7 +113,7 @@ export function createLand(terrain: Terrain): Land {
     for (let k = 0; k < 3; k++) {
       const i = f * 3 + k;
       dir.fromBufferAttribute(srcPos, i).normalize();
-      const h = terrain.heightAt(dir);
+      const h = heightMap.sample(dir);
       vh[k] = h;
       vx[k] = dir.x;
       vy[k] = dir.y;
