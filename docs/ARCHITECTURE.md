@@ -36,6 +36,21 @@ These have bitten us once. Do not reinterpret them in a consumer.
   it is the one the wind is actually kept as; `bearing` is derived from it.
   Prefer the vector for anything geometric. Same rule as `ShipState.forward`
   against `ShipState.heading`.
+- `Water.offsets` (and the `WaveOffsets` that `wavefield.ts` and `ship.ts`
+  read) are in **direction space** — already divided by `GLOBE_RADIUS` —
+  never world units. `water.ts` integrates them that way so its shader can add
+  them straight to a unit direction; summing one with a world-unit quantity
+  means one of the two was not converted.
+- The wake map's texture (`wakemap.ts`) is **data, not colour**: R is foam
+  density, G is a signed height packed as `0.5 + h * WAKE_HEIGHT_SCALE`, B is
+  foam age, and the target's `colorSpace` is `THREE.NoColorSpace`. Never let
+  it pick up an sRGB encode going in or a decode coming out.
+- `reflection.ts`'s cube holds **sRGB-encoded** colour, because everything
+  rendered into it — stock materials via `postfx.ts`'s self-encode patch, the
+  beacons' and lights' own hand-written shaders — already encodes on the way
+  out. `waterreflect.ts` decodes with `pow(c, 2.2)` before mixing it into the
+  water's linear colour: the one sample in that shader that is not already
+  linear.
 
 ## World scale
 `GLOBE_RADIUS` in `geo.ts` is the one number that sets how big the world feels,
@@ -67,6 +82,39 @@ Two traps when changing it, both of which have bitten:
   tracks the radius so the orbital shot survives; its opening `zoomTarget` is
   therefore chosen to reproduce a fixed *distance*, not a fixed fraction.
 
+The wake, the sea's own displacement and the reflected sky add a dozen more
+files, and every constant in them still sorts into one of the two families
+above — with one addition: a few describe the pipeline rather than the world,
+and the split does not apply to them at all.
+
+- **World-scale, in the newer modules.** `waveconstants.ts`'s three
+  wavelengths (`SWELL_WAVELENGTH`, `WAVE_WAVELENGTH`, `CHOP_WAVELENGTH`) are
+  the numbers `water.ts` used to hold directly, converted through the same
+  `freq()` → 1/radian pattern, now shared with `wavefield.ts`'s CPU port so
+  the two can never numerically drift apart — the whole reason that module
+  exists. `terrainbake.ts`'s `BAKE_RELIEF_SCALE` (`GLOBE_RADIUS * 0.05`,
+  matching `land.ts`'s own `MAX_LAND_RELIEF`) and its two ray-march radii
+  (`AO_RADIUS_RADIANS`, `HORIZON_RADIUS_RADIANS`) are angular, exactly like
+  terrain noise. `reflection.ts`'s far plane (`GLOBE_RADIUS * 3`) tracks the
+  atmosphere shell it has to contain. `land.ts`'s mottling/striation
+  wavelengths go through that identical `freq()` conversion.
+- **Ship-scale, in the newer modules.** Everything the wake and the
+  displacement patch are built from: `wakeconstants.ts`'s whole shared
+  geometry, `wakemap.ts`'s map extent, camera height, near/far, and its
+  Kelvin-pattern and hump/churn constants, `waterpatch.ts`'s `PATCH_EXTENT`,
+  `waveconstants.ts`'s `DISPLACE_AMPLITUDE`, `wavefield.ts`'s
+  finite-difference step (mirroring `water.ts`'s own private `NORMAL_STEP`),
+  `ship.ts`'s hull-sample half-length and half-beam, and `waterreflect.ts`'s
+  neon-streak width and length. All absolute, all sized against the hull or a
+  fixed patch of sea, none of them growing if `GLOBE_RADIUS` does.
+- **Neither.** `quality.ts`'s whole table — a pixel-ratio cap, a bloom working
+  width, three render-target/vertex counts, a face count — and `layers.ts`'s
+  two layer indices are pipeline and wiring numbers: texel counts, a vertex
+  count, a bit index passed to `Object3D.layers`. None of them is a distance
+  or a frequency over the globe, so the two-family split above simply does
+  not apply to them; do not go looking for which family a `QualitySettings`
+  field belongs to.
+
 ## Ship dynamics
 Top speed is **not** the `MAX_FORWARD` clamp. Thrust and drag balance at
 `ACCEL / DRAG`, so that ratio is the real limit and the clamp only catches the
@@ -97,12 +145,74 @@ cleanly to zero with no throttle, so the ship coasts as before.
 
 The hull is drawn at `MODEL_SCALE` (0.65), exported from `ship.ts` because the
 wake is authored against the hull's own dimensions and has to shrink with it —
-`STERN_BACK`, `BOW_FORWARD` and `HALF_WIDTH_0` in `wake.ts` all carry the
-factor. `MODEL_WATERLINE_Y` is a model-space number, so `MODEL_MOUNT_Y` scales
-it before subtracting; skip that and the ship floats at the wrong depth. Scale
-is deliberately kept out of the motion constants: `BOB_AMPLITUDE`, the sway and
-the bank are absolute, so a smaller hull moves the same distance in the swell
-and therefore looks livelier in it.
+`STERN_BACK`, `BOW_FORWARD` and `HALF_WIDTH_0` in `wakeconstants.ts` all carry
+the factor. `MODEL_WATERLINE_Y` is a model-space number, so `MODEL_MOUNT_Y`
+scales it before subtracting; skip that and the ship floats at the wrong depth.
+Scale is deliberately kept out of the motion constants: `BOB_AMPLITUDE`, the
+sway and the bank are absolute, so a smaller hull moves the same distance in
+the swell and therefore looks livelier in it.
+
+`BOB_AMPLITUDE` is no longer what heaves the hull. It is a residual, run at
+30% of this amplitude, kept only so a dead calm — where `sampleWave`'s real
+signal is nearly flat — still breathes instead of freezing the hull dead
+still. The heave, pitch and roll a player actually sees under way are read
+off `wavefield.ts`'s `sampleWave` at the hull's centre and at bow/stern/
+port/starboard points scaled by `MODEL_SCALE`, low-pass filtered at
+`HULL_RESPONSE` so the hull settles onto a new reading rather than snapping
+to it — see **The wave field**.
+
+## The wave field
+`wavefield.ts` is a hand port of the GLSL `waveField` in `waterglsl.ts` — the
+swell and wave layers only, never chop, which stays fragment-side. `ship.ts`
+samples it (through `sampleWave`) to heave, pitch and roll the hull;
+`waterpatch.ts` pastes the identical GLSL chunk, rather than reimplementing
+it, to displace the visible sea near the ship. These have to read as one
+surface, because the whole point of the split is that the hull rides the sea
+the player actually sees.
+
+Every arithmetic step of the CPU port is rounded to float32 with
+`Math.fround`, deliberately, to match the shader's own `highp float`
+precision instead of running the smoother float64 arithmetic JS would
+otherwise use. This is not paranoia: `snoise`'s corner-rejection test
+(`h <= 0`) is a difference of near-cancelling terms that legitimately lands
+within double-precision epsilon of zero on a meaningful fraction of real
+inputs, and float64 and float32 arithmetic then round that near-zero tie to
+opposite signs — which flips which lattice corner's gradient contributes at
+all and swings the return value by a unit or more. Rounding every
+intermediate to float32, the same way the GPU already does, puts both sides
+on the same side of every such tie by construction.
+
+`tests/smoke/wave-parity.spec.ts` is what enforces this. It loads
+`?probe=wave` (`dev/probe.ts`), which renders the same GLSL chunk to a
+128×128 canvas and publishes the matching CPU grid on
+`window.__pirateWorld.probe`, and asserts every pixel agrees to within 3/255
+— measured, today, to within 1/255. **Changing one side of the port without
+the other is a silent desync**: nothing fails to compile and nothing throws,
+the hull just quietly stops riding the sea it looks like it is riding.
+
+`waterpatch.ts` raises the sea's actual geometry near the ship by up to
+`DISPLACE_AMPLITUDE` (0.3 world units) at a full gale, scaled by
+`uWaveIntensity` and faded to zero over the patch's outer skirt so it meets
+the undisplaced sphere without a seam. **Anything that used to sit at a fixed
+height above a flat sea has to clear that crest instead**, or heavy weather
+swallows it: the wake ribbon's lift went from 0.1 to 0.4, the bow spray's
+spawn lift from 0.12 to 0.42, and the berth ring's lift from 0.12 to 0.42 —
+each is `DISPLACE_AMPLITUDE` plus whatever the old flat-sea lift was already
+clearing. A new object authored at the old flat-sea height will clear the
+water in a calm-weather screenshot and vanish inside crests the first time
+someone tests it in a gale.
+
+A `WaterPlugin` (see **Shader notes**) can only be woven into the water
+shader while it is being assembled — `createWater`'s fragment shader is built
+once, from its `plugins` argument, at construction, and never touched again.
+`main.ts` therefore builds `wake` and `reflection`, and the plugins that read
+them (`waterwake.ts`, `waterreflect.ts`), *before* calling `createGlobe`,
+which is the only place `createWater` runs; registering a plugin afterwards
+would mean recompiling a shader that already exists. `waterpatch.ts`'s
+displacement patch is built the other way around from that same rule: inside
+`createGlobe`, *after* the plugins are woven in, because it clones the
+sphere's already-finished `fragmentShader` byte for byte — build it first and
+the clone is missing every plugin's hooks.
 
 ## The world environment
 `src/env.ts` defines `WorldEnv`: `sunDirection`, `sunColor`, `elapsed`, `timeOfDay`, `dayFactor`.
@@ -129,17 +239,23 @@ shader.
 |---|---|---|
 | `geo.ts` | `GLOBE_RADIUS`, `latLonToDir`, `dirToLatLon`, `tangentFrame`, `headingToForward`, `normalizeHeadingDeg` | conventions |
 | `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode`, `WindState` | interfaces only |
+| `quality.ts` | `QualityTier`, `QualitySettings`, `Quality`, `createQuality(search?)`, `QUALITY_STORAGE_KEY` | resolved once at startup (`?quality=` beats `localStorage` beats `'high'`); frozen, read-only table everything built after it treats as fixed; `reflectionSize`/`reflectionFacesPerFrame` of 0 means the reflection pass is absent, not idle |
+| `layers.ts` | `LAYER_DEFAULT`, `LAYER_REFLECTED` | the two `Object3D.layers` bit indices every rendering stream shares; wiring constants, not world- or ship-scale |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
-| `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once |
+| `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once; `aux`/`horizon` start `null` and are filled in later by `land.ts`'s startup bake (`terrainbake.ts`) |
 | `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts and the land/water ratio; `useLandMask` re-points collision at the culled raster |
 | `islets.ts` | `cullIslets(heightMap, seaLevel)`, `MIN_ISLAND_AREA` | sinks landmasses too small to see; runs once, before anything reads the map |
 | `waterbodies.ts` | `WaterBodies`, `createWaterBodies(heightMap, seaLevel, spawnDir)` | built once; ocean vs. inland mask, texture + CPU `sample` |
-| `land.ts` | `createLand(terrain, heightMap)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water |
+| `land.ts` | `createLand(terrain, heightMap)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water; `MeshStandardMaterial` extended with a chained `onBeforeCompile` (see **Post-processing**) that modulates the vertex-coloured base with per-pixel slope, curvature, wetness, noise, baked AO and a sun-tracking horizon shadow from `terrainbake.ts` |
+| `terrainbake.ts` | `bakeTerrain(heightMap, seaLevel)`, `bakeAmbientOcclusion`, `bakeHorizon`, `TerrainBake`, `BAKE_WIDTH`, `BAKE_HEIGHT` | startup-only ambient-occlusion and 8-azimuth horizon bake over a half-resolution copy of the shared height map; called from inside `createLand`, after `globe.ts`'s islet cull, so it never occludes for an island that is about to be sunk |
 | `noiseglsl.ts` | `NOISE_GLSL` | inlined Ashima/Gustavson simplex noise; `water.ts` and `land.ts` share this one copy |
+| `waveconstants.ts` | `SWELL_WAVELENGTH`, `WAVE_WAVELENGTH`, `CHOP_WAVELENGTH`, `AXIS_WAVE`, `AXIS_CHOP`, `DISPLACE_AMPLITUDE`, `freq`, `freqNumber`, `vec3Literal` | the one source both `waterglsl.ts` (GPU) and `wavefield.ts` (CPU) read, so the two wave fields can never numerically drift apart — see **The wave field** |
 | `waterglsl.ts` | `WATER_UNIFORMS`, `waterWavefield`, `waterDepth`, `WATER_LIGHTING_HEAD`/`_TAIL`, `waterFoam`, `WATER_FOAM_TAIL`, `WATER_OUTPUT` | the water fragment shader, as named chunks `water.ts` assembles; see **Shader notes** for the plugin hook seams between them |
-| `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective placeholder; body is currently the identity |
+| `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective blend toward the atmosphere colour, thickened at grazing angles and weakened with camera altitude, capped at `FOG_MAX_AMOUNT`; called from water and land |
 | `fog.ts` | `fogUniforms`, `updateFog(env)` | owns the three uniforms `applyAerial` reads; called from `globe.update` before water and land |
-| `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; see **Shader notes** for the plugin contract |
+| `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; exposes `offsets`, the three wave layers' integrated drift (direction-space, read-only), for `wavefield.ts`'s CPU port; see **Shader notes** for the plugin contract |
+| `wavefield.ts` | `snoise`, `sampleWave`, `waveHeight`, `waveNormalBasis`, `WaveOffsets`, `WaveSample` | float32-rounded CPU port of `waterglsl.ts`'s swell+wave `waveField`; `ship.ts` rides this, the player sees the GPU copy — see **The wave field** |
+| `waterpatch.ts` | `createWaterPatch(water, quality)`, `WaterPatch` | ship-following grid that actually displaces in the vertex shader, reusing the sphere's already-assembled fragment shader byte for byte; built after the water plugins are woven in |
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()` | atmosphere shell + starfield |
 | `daynight.ts` | `createDayNight()` | lights, writes `WorldEnv` |
@@ -149,11 +265,16 @@ shader.
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
 | `energy.ts` | `createEnergy(towns)` | burn / solar / dock charge; owns `EnergyState` |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE` | calm/event weather; owns `WindState`; probes the shared height map for the coast |
-| `wake.ts` | `createWake()` | ship wake and spray |
-| `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
-| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map |
-| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load |
-| `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
+| `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
+| `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
+| `wakemap.ts` | `createWakeMap(size, ribbonGeometry)`, `WakeMap`, `computeWakeFrame`, `createWakeFrame`, `projectToMapUV`, `WAKE_MAP_EXTENT`, `WAKE_HEIGHT_SCALE`, `WAKE_BREAKUP_GLSL` | renders the wake's foam/height/age into a small top-down render target every frame; see **Shader notes** for the channel layout |
+| `waterwake.ts` | `createWaterWakePlugin(wake)` | the `WaterPlugin` that samples `wakemap.ts`'s texture back into the water shader's `normal`/`foam`/`colour` hooks |
+| `reflection.ts` | `createReflection(quality)`, `Reflection`, `scheduleFaces` | low-res cube camera parked at the ship's waterline, round-robins `quality.reflectionFacesPerFrame` faces per frame; `texture` is `null` and the whole system absent, not idle, when `reflectionSize` is 0 |
+| `waterreflect.ts` | `createWaterReflectPlugin(cubeTexture)` | the `WaterPlugin` that mixes the decoded cube into `skyCol` and paints a fake hull-neon streak, since the hull itself cannot appear in its own reflection camera |
+| `postfx.ts` | `createPostFx(renderer, quality)`, `GpuFrameStats` | composer / bloom; `adopt(root)` for late materials; chains its sRGB self-encode `onBeforeCompile` after a material's own hook (see **Post-processing**); owns the optional GPU/CPU/draw-call timer toggled with Backquote |
+| `globe.ts` | `createGlobe(terrain, quality, waterPlugins?): { group, heightMap, waterBodies, towns, waveOffsets, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map; builds the displacement patch after the water plugins are woven into the shader |
+| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** |
+| `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
 | `hud.ts` | `createHud(wallet)` | compass needle, speed, wind, gold, power, and the dock's two buttons; heading and lat/long live on the radar panel |
@@ -165,6 +286,7 @@ shader.
 | `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
 | `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
+| `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `main.ts` | — | bootstrap and frame loop |
 
 ## Land / water split
@@ -272,11 +394,12 @@ Two more things follow from the stack and are easy to undo by accident:
 ```
 energy.update(dt, shipState, env)          // burn / solar / dock, on last frame's speed
 wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
-ship.update(dt, input, energyState, windState)  // thrust gated on energy.canThrust
+ship.update(dt, input, energyState, windState, globe.waveOffsets)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws
 camera.update(dt, shipState, input)
-globe.update(dt, env, wind.state, shipState, camera)  // daynight, fog, then water (reads wind), land, citylights, clouds, sky
+globe.update(dt, env, wind.state, shipState, camera)  // daynight, fog, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky
+reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
-wake.update(dt, shipState, env)
+wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
 hud.update(shipState, energyState, windState)
 radar.update(dt, shipState, windState)
 postFx.render(dt, scene, camera)
@@ -294,9 +417,9 @@ postFx.render(0, scene, camera)       // zero dt: freeze the frame, survive a re
 controls.endFrame()                   // zoomDelta must not accumulate under the card
 ```
 
-Everything else — wind, ship, camera, globe, docks, wake, radar — is skipped.
-See **Fishing** for why each of those five is in the list and what happens to
-the world while it runs.
+Everything else — wind, ship, camera, globe, reflection, docks, wake, radar —
+is skipped. See **Fishing** for why each of those five is in the list and what
+happens to the world while it runs.
 
 Power runs **before** the ship, so it charges for a frame of travel the ship has
 already made rather than one it might not be able to afford. `globe.update` is
@@ -304,13 +427,31 @@ what writes `env`, so the sun the solar panels see is one frame old too — 16 m
 of a 30-minute day.
 
 `globe.update` takes `shipState` and `camera` because two of the water's
-plugins (Phase 1 streams A and D) follow the ship: a wake map and a reflection
-cube, neither of which is available from `env` or `wind`. `globe.ts` forwards
-both straight through to `water.update`, which hands them to every plugin's
-own `update`; the sphere's own shading ignores them. `globe.update` also calls
-`fog.ts`'s `updateFog(env)` first, right after `dayNight.update`, so water and
-land sample this frame's fog colours rather than last frame's — see **Shader
-notes** for the plugin and fog contracts.
+plugins follow the ship: a wake map and a reflection cube, neither of which is
+available from `env` or `wind`. `globe.ts` forwards both straight through to
+`water.update`, which hands them to every plugin's own `update`; the sphere's
+own shading ignores them. `globe.update` also calls `fog.ts`'s `updateFog(env)`
+first, right after `dayNight.update`, so water and land sample this frame's
+fog colours rather than last frame's — see **Shader notes** for the plugin and
+fog contracts. `createGlobe` itself also takes `quality` (read by the
+displacement patch and forwarded to the plugins `main.ts` built) and the list
+of water plugins, built and passed in from `main.ts` rather than from inside
+`globe.ts` — see **The wave field** for why a plugin has to exist before
+`createGlobe` runs at all.
+
+`reflection.update` and the wake map's own fill (inside `wake.update`) both
+have to land before `postFx.render` draws the visible frame, and for the same
+reason: each renders into its own off-screen target — a cube, a small
+top-down RGBA8 map — that the water shader samples during that very draw. Run
+either after `postFx.render` and the *next* frame shows this frame's
+reflection and wake, one frame stale. Worse, both `reflection.ts` and
+`wakemap.ts` render by temporarily rebinding the renderer's active target;
+skip restoring it and the very next thing drawn — the whole visible game —
+renders into that off-screen target instead of the canvas, and the player
+sees black. `wake.update` fills its map *last* within itself, after `now` and
+every rib/spray value for the frame are final, rather than from an
+`onBeforeRender` callback, so the fill happens at one predictable point in the
+loop instead of at a moment tied to when Three happens to draw the ribbon.
 
 Wind is wedged **between** the two, and the order is load bearing in both
 directions. It runs after energy because a berth is shelter and `energy.ts`
@@ -380,15 +521,46 @@ appear far from any coastline.
 Uniform names are prefixed per plugin (`uWake…`, `uRefl…`, …) so two plugins
 sharing one shader can never collide.
 
+**The wake map's channel layout**, since `waterwake.ts` is the plugin that
+reads it: `wakemap.ts` renders into its own RGBA8 render target, cleared to
+`(0, 0.5, 0, 0)` — R is foam density (0–1), G is a signed surface-height
+offset packed as `0.5 + h * WAKE_HEIGHT_SCALE` (0.9), B is foam age (0–1, 0 =
+just laid near the ship, 1 = about to dissolve), A is unused. This is data,
+not colour: the target's `colorSpace` is `THREE.NoColorSpace`, nothing
+sRGB-encodes it going in and `waterwake.ts` does not decode it coming out.
+Its `normal` hook tilts `N` by a two-tap gradient of the height channel, its
+`foam` hook floors the shader's own foam mask under the map's foam channel
+(scaled by the same world-keyed `wakeBreakup` noise `wakemap.ts` paints with
+— pasted into both shaders verbatim so the two can never disagree about what
+"breakup" means), and its `colour` hook fades a cyan tint in near the stern
+as foam age approaches zero.
+
+**`WATER_DISPLACED`** is the `#define` `waterpatch.ts`'s material sets
+(`defines: { WATER_DISPLACED: 1 }`) on the fragment shader it clones byte for
+byte from the sphere. As things stand, no chunk in `waterglsl.ts` branches on
+it: the patch's normal is reconstructed by the same finite-difference
+tangent-plane code the sphere runs, sampled around the patch's own `vDir`
+(`normalize(displaced)`, not quite radial at the patch's edges). The define
+compiles and does nothing yet — it is the seam the vertex-side displacement
+was built against (`water.ts`'s own vertex shader carries a matching, equally
+empty `#ifdef WATER_DISPLACED` block), not a live branch.
+
 `fogglsl.ts` is the aerial-perspective **contract**: `applyAerial(col,
 worldPos, camPos, sunDir, dayFactor)` is called from the water's `colour`
-position (after any plugin `colour` hooks, before the sRGB encode) and,
-once `land.ts` calls it too, from the land shader. Its body is currently the
-identity (`return col;`); a later stream fills in the real blend. The three
-uniforms it reads (`uFogColorDay`, `uFogColorNight`, `uFogDensity`) are owned
-by `fog.ts`, which exposes them as one shared `fogUniforms` object — merged
-into every caller's material uniforms, so there is exactly one writer — and
-`updateFog(env)`, called from `globe.update` before water and land.
+position (after any plugin `colour` hooks, before the sRGB encode) and from
+the land shader's `<opaque_fragment>` injection. Its body blends `col` toward
+the atmosphere's own colour as distance grows, thickened at grazing angles
+(more air looking along the horizon than straight down) and weakened with the
+camera's own altitude above the local surface, capped at `FOG_MAX_AMOUNT`
+(0.15) so the exponential never washes the water's deep-colour ramp into a
+flat pale sheet. The three uniforms it reads (`uFogColorDay`, `uFogColorNight`,
+`uFogDensity`) are owned by `fog.ts`, which exposes them as one shared
+`fogUniforms` object — merged into every caller's material uniforms, so there
+is exactly one writer — and `updateFog(env)`, called from `globe.update`
+before water and land. `uFogDensity` is `2.0 / GLOBE_RADIUS` (world-scale):
+an earlier `0.8 / GLOBE_RADIUS` was tried and was too strong once combined
+with the grazing-angle term and no ceiling — `fog.ts`'s own comment has the
+arithmetic.
 
 ## Post-processing and colour management
 The frame goes through an `EffectComposer` in `postfx.ts`: render → bloom →
@@ -416,6 +588,63 @@ difference. A stock material added after the first frame is not patched by the
 scene walk — add it before the first `postFx.render`, or hand its subtree to
 `postFx.adopt(root)`, which is what `main.ts` does when the ship's glTF hull
 finishes loading.
+
+The self-encode patch used to `throw` the moment a material already carried
+an `onBeforeCompile` hook. It now **chains**: `land.ts` needs to add its own
+hook to the same `MeshStandardMaterial` this patch already targets (per-pixel
+slope, curvature, AO and horizon shadow — see the module ownership table), so
+the prior hook runs first, unchanged, and this patch's encode replacement
+runs after it. That is what makes `land.ts`'s `onBeforeCompile` legal at all.
+
+**The trap**: `customProgramCacheKey` has to stay unique per *combination* of
+hooks, not merely per patch. Three's own default cache key is
+`onBeforeCompile.toString()`, so `postfx.ts` captures it — before overwriting
+`onBeforeCompile` — and appends its own key onto it, rather than replacing it
+outright. Skip that capture, or read it after the swap, and every
+differently-hooked material collapses onto the same cache key regardless of
+what its shader actually contains. Two materials then share one compiled
+program, and one of them silently renders with the other's code: a bug that
+shows up as one material looking like a different one, not as a compile
+error or a console warning.
+
+## Quality tiers and the dev timing overlay
+`quality.ts` resolves one `QualityTier` — `'low' | 'medium' | 'high'` — once,
+at the top of `main.ts`, before anything below reads a row of its table:
+`?quality=` on the URL beats a stored `localStorage['pirate-world/quality']`
+choice beats the default of `'high'`. The result is frozen, so nothing built
+afterwards can drift its own copy out of step with the table it was read
+from.
+
+Every field is a pipeline/wiring number, not a world- or ship-scale one: a
+pixel-ratio ceiling, a bloom working-width cap, three render-target/vertex
+counts (`wakeMapSize`, `patchSegments`, `reflectionSize`), a face count
+(`reflectionFacesPerFrame`), and whether the water shader's fragment-side
+chop octave runs at all (`waveChop`). **`reflectionSize: 0`** (the `low`
+tier) means the reflection cube is **absent, not idle**: `reflection.ts`
+allocates no render target at all, its `texture` is `null`, and `main.ts`
+never builds `waterreflect.ts`'s plugin — so the water shader compiles with
+one texture sampler fewer rather than sampling a black cube every frame.
+
+The performance budget these tiers exist to protect drops features in a
+fixed order when a frame runs over it: reflection size, wake map size, patch
+segments, chop octave, pixel ratio cap. The owner moves a machine to a lower
+tier rather than cutting one feature by hand.
+
+`?quality=` or `?debug` on the URL also publishes
+`window.__pirateWorld = { quality }`, which is how the smoke tests (and any
+other query-driven check) confirm which tier actually loaded. An ordinary
+player's session sets neither parameter, so the hook never exists for them —
+`import.meta.env.MODE !== 'production'` would be the wrong guard here, since
+`vite preview` serves a genuine production build and the smoke test's
+`?quality=low` pass needs the hook under exactly that build.
+
+A rolling GPU ms / CPU ms / draw-call readout lives at the foot of the
+telemetry panel, fed by `postfx.ts`'s `EXT_disjoint_timer_query_webgl2`
+wrapper around the composer's render call. It is off by default — a disjoint
+timer query carries a real GPU cost — and toggled with **Backquote**:
+`main.ts`'s keydown listener flips both `postFx.setTimingEnabled` and
+`hud.setDevTimingVisible` together. When the extension is unavailable, or
+while the timer is off, the row prints `n/a` rather than a guessed number.
 
 ## Day, night, and travel
 `daynight.ts` places the sun in world space from elapsed time alone, and every
@@ -721,7 +950,7 @@ its own.
 
 | Number | Means | Who reads it |
 |---|---|---|
-| `ShipState.speed` | engine only, along the bow | the burn, turn rate, bob, sway, bank, `MAX_FORWARD` clamp, `STOP_EPSILON`, the solar test |
+| `ShipState.speed` | engine only, along the bow | the burn, turn rate, bank, `MAX_FORWARD` clamp, `STOP_EPSILON`, the solar test. Heave, pitch and roll no longer read it at all — they are `sampleWave` readings at the hull, driven by the wave field and the wind, not by the engine; see **The wave field** |
 | `ShipState.groundSpeed` | engine + wind, signed | the HUD's `SPD` row, the berth connect test |
 
 Two rules in `energy.ts` moved or deliberately did not:
