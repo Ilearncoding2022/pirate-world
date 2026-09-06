@@ -4,9 +4,36 @@ import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
 import { MAX_FORWARD, MODEL_SCALE } from './ship';
 
+/**
+ * Read-only introspection of the ribbon's ring buffer, for
+ * `tests/unit/wake-ring.test.ts`. Nothing the running game reads.
+ *
+ * Exists because the buffer's invariants (live count within capacity, the
+ * draw range staying a contiguous slice of the doubled index list, every
+ * rib's tangent staying non-zero) are exactly the kind of thing that breaks
+ * silently -- the ring keeps rendering *something* even when the bookkeeping
+ * has drifted -- so a regression test needs a way to look inside it that does
+ * not exist for any other caller.
+ */
+export interface WakeDebug {
+  /** Ribs currently alive in the ring, 0..RIB_CAPACITY. */
+  readonly liveRibs: number;
+  /** Ring-buffer slot of the most recently laid rib. */
+  readonly head: number;
+  /** The ribbon geometry's current `drawRange`, as `setDrawRange` left it. */
+  readonly drawRange: { start: number; count: number };
+  /**
+   * The ribbon's `aRight` attribute array: one tangent vector, repeated
+   * across a rib's vertices. Read-only in spirit -- nothing in this module
+   * writes it back.
+   */
+  readonly aRight: Float32Array;
+}
+
 export interface Wake {
   object: THREE.Object3D;
   update(dt: number, ship: ShipState, env: WorldEnv): void;
+  readonly debug: WakeDebug;
 }
 
 /* ------------------------------------------------------------------ */
@@ -593,5 +620,20 @@ export function createWake(): Wake {
     sprayU.uPixelScale.value = window.innerHeight * Math.min(window.devicePixelRatio, 2) * 0.5;
   }
 
-  return { object, update };
+  const debug: WakeDebug = {
+    get liveRibs() {
+      return liveRibs;
+    },
+    get head() {
+      return head;
+    },
+    get drawRange() {
+      return ribbonGeo.drawRange;
+    },
+    get aRight() {
+      return ribbonRight;
+    },
+  };
+
+  return { object, update, debug };
 }

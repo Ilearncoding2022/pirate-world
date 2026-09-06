@@ -1,0 +1,13 @@
+{
+  "seed": 1337,
+  "heightMapWidth": 2048,
+  "heightMapHeight": 1024,
+  "landFraction": 0.23524188995361328,
+  "lakeFraction": 0.0066391738692890825,
+  "townCount": 57,
+  "dockCount": 57,
+  "allDocksNonNull": true,
+  "waterBodyCount": 103,
+  "islandsBefore": 253,
+  "islandsRemoved": 160
+}

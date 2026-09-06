@@ -6,12 +6,20 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:smoke": "playwright test",
+    "test:all": "npm run build && npm test && npm run test:smoke",
+    "golden:update": "vitest run --config tests/fixtures/vitest.config.ts"
   },
   "devDependencies": {
+    "@types/pngjs": "^6.0.5",
     "@types/three": "^0.182.0",
+    "playwright": "^1.63.0",
+    "pngjs": "^7.0.0",
     "typescript": "~6.0.2",
-    "vite": "^8.2.2"
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3",

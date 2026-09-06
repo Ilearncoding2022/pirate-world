@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Playwright smoke-test screenshots -- artefacts for the owner to look at,
+# never assertions, and never committed.
+tests/out/
+# Playwright's own run bookkeeping (traces, .last-run.json), separate from
+# tests/out/ above.
+test-results/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
