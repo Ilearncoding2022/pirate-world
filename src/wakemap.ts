@@ -1,9 +1,17 @@
 import * as THREE from 'three';
 import type { ShipState } from './types';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
-import { MODEL_SCALE, MAX_FORWARD } from './ship';
+import { MAX_FORWARD } from './ship';
 import { NOISE_GLSL } from './noiseglsl';
 import { LAYER_DEFAULT } from './layers';
+import {
+  BOW_FORWARD,
+  HALF_WIDTH_0,
+  SPREAD_RATE,
+  STERN_BACK,
+  WAKE_LIFE,
+  WAKE_RADIUS,
+} from './wakeconstants';
 
 /**
  * wakemap.ts -- the ship's wake as an input to the water shader.
@@ -86,27 +94,24 @@ export const WAKE_HEIGHT_SCALE = 0.9;
 const WAKE_FOAM_WAVELENGTH = 3.2;
 
 /*
- * The next three mirror wake.ts's SURFACE_LIFT/WAKE_RADIUS, HALF_WIDTH_0 and
- * SPREAD_RATE exactly, so the map-only ribbon material traces the identical
- * footprint the on-screen ribbon does even though its fragment shader is
- * different. Duplicated rather than imported: wake.ts already imports
- * `createWakeMap` from this file, and importing these back would make the
- * two modules a cycle. Keep them in sync by hand if wake.ts's values change.
+ * The map-only ribbon traces the identical footprint the on-screen ribbon
+ * does, even though its fragment shader is different, so it reads the same
+ * four numbers from `wakeconstants.ts` rather than restating them. That module
+ * exists precisely so these cannot drift: `wake.ts` imports `createWakeMap`
+ * from this file, so this file cannot import back through it.
  */
-const RIBBON_MAP_RADIUS = GLOBE_RADIUS + 0.1;
-const RIBBON_MAP_HALF_WIDTH = 1.15 * MODEL_SCALE;
-const RIBBON_MAP_SPREAD = 1.95;
-/** Seconds from a rib being laid to it having completely dissolved; mirrors wake.ts's WAKE_LIFE. */
-const RIBBON_MAP_LIFE = 4.0;
+const RIBBON_MAP_RADIUS = WAKE_RADIUS;
+const RIBBON_MAP_HALF_WIDTH = HALF_WIDTH_0;
+const RIBBON_MAP_SPREAD = SPREAD_RATE;
+const RIBBON_MAP_LIFE = WAKE_LIFE;
 
 /**
- * Hull-relative anchors for the bow hump and stern trough, world units.
- * Mirror wake.ts's BOW_FORWARD/STERN_BACK (same duplication reasoning as
- * above): authored against the hull's own half-length and carried by
- * MODEL_SCALE, so a hull rescale moves the hump and the trough with it.
+ * Hull-relative anchors for the bow hump and stern trough, world units. The
+ * same two points the foam is thrown from, so the hump sits at the stem and
+ * the trough at the transom however the hull is rescaled.
  */
-const HULL_BOW_ANCHOR = 2.5 * MODEL_SCALE;
-const HULL_STERN_ANCHOR = 2.3 * MODEL_SCALE;
+const HULL_BOW_ANCHOR = BOW_FORWARD;
+const HULL_STERN_ANCHOR = STERN_BACK;
 
 /** Kelvin pattern transverse wavelength at MAX_FORWARD, world units; runs with speed^2 below. */
 const KELVIN_WAVELENGTH = 2.6;

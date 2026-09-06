@@ -2,7 +2,17 @@ import * as THREE from 'three';
 import type { ShipState } from './types';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
-import { MAX_FORWARD, MODEL_SCALE } from './ship';
+import { MAX_FORWARD } from './ship';
+// The wake's shared geometry lives in its own module because `wakemap.ts`
+// needs the same numbers and cannot import them back through this file.
+import {
+  BOW_FORWARD,
+  HALF_WIDTH_0,
+  SPREAD_RATE,
+  STERN_BACK,
+  WAKE_LIFE,
+  WAKE_RADIUS,
+} from './wakeconstants';
 import { createWakeMap } from './wakemap';
 import type { WakeMap } from './wakemap';
 
@@ -71,51 +81,14 @@ const LINK_INDICES = (RIB_VERTS - 1) * 6;
 
 /** Surface distance the ship must cover before a new rib is laid down. */
 const RIB_SPACING = 0.34;
-/** Seconds from laying a rib to it having completely dissolved. */
-const WAKE_LIFE = 4.0;
 /** A jump bigger than this (reverse, a long coast) splits the ribbon. */
 const BREAK_GAP = 2.5;
 
 /** Below this the ship leaves no wake at all. Reverse (negative) never does. */
 const MIN_WAKE_SPEED = 1.2;
 
-/*
- * Where the foam is thrown, relative to the ship's origin.
- *
- * Authored against the hull's own half-length, so they are multiplied by the
- * same MODEL_SCALE the hull is drawn at. Left at full size against a shrunken
- * ship the wake starts a whole boat-length astern of the transom and the bow
- * spray erupts out of open water ahead of the stem -- the most visible way
- * there is to get a scale change wrong.
- */
 
-/** Distance astern of the ship origin where the foam starts. Hull half-length is 2.5 unscaled. */
-const STERN_BACK = 2.3 * MODEL_SCALE;
-/** Distance forward of the ship origin where bow spray is thrown. */
-const BOW_FORWARD = 2.5 * MODEL_SCALE;
 
-/**
- * Lift above the water sphere.
- *
- * The water mesh is a 256x128 sphere, so its facets sag
- * GLOBE_RADIUS * (1 - cos(PI / 256)) below the true surface -- about 0.015 at
- * the current radius. This has to clear that plus the ribbon's own (much
- * smaller) sag. Absolute rather than radius-scaled on purpose: the sag grows
- * with the radius but the segment counts grow with it too, so it stays put.
- * Invisible at any camera distance.
- */
-const SURFACE_LIFT = 0.1;
-const WAKE_RADIUS = GLOBE_RADIUS + SURFACE_LIFT;
-
-/**
- * Half-width of a freshly laid rib, and how fast a rib keeps spreading.
- *
- * The initial width is the hull's beam, so it scales with the hull. The spread
- * rate is the sea's answer to being parted and is left alone, so a smaller ship
- * cuts a narrower wake that opens out just as wide behind it.
- */
-const HALF_WIDTH_0 = 1.15 * MODEL_SCALE;
-const SPREAD_RATE = 1.95;
 
 /* Bow spray ---------------------------------------------------------- */
 
