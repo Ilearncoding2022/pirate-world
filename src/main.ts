@@ -27,11 +27,15 @@ const terrain = createTerrain(DEFAULT_SEED);
 const globe = createGlobe(terrain);
 scene.add(globe.group);
 
-const ship = createShip(terrain, {
-  latDeg: SPAWN_LAT_DEG,
-  lonDeg: SPAWN_LON_DEG,
-  headingDeg: 90,
-});
+const ship = createShip(
+  terrain,
+  {
+    latDeg: SPAWN_LAT_DEG,
+    lonDeg: SPAWN_LON_DEG,
+    headingDeg: 90,
+  },
+  renderer.capabilities.getMaxAnisotropy(),
+);
 scene.add(ship.object);
 
 const wake = createWake();

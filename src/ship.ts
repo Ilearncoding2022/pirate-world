@@ -16,6 +16,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { BufferGeometry, Material, Object3D } from 'three';
 import type { InputState, ShipState, Terrain } from './types';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
+import { createShipFx } from './shipfx';
+import type { ShipFx } from './shipfx';
 import shipModelUrl from '../assets/pirateship_beginner.glb?url';
 
 /* ------------------------------------------------------------------ */
@@ -293,14 +295,26 @@ function disposeTree(root: Object3D): void {
  * The glTF is authored to this module's axis convention already (see the
  * module docstring in `tools/build_ship.py`), so it needs no rotation and no
  * scaling -- only the vertical mount that puts its waterline on the sea.
+ *
+ * `shipfx.ts` then takes the loaded model over: it sharpens the tiled maps and
+ * claims the nodes the build script kept separate for the game to animate. That
+ * has to happen here, before `ready` resolves, because `main.ts` hands the
+ * model to the post-processing chain on that promise and the materials must be
+ * final by then.
  */
-function loadHull(object: Group, standIn: Group): Promise<void> {
+function loadHull(
+  object: Group,
+  standIn: Group,
+  maxAnisotropy: number,
+  onFx: (fx: ShipFx) => void,
+): Promise<void> {
   return new GLTFLoader()
     .loadAsync(shipModelUrl)
     .then((gltf) => {
       const model = gltf.scene;
       model.name = 'ship-hull';
       model.position.y = MODEL_MOUNT_Y;
+      onFx(createShipFx(model, maxAnisotropy));
       object.add(model);
       object.remove(standIn);
       disposeTree(standIn);
@@ -311,9 +325,16 @@ function loadHull(object: Group, standIn: Group): Promise<void> {
     });
 }
 
+/**
+ * @param maxAnisotropy the renderer's `capabilities.getMaxAnisotropy()`, passed
+ *   in rather than read here because this module never sees the renderer. It is
+ *   what keeps the model's tiled deck and hull maps from mushing out at the
+ *   grazing angles the chase camera looks along.
+ */
 export function createShip(
   terrain: Terrain,
   start?: { latDeg: number; lonDeg: number; headingDeg?: number },
+  maxAnisotropy = 1,
 ): Ship {
   const startLat = start?.latDeg ?? 0;
   const startLon = start?.lonDeg ?? 0;
@@ -323,7 +344,12 @@ export function createShip(
   object.name = 'ship';
   const standIn = buildStandInHull();
   object.add(standIn);
-  const ready = loadHull(object, standIn);
+  // Null until the glTF lands, and stays null if the load fails -- the stand-in
+  // has none of the parts it drives.
+  let fx: ShipFx | null = null;
+  const ready = loadHull(object, standIn, maxAnisotropy, (loaded) => {
+    fx = loaded;
+  });
 
   const state: MutableShipState = {
     position: latLonToDir(startLat, startLon).normalize(),
@@ -471,10 +497,14 @@ export function createShip(
     refreshForward(); // forward must match the committed position
 
     // ---- Idle motion ------------------------------------------------------
-    const bobAmp = BOB_AMPLITUDE * (0.5 + 0.5 * clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1));
+    const driveFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
+    const bobAmp = BOB_AMPLITUDE * (0.5 + 0.5 * driveFrac);
     bob = Math.sin(elapsed * 1.6) * bobAmp;
 
     applyTransform();
+
+    // ---- Sail, flag and neon, on the committed speed ----------------------
+    fx?.update(dt, driveFrac, (input.forward ? 1 : 0) - (input.backward ? 1 : 0));
   }
 
   // Place the ship correctly before the first frame is drawn.

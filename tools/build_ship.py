@@ -8,7 +8,7 @@ Outputs:
     assets/pirateship_beginner.glb          the model
     assets/pirateship_beginner_preview.png  3/4 rear view - the game's camera
     assets/pirateship_beginner_side.png     side elevation
-    assets/pirateship_beginner_detail.png   close on the transom
+    assets/pirateship_beginner_detail.png   close on the deck
 
 Axis convention. Blender is Z-up; the glTF exporter maps Blender (x, y, z) onto
 glTF (x, z, -y). So Blender +Z becomes glTF +Y (up, as wanted) but Blender -Y
@@ -18,14 +18,22 @@ root 180 degrees about Z before export. That is a rotation, not a mirror, so the
 ship keeps its handedness and lands on ship.ts's convention exactly: bow -Z,
 up +Y, starboard +X. Hull spans y -2.4 (bow) .. +2.6 (transom).
 
-Detail level. Every part is smooth-shaded by angle and carries a bevel, so edges
-catch a specular highlight instead of dying at a hard 90 degrees - that, far more
-than raw triangle count, is what separates this from a blocky first pass. The
-QUALITY knobs below scale the whole model; halve them for a cheap LOD.
+Three things carry the detail, in order of how much they matter:
+
+1. Shading. Every part is smooth-shaded by angle and beveled, so edges catch a
+   specular highlight instead of dying at a hard 90 degrees.
+2. Texture. Procedural plank/metal/canvas maps from ship_textures.py, on real
+   UVs - lofted parts get analytic UVs so planks run fore-aft rather than in
+   whatever direction an automatic unwrap happened to pick.
+3. Geometry. Enough sections that curves read as curves, plus trim that rides
+   the hull surface via hull_point/hull_frame.
+
+The QUALITY knobs below scale the whole model; halve them for a cheap LOD.
 """
 
 import math
 import os
+import sys
 
 import bpy
 from mathutils import Vector
@@ -33,6 +41,10 @@ from mathutils import Vector
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 ASSETS = os.path.join(ROOT, "assets")
+
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import ship_textures as tex  # noqa: E402  (needs the sys.path line above)
 
 BOW_Y = -2.4
 STERN_Y = 2.6
@@ -48,7 +60,18 @@ QUALITY = {
     "bevel_width": 0.009,
     "bevel_segments": 3,
     "smooth_angle": math.radians(41),
+    "tex_wood": 512,
+    "tex_metal": 512,
+    "tex_sail": 768,
+    "tex_flag": 512,
 }
+
+# Parts kept as their own objects through the merge, because the game may want
+# to address them: the glows it can pulse, and the two cloth pieces.
+KEEP_SEPARATE = (
+    "thruster_flame", "porthole_glow", "pod_eye", "window_glow", "port_glow",
+    "capstan_core", "lantern_glow", "mainsail", "flag",
+)
 
 
 def reset_scene():
@@ -59,6 +82,7 @@ def reset_scene():
 
 
 def make_mat(name, color, roughness=0.8, metallic=0.0, emission=None, strength=0.0):
+    """Flat, untextured material - used for the neon emitters."""
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes["Principled BSDF"]
@@ -71,18 +95,96 @@ def make_mat(name, color, roughness=0.8, metallic=0.0, emission=None, strength=0
     return mat
 
 
+def tex_mat(name, base_img, rough_img=None, normal_img=None, metallic=0.0,
+            roughness=0.8, emissive_img=None, strength=0.0, scale=(1.0, 1.0),
+            normal_strength=1.0, double_sided=False):
+    """Textured material.
+
+    `scale` drives a Mapping node, which the glTF exporter writes out as
+    KHR_texture_transform - three.js honours it, so tiling stays a material
+    setting rather than something baked into every UV.
+    """
+    mat = bpy.data.materials.new(name)
+    mat.use_nodes = True
+    nt = mat.node_tree
+    bsdf = nt.nodes["Principled BSDF"]
+    bsdf.inputs["Metallic"].default_value = metallic
+    bsdf.inputs["Roughness"].default_value = roughness
+    mat.use_backface_culling = not double_sided
+
+    uv = nt.nodes.new("ShaderNodeUVMap")
+    uv.uv_map = "UVMap"
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (scale[0], scale[1], 1.0)
+    nt.links.new(uv.outputs["UV"], mapping.inputs["Vector"])
+
+    def image_node(img):
+        node = nt.nodes.new("ShaderNodeTexImage")
+        node.image = img
+        nt.links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+        return node
+
+    nt.links.new(image_node(base_img).outputs["Color"], bsdf.inputs["Base Color"])
+    if rough_img is not None:
+        nt.links.new(image_node(rough_img).outputs["Color"], bsdf.inputs["Roughness"])
+    if normal_img is not None:
+        nmap = nt.nodes.new("ShaderNodeNormalMap")
+        nmap.inputs["Strength"].default_value = normal_strength
+        nt.links.new(image_node(normal_img).outputs["Color"], nmap.inputs["Color"])
+        nt.links.new(nmap.outputs["Normal"], bsdf.inputs["Normal"])
+    if emissive_img is not None:
+        nt.links.new(image_node(emissive_img).outputs["Color"], bsdf.inputs["Emission Color"])
+        bsdf.inputs["Emission Strength"].default_value = strength
+    return mat
+
+
 def build_materials():
+    wood_size = QUALITY["tex_wood"]
+    metal_size = QUALITY["tex_metal"]
+
+    _, wood_rough, wood_normal = tex.wood_maps(wood_size, normal_size=256)
+    wood_arr = tex.wood_base_array(wood_size)
+    _, metal_rough, metal_normal = tex.metal_maps(metal_size, normal_size=256)
+    metal_arr = tex.metal_base_array(metal_size)
+    rope_base, rope_normal = tex.rope_maps(256)
+    sail_base, sail_emis, sail_normal = tex.sail_maps(QUALITY["tex_sail"], normal_size=256)
+    flag_base, flag_emis = tex.flag_maps(QUALITY["tex_flag"])
+
+    # One wood pass, one metal pass; the families differ only by tint, which
+    # keeps the GLB down to two shared normal/roughness pairs.
+    hull_base = tex.tinted("hull_base", wood_arr, (0.34, 0.20, 0.115))
+    seam_base = tex.tinted("hull_seam_base", wood_arr, (0.19, 0.105, 0.060))
+    deck_base = tex.tinted("deck_base", wood_arr, (0.62, 0.395, 0.205))
+    trim_base = tex.tinted("wood_trim_base", wood_arr, (0.48, 0.290, 0.150))
+    brass_base = tex.tinted("brass_base", metal_arr, (0.86, 0.560, 0.165))
+    brass_dark_base = tex.tinted("brass_dark_base", metal_arr, (0.45, 0.265, 0.085))
+    iron_base = tex.tinted("iron_base", metal_arr, (0.135, 0.130, 0.150))
+
+    def wood(name, img, scale, double_sided=False):
+        return tex_mat(name, img, wood_rough, wood_normal, scale=scale, normal_strength=0.9,
+                       double_sided=double_sided)
+
+    def metal(name, img, scale, metallic=0.85):
+        return tex_mat(name, img, metal_rough, metal_normal, metallic=metallic,
+                       scale=scale, normal_strength=0.6)
+
     return {
-        "hull": make_mat("hull_planks", (0.140, 0.080, 0.048), 0.85),
-        "hull_dark": make_mat("hull_seam", (0.070, 0.038, 0.022), 0.90),
-        "deck": make_mat("deck_planks", (0.300, 0.180, 0.092), 0.88),
-        "wood": make_mat("wood_trim", (0.230, 0.135, 0.068), 0.82),
-        "brass": make_mat("brass", (0.60, 0.375, 0.105), 0.30, 0.80),
-        "brass_dark": make_mat("brass_dark", (0.32, 0.185, 0.058), 0.44, 0.75),
-        "iron": make_mat("iron", (0.055, 0.052, 0.058), 0.55, 0.85),
-        "rope": make_mat("rope", (0.235, 0.180, 0.105), 0.95),
-        "sail": make_mat("sail_cloth", (0.165, 0.145, 0.290), 0.95),
-        "flag": make_mat("flag_cloth", (0.045, 0.032, 0.105), 0.95),
+        # Double-sided: the follow camera looks down past the rail into the
+        # hull, and a culled backface shows the sky through the ship.
+        "hull": wood("hull_planks", hull_base, (3.0, 2.0), double_sided=True),
+        "hull_dark": wood("hull_seam", seam_base, (6.0, 1.0)),
+        "deck": wood("deck_planks", deck_base, (2.0, 0.4)),
+        "wood": wood("wood_trim", trim_base, (1.6, 1.6)),
+        "brass": metal("brass", brass_base, (1.4, 1.4)),
+        "brass_dark": metal("brass_dark", brass_dark_base, (1.4, 1.4)),
+        "iron": metal("iron", iron_base, (1.2, 1.2), metallic=0.9),
+        "rope": tex_mat("rope", rope_base, None, rope_normal, roughness=0.95,
+                        scale=(6.0, 1.0), normal_strength=0.8),
+        "sail": tex_mat("sail_cloth", sail_base, None, sail_normal, roughness=0.92,
+                        emissive_img=sail_emis, strength=2.2, normal_strength=0.5,
+                        double_sided=True),
+        "flag": tex_mat("flag_cloth", flag_base, None, None, roughness=0.95,
+                        emissive_img=flag_emis, strength=2.4, double_sided=True),
         "cyan": make_mat("neon_cyan", (0.02, 0.09, 0.11), 0.35, 0.1, (0.10, 0.72, 1.0), 2.6),
         "violet": make_mat("neon_violet", (0.09, 0.02, 0.10), 0.35, 0.1, (0.62, 0.20, 1.0), 2.2),
         "lime": make_mat("neon_lime", (0.05, 0.10, 0.02), 0.35, 0.1, (0.48, 1.0, 0.16), 2.6),
@@ -121,33 +223,44 @@ def finish(obj, bevel=True, width=None, segments=None):
     return obj
 
 
-def new_obj(name, verts, faces, mat, bevel=True, width=None):
+def new_obj(name, verts, faces, mat, bevel=True, width=None, uvs=None):
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(verts, [], faces)
     mesh.validate()
     mesh.update()
     mesh.materials.append(mat)
+    if uvs is not None:
+        layer = mesh.uv_layers.new(name="UVMap")
+        for poly in mesh.polygons:
+            for li in poly.loop_indices:
+                layer.data[li].uv = uvs[mesh.loops[li].vertex_index]
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
     return finish(obj, bevel, width)
 
 
-def loft(name, rings, mat, cap_start=True, cap_end=True, bevel=True, width=None):
-    """Skins a list of equal-length vertex rings into a tube."""
-    n = len(rings[0])
-    verts, faces = [], []
-    for ring in rings:
+def loft(name, rings, mat, cap_start=True, cap_end=True, bevel=True, width=None, uv=(1.0, 1.0)):
+    """Skins equal-length vertex rings into a tube, with analytic UVs.
+
+    U follows the length of the loft and V wraps the section, so a plank texture
+    laid on the hull runs fore-and-aft the way real planking does.
+    """
+    n, stations = len(rings[0]), len(rings)
+    verts, faces, uvs = [], [], []
+    for s, ring in enumerate(rings):
         verts.extend(ring)
-    for s in range(len(rings) - 1):
+        for i in range(n):
+            uvs.append((s / max(stations - 1, 1) * uv[0], i / max(n - 1, 1) * uv[1]))
+    for s in range(stations - 1):
         a, b = s * n, (s + 1) * n
         for i in range(n - 1):
             faces.append((a + i, a + i + 1, b + i + 1, b + i))
     if cap_start:
         faces.append(tuple(range(n - 1, -1, -1)))
     if cap_end:
-        base = (len(rings) - 1) * n
+        base = (stations - 1) * n
         faces.append(tuple(range(base, base + n)))
-    return new_obj(name, verts, faces, mat, bevel, width)
+    return new_obj(name, verts, faces, mat, bevel, width, uvs)
 
 
 def prim(kind, mat, name, loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1),
@@ -158,6 +271,8 @@ def prim(kind, mat, name, loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1),
     obj.scale = scale
     bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
     obj.data.materials.append(mat)
+    if not obj.data.uv_layers:
+        obj.data.uv_layers.new(name="UVMap")
     return finish(obj, bevel, width)
 
 
@@ -229,7 +344,7 @@ def hull_frame(f, t, side=1):
     """Outward normal and along-section tangent at a point on the skin.
 
     Lets trim (planks, strakes, ribs) sit ON the curved hull rather than float
-    beside it, which is most of why the topsides now read as built rather than
+    beside it, which is most of why the topsides read as built rather than
     extruded.
     """
     d = 1e-3
@@ -251,7 +366,7 @@ def build_hull(mats):
         f = i / ns
         half = [hull_point(f, j / (npts - 1)) for j in range(npts)]
         rings.append([Vector((-p.x, p.y, p.z)) for p in reversed(half)] + half[1:])
-    loft("hull", rings, mats["hull"], width=0.02)
+    loft("hull", rings, mats["hull"], width=0.02, uv=(1.0, 1.0))
 
 
 def build_planking(mats):
@@ -270,7 +385,7 @@ def build_planking(mats):
                     p - tan * 0.028 - n * 0.005,
                     p + tan * 0.028 - n * 0.005,
                 ])
-            loft(f"plank_{side}_{i}", rings, mats["hull_dark"], width=0.004)
+            loft(f"plank_{side}_{i}", rings, mats["hull_dark"], width=0.004, uv=(4.0, 0.3))
 
 
 def build_rail(mats):
@@ -289,7 +404,8 @@ def build_rail(mats):
                 Vector((cx - 0.075, y, cz + 0.10)),
                 Vector((cx - 0.075, y, cz - 0.10)),
             ])
-        loft(f"rail_{'port' if side < 0 else 'stbd'}", rings, mats["brass"], width=0.006)
+        loft(f"rail_{'port' if side < 0 else 'stbd'}", rings, mats["brass"], width=0.006,
+             uv=(5.0, 0.5))
 
         for i in range(13):
             f = 0.10 + 0.86 * (i / 12)
@@ -316,7 +432,7 @@ def build_deck(mats):
                 Vector((u0 * w, y, 0.42)),
                 Vector((u0 * w, y, 0.36)),
             ])
-        loft(f"deck_plank_{p}", rings, mats["deck"], width=0.005)
+        loft(f"deck_plank_{p}", rings, mats["deck"], width=0.005, uv=(3.0, 0.15))
 
 
 # ------------------------------------------------------------------- fittings
@@ -404,7 +520,8 @@ def build_rig(mats):
         prim("uv_sphere", mats["brass"], f"yard_tip_{x}", loc=(x, mast_y, 2.72), width=0.004,
              radius=0.065, segments=16, ring_count=10)
 
-    # Mainsail: a grid bellied forward, since the wind is over the stern.
+    # Mainsail: a grid bellied forward, since the wind is over the stern. The
+    # circuit runes live in the texture now, not in floating geometry.
     cols, rows = QUALITY["sail_grid"]
     w, h, top = 2.30, 1.95, 2.64
 
@@ -412,42 +529,20 @@ def build_rig(mats):
         belly = math.sin(u * math.pi) * math.sin(min(1.0, v * 1.25) * math.pi * 0.75)
         return mast_y - 0.06 - 0.42 * belly
 
-    verts, faces = [], []
+    verts, faces, uvs = [], [], []
     for r in range(rows + 1):
         for c in range(cols + 1):
             u, v = c / cols, r / rows
             # Scalloped foot, like cloth hanging between its corners.
             vv = v + (0.05 * math.sin(u * math.pi) if r == rows else 0.0)
             verts.append(Vector(((u - 0.5) * w, sail_y(u, v), top - vv * h)))
+            uvs.append((u, 1.0 - v))
     for r in range(rows):
         for c in range(cols):
             a = r * (cols + 1) + c
             b = a + cols + 1
             faces.append((a, a + 1, b + 1, b))
-    new_obj("mainsail", verts, faces, mats["sail"], bevel=False)
-
-    # Glowing circuit runes, floating just proud of the aft face of the cloth.
-    def rune_y(x, z):
-        return sail_y((x / w) + 0.5, (top - z) / h) + 0.08
-
-    runes = [
-        ((-0.78, 2.26), (0.78, 2.26)), ((-0.78, 2.26), (-0.78, 1.50)),
-        ((0.78, 2.26), (0.78, 1.50)), ((-0.78, 1.50), (-0.34, 1.50)),
-        ((0.78, 1.50), (0.34, 1.50)), ((-0.40, 1.94), (0.40, 1.94)),
-        ((0.0, 2.46), (0.0, 1.16)), ((-0.34, 2.46), (-0.34, 2.26)),
-        ((0.34, 2.46), (0.34, 2.26)), ((-0.58, 1.16), (0.58, 1.16)),
-    ]
-    for i, ((x0, z0), (x1, z1)) in enumerate(runes):
-        cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
-        length = math.hypot(x1 - x0, z1 - z0)
-        horizontal = abs(x1 - x0) > abs(z1 - z0)
-        size = (length, 0.022, 0.05) if horizontal else (0.05, 0.022, length)
-        box(mats["cyan"], f"sail_rune_{i}", (cx, rune_y(cx, cz), cz), size, width=0.005)
-    nodes = ((-0.78, 2.26), (0.78, 2.26), (0.0, 1.94), (-0.78, 1.50),
-             (0.78, 1.50), (0.0, 1.16), (-0.34, 2.26), (0.34, 2.26))
-    for i, (x, z) in enumerate(nodes):
-        cyl(mats["cyan"], f"sail_node_{i}", (x, rune_y(x, z), z), 0.085, 0.03,
-            rot=(math.pi / 2, 0, 0), verts=12, width=0.004)
+    new_obj("mainsail", verts, faces, mats["sail"], bevel=False, uvs=uvs)
 
     # Standing rigging: shrouds to the rail with ratlines, plus fore/back stays.
     for side in (-1, 1):
@@ -470,13 +565,22 @@ def build_rig(mats):
         rod(mats["rope"], f"yard_brace_{side}", (side * 1.15, mast_y, 2.72),
             (side * 0.55, STERN_Y - 0.35, 0.62), 0.012)
 
-    # Jolly Roger at the masthead.
-    box(mats["flag"], "flag", (0.46, mast_y, 3.72), (0.86, 0.02, 0.46), width=0.004)
-    cyl(mats["cyan"], "flag_skull", (0.34, mast_y + 0.02, 3.74), 0.11, 0.02,
-        rot=(math.pi / 2, 0, 0), verts=16, width=0.003)
-    for i, dx in enumerate((-0.05, 0.05)):
-        cyl(mats["cyan"], f"flag_bone_{i}", (0.34 + dx, mast_y + 0.02, 3.64), 0.028, 0.02,
-            rot=(math.pi / 2, 0, 0), verts=10, width=0.002)
+    # Jolly Roger. The glitched skull is painted into flag_emissive.
+    fverts, ffaces, fuvs = [], [], []
+    fc, fr = 10, 6
+    for r in range(fr + 1):
+        for c in range(fc + 1):
+            u, v = c / fc, r / fr
+            # Ripple, so the flag is cloth in the wind rather than a card.
+            y = mast_y + 0.06 * math.sin(u * 5.0) * (0.25 + 0.75 * u)
+            fverts.append(Vector((0.03 + u * 0.86, y, 3.95 - v * 0.46)))
+            fuvs.append((u, 1.0 - v))
+    for r in range(fr):
+        for c in range(fc):
+            a = r * (fc + 1) + c
+            b = a + fc + 1
+            ffaces.append((a, a + 1, b + 1, b))
+    new_obj("flag", fverts, ffaces, mats["flag"], bevel=False, uvs=fuvs)
 
 
 def build_deck_fittings(mats):
@@ -557,7 +661,8 @@ def build_deck_fittings(mats):
                 p - tan * 0.06 - n * 0.005,
                 p + tan * 0.06 - n * 0.005,
             ])
-        loft(f"strake_{'port' if side < 0 else 'stbd'}", rings, mats["brass_dark"], width=0.005)
+        loft(f"strake_{'port' if side < 0 else 'stbd'}", rings, mats["brass_dark"], width=0.005,
+             uv=(6.0, 0.4))
 
     # Vertical brass ribs strapping the topsides.
     for side in (-1, 1):
@@ -574,7 +679,7 @@ def build_deck_fittings(mats):
                     p + Vector((0, -0.055, 0)) - n * 0.005,
                     p + Vector((0, 0.055, 0)) - n * 0.005,
                 ])
-            loft(f"rib_{side}_{i}", rings, mats["brass_dark"], width=0.004)
+            loft(f"rib_{side}_{i}", rings, mats["brass_dark"], width=0.004, uv=(1.0, 0.4))
 
     # Broadside portholes, glowing lime like the cabin windows.
     for side in (-1, 1):
@@ -587,7 +692,43 @@ def build_deck_fittings(mats):
                 rot=(0, math.pi / 2, 0), verts=18)
 
 
-# --------------------------------------------------------------- render + io
+# ------------------------------------------------------------ bake down + io
+
+
+def apply_and_merge():
+    """Applies every bevel, then joins static parts by material.
+
+    Joining drops the draw calls from one per bolt to one per material. It has
+    to happen after the modifiers are applied, because `join` keeps only the
+    active object's modifier stack and would silently discard the rest.
+    """
+    for obj in PARTS:
+        if not obj.modifiers:
+            continue
+        bpy.ops.object.select_all(action="DESELECT")
+        obj.select_set(True)
+        bpy.context.view_layer.objects.active = obj
+        for mod in list(obj.modifiers):
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+
+    groups, kept = {}, []
+    for obj in PARTS:
+        if obj.name.startswith(KEEP_SEPARATE):
+            kept.append(obj)
+        else:
+            groups.setdefault(obj.data.materials[0].name, []).append(obj)
+
+    merged = []
+    for mat_name, objs in groups.items():
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in objs:
+            o.select_set(True)
+        bpy.context.view_layer.objects.active = objs[0]
+        if len(objs) > 1:
+            bpy.ops.object.join()
+        objs[0].name = f"{mat_name}_parts"
+        merged.append(objs[0])
+    return merged + kept
 
 
 def setup_render():
@@ -640,11 +781,15 @@ def main():
     build_stern(mats)
     build_rig(mats)
     build_deck_fittings(mats)
+    print(f"[build_ship] {len(PARTS)} parts authored")
+
+    objects = apply_and_merge()
+    print(f"[build_ship] merged to {len(objects)} objects (draw calls)")
 
     bpy.ops.object.empty_add(type="PLAIN_AXES", location=(0, 0, 0))
     root = bpy.context.active_object
     root.name = "pirateship_beginner"
-    for obj in PARTS:
+    for obj in objects:
         obj.parent = root
 
     # Yaw 180 deg so the glTF (x, z, -y) conversion puts the bow on -Z. See the
@@ -652,14 +797,12 @@ def main():
     root.rotation_euler = (0.0, 0.0, math.pi)
     bpy.context.view_layer.update()
 
-    print(f"[build_ship] {len(PARTS)} objects (pre-bevel)")
-
     os.makedirs(ASSETS, exist_ok=True)
     glb = os.path.join(ASSETS, "pirateship_beginner.glb")
 
     bpy.ops.object.select_all(action="DESELECT")
     root.select_set(True)
-    for obj in PARTS:
+    for obj in objects:
         obj.select_set(True)
     bpy.context.view_layer.objects.active = root
 

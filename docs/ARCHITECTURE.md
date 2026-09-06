@@ -109,7 +109,8 @@ shader.
 | `wake.ts` | `createWake()` | ship wake and spray |
 | `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
 | `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, update(dt, env) }` | orchestrator only |
-| `ship.ts` | `createShip(terrain, start?)` | glTF hull + physics + collision; `ready` settles on load |
+| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)` | glTF hull + physics + collision; `ready` settles on load |
+| `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
 | `hud.ts` | `createHud()` | compass needle, speed, heading, lat/long |
@@ -288,3 +289,25 @@ normal `+Y`, starboard `+X` — so it needs no rotation and no scaling, only the
 vertical mount that puts `MODEL_WATERLINE_Y` on the sea. `ship.ts` shows a
 primitive stand-in hull until the load resolves and keeps it if the load fails:
 a missing asset costs detail, not the ship.
+
+Surfacing is procedural too: `tools/ship_textures.py` generates the plank,
+brushed-metal, rope, canvas and Jolly Roger maps with numpy and packs them into
+the GLB, tiled through `KHR_texture_transform` rather than baked per UV. Tiling
+is why `main.ts` passes `renderer.capabilities.getMaxAnisotropy()` down to
+`shipfx.ts`, which raises it on every map the model brings: the deck repeats its
+planks three times along a hull the chase camera sees almost edge-on, and that
+is the one case isotropic filtering cannot survive.
+
+The build script joins its 233 authored parts by material, so the ship draws in
+26 calls instead of one per bolt, and exempts a handful of parts in its
+`KEEP_SEPARATE` tuple **because the game addresses them**. `shipfx.ts` is the
+consumer of that contract: it bellies the mainsail and streams the flag by
+rewriting their vertices from a stored rest pose (both are welded grids of well
+under a hundred vertices, so the per-frame cost is a normals rebuild on two
+small meshes), pulses each neon lamp off its own cloned material at a rate
+hashed from its node name, and drives the thruster flames from the throttle.
+Only the three parts needing bespoke motion are matched by name; the lamps are
+found by material — flat emissive, no emissive map — so a new light on the rig
+needs no change here. The cloning happens during the load, before `ready`
+resolves, because a material cloned after `postfx.adopt` would carry the
+"already encoded" flag without the `onBeforeCompile` behind it and render dark.

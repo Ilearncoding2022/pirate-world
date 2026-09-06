@@ -59,8 +59,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   tall a bank builds varies from place to place, between two thirds and all of
   the deck's depth.
 - **Ship wake** that follows the curve of the planet and fades behind you.
-- **The ship**: a glTF hull with planked topsides, brass rails, rigging and
-  neon thruster pods, floated at its designed waterline.
+- **The ship**: a glTF hull with textured planking, brass rails, rigging and
+  neon thruster pods, floated at its designed waterline. The mainsail bellies
+  and the Jolly Roger streams as you make way, the lamps breathe out of step
+  with each other, and the thrusters flare on the throttle.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   100 units in every direction, drawn on the CPU from the same height field the
   world is built from. The compass sits in the middle of the helm pad.
