@@ -21,10 +21,16 @@ import { OCEAN_CAP } from './wind';
 /**
  * Radius of the world the scope covers, in world units.
  *
- * 100 is one full radian of arc on a globe of radius 100 — a sixth of the way
- * around the planet — so the scope shows the neighbourhood, not the hull.
+ * Half a radian of arc at the current GLOBE_RADIUS, about a twelfth of the way
+ * around the planet. It was a full radian; halving it trades the wide
+ * neighbourhood view for one where a coastline is worth steering by, since
+ * everything on the plot is now twice the size it was.
+ *
+ * Ship-scale in spirit but written absolute, like the hull and its speed: what
+ * the scope is for is judging water the ship can reach soon, and that is a
+ * distance, not a fraction of the planet.
  */
-export const RADAR_RANGE = 100;
+export const RADAR_RANGE = 50;
 
 /** Range rings, as a fraction of RADAR_RANGE. */
 const RINGS = [0.25, 0.5, 0.75];
