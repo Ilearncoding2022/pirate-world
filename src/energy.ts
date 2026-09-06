@@ -128,21 +128,26 @@ const SOLAR_PEAK = 1 / SOLAR_FULL_SECONDS + IDLE_DRAIN;
 const DOCK_RATE = 1 / DOCK_FULL_SECONDS;
 
 /**
- * Speed under which a berth will connect, world units/s (3.0 kn on the HUD).
+ * Seconds the ship has to stay inside a berth's ring before it connects.
  *
- * Not zero, because a berth that only pays out at a dead stop makes the player
- * fight STOP_EPSILON for a reward they have already sailed to; and not
- * generous either, because at 15 kn the ship crosses a whole charging zone in
- * a second or two, which even at the slower rate is a twentieth of a tank for
- * driving past.
+ * This replaced a speed limit, and it enforces the same rule in the terms the
+ * player can actually see. The old test asked "are you under 3 kn": true of a
+ * ship that had stopped, but also true of one drifting quietly across the ring
+ * on the wind, and false of one that had genuinely arrived and not yet lost
+ * way. A dwell asks the question the ring is drawn to ask -- are you staying?
  *
- * Tested against GROUND speed, and it is the only test in this file that is.
- * See the note below on the two speeds: a ship blown through a ring at 12 kn
- * with its engines stopped has `speed === 0`, and against that it would read
- * as moored, take on shore power and -- because `wind.ts` shelters whatever is
- * docked -- have the wind switched off around it mid-drift.
+ * Two seconds is the number because of what it excludes. The zone is 16 units
+ * across, so at 15 kn a straight run through it lasts 1.07 s and at 10 kn
+ * 1.6 s: nothing on a passage can collect a berth by crossing it, which is the
+ * whole job the speed limit was doing. Anything slower than about 8 kn can
+ * dwell, drifting included, and that is deliberate -- being blown into harbour
+ * and moored is an arrival, not an exploit, and `wind.ts` shelters what is
+ * docked so the drift ends there anyway.
+ *
+ * Timed against wall clock rather than distance, so a ship holding station
+ * inside the ring qualifies however it is holding it.
  */
-const DOCK_SPEED_LIMIT = 3;
+const DOCK_DWELL_SECONDS = 2;
 
 /*
  * The two speeds, and which one each rule here uses.
@@ -157,8 +162,11 @@ const DOCK_SPEED_LIMIT = 3;
  *     still deploys its panels. That is the entire point of running out of
  *     charge in a wind: you are not stranded, you are being carried somewhere
  *     while you recover.
- *   - The berth test is on GROUND speed, so a ring cannot be collected by
- *     drifting through it.
+ *   - The berth test is on NEITHER any more. It is a dwell: see
+ *     DOCK_DWELL_SECONDS. A ring cannot be collected by crossing it because
+ *     crossing it does not take two seconds, which is the same protection the
+ *     old ground-speed test gave without having to pick between the two
+ *     speeds at all.
  */
 
 /**
@@ -205,6 +213,11 @@ export function createEnergy(towns: Towns): Energy {
     canThrust: true,
   };
 
+  /** Seconds spent continuously inside `dwellBerth`. See DOCK_DWELL_SECONDS. */
+  let dwell = 0;
+  /** The ring the clock is counting for, or null when the ship is in none. */
+  let dwellBerth: Dock | null = null;
+
   function update(dt: number, ship: ShipState, env: WorldEnv): void {
     // A frame that advanced no time moves no charge. Returning leaves the last
     // true reading standing; falling through would rewrite `rate` to a 0 the
@@ -224,8 +237,18 @@ export function createEnergy(towns: Towns): Energy {
     // is over four times the best the sun ever manages, so the sum would beat
     // the berth alone by a couple of seconds over a whole charge -- and it
     // would make the rate on the HUD unreadable back to a single cause.
+    // The dwell clock. It counts only while the ship is inside one particular
+    // ring, and it is the identity of the berth that is tracked rather than
+    // merely "inside something": two zones cannot overlap (`towns.ts` rejects
+    // a berth that would), so leaving one and entering another is a new
+    // arrival and starts the two seconds again.
     const berth = towns.dockAt(ship.position);
-    const docked = berth !== null && Math.abs(ship.groundSpeed) < DOCK_SPEED_LIMIT;
+    if (berth === null || berth !== dwellBerth) {
+      dwellBerth = berth;
+      dwell = 0;
+    }
+    if (berth !== null) dwell += dt;
+    const docked = berth !== null && dwell >= DOCK_DWELL_SECONDS;
 
     let charge = 0;
     if (docked) {
