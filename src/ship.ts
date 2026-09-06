@@ -45,11 +45,34 @@ const HULL_OFFSET = 0.6;
  */
 const MODEL_WATERLINE_Y = -0.2;
 
-/** Where the glTF root hangs inside the ship group, so its waterline lands on the sea. */
-const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y;
+/**
+ * Uniform scale applied to the hull, the stand-in included.
+ *
+ * 0.65 is the ship at 35% off its authored size. It makes the world bigger in
+ * the only sense `geo.ts` says a world can be -- same globe, same crossings,
+ * smaller boat -- without touching a single world-scale constant.
+ *
+ * Everything measured off the hull has to come with it. Inside this file that
+ * is MODEL_MOUNT_Y below; outside it, `wake.ts` authors STERN_BACK,
+ * BOW_FORWARD and HALF_WIDTH_0 against the hull's own half-length, and a wake
+ * left at full size detaches from a shrunken ship in the most obvious way
+ * there is.
+ */
+export const MODEL_SCALE = 0.65;
 
 /**
- * Top speed, world units per second, which `hud.ts` reads out as 20.0 kn.
+ * Where the glTF root hangs inside the ship group, so its waterline lands on
+ * the sea.
+ *
+ * MODEL_WATERLINE_Y is a MODEL-space number, so it has to be scaled before it
+ * is subtracted: at 0.65 the hull meets the water 0.13 below its deck plane,
+ * not 0.2. Mounting it as though the model were still full size would sink the
+ * ship the difference and put the sea through its gunwale.
+ */
+const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y * MODEL_SCALE;
+
+/**
+ * Top speed, world units per second, which `hud.ts` reads out as 15.0 kn.
  *
  * Drag, not the clamp below, is what actually decides this. Thrust and drag
  * balance at ACCEL / DRAG, so that ratio *is* the top speed and the clamp only
@@ -59,10 +82,11 @@ const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y;
  * set, and the number in this constant was simply never reached.
  *
  * Exported because `energy.ts` divides the burn by it: the draw is quadratic in
- * (speed / MAX_FORWARD), so a copy of the 20 over there would mean a top-speed
+ * (speed / MAX_FORWARD), so a copy of the 15 over there would mean a top-speed
  * change quietly retuning the whole fuel economy instead of moving with it.
+ * `wake.ts` imports it for the same reason.
  */
-export const MAX_FORWARD = 20;
+export const MAX_FORWARD = 15;
 /** Linear drag coefficient, 1/s. Also sets how long the ship coasts. */
 const DRAG = 0.7;
 /** Thrust while a throttle key is held, world units / s^2. */
@@ -326,6 +350,7 @@ function loadHull(
     .then((gltf) => {
       const model = gltf.scene;
       model.name = 'ship-hull';
+      model.scale.setScalar(MODEL_SCALE);
       model.position.y = MODEL_MOUNT_Y;
       onFx(createShipFx(model, maxAnisotropy));
       object.add(model);
@@ -356,6 +381,9 @@ export function createShip(
   const object = new Group();
   object.name = 'ship';
   const standIn = buildStandInHull();
+  // Scaled with the same factor as the glTF, so the half second before the
+  // model lands does not show a ship of a different size.
+  standIn.scale.setScalar(MODEL_SCALE);
   object.add(standIn);
   // Null until the glTF lands, and stays null if the load fails -- the stand-in
   // has none of the parts it drives.
@@ -604,7 +632,7 @@ export function createShip(
     // needs no vectors, and it uses the true bearing rather than the quantised
     // sector because the eye is better at angles than the hull is.
     //
-    // In a flat calm at 20 kn this comes out as 20 kn from dead ahead, and the
+    // In a flat calm at 15 kn this comes out as 15 kn from dead ahead, and the
     // sail only takes on extra belly once a following wind is outrunning the
     // ship.
     //

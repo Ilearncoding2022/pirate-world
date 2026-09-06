@@ -60,8 +60,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the deck's depth.
 - **Wind.** Gusts blow up on a random bearing, hold for five to thirty seconds
   and drop away again, with calms between them. It is a real push, not a
-  number: three quarters of the wind's speed is added to your own, so 8 knots
-  of engine under a 10 knot tailwind makes 15.5 over the ground — and a beam
+  number: just over a third of the wind's speed is added to your own, so 8
+  knots of engine under a 10 knot tailwind makes 11.5 over the ground — and a beam
   wind carries you sideways off your course while the bow holds its heading.
   The open ocean blows twice as hard as the shoreline, building over the first
   40 units offshore, so hugging the coast is shelter and standing out to sea is
@@ -75,7 +75,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   thrusters flare on the throttle.
 - **Power, not fuel tanks.** The ship runs on a reserve that burns with the
   *square* of your speed, so half throttle costs a quarter as much and cruising
-  slowly is a real strategy: 90 seconds flat out, or fifteen minutes at 5 knots.
+  slowly is a real strategy: 90 seconds flat out, or ten and a half minutes at
+  5 knots.
   Stop in daylight and the panels charge you back at a rate that follows the
   sun's height in the sky — nothing at night, two minutes from empty at noon.
   Run dry and you keep the helm but lose the engines, drifting until the sun

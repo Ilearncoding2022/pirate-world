@@ -74,9 +74,18 @@ state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
 ```
 
 Stepping thrust and then drag lands on `(ACCEL / DRAG) * (1 - DRAG * dt)`,
-which makes the top speed depend on the frame rate: 19.8 kn at 60fps, 18.6 at
+which makes the top speed depend on the frame rate: 14.8 kn at 60fps, 14.0 at
 10. The closed form is exactly `thrust / DRAG` at any rate, and still decays
 cleanly to zero with no throttle, so the ship coasts as before.
+
+The hull is drawn at `MODEL_SCALE` (0.65), exported from `ship.ts` because the
+wake is authored against the hull's own dimensions and has to shrink with it —
+`STERN_BACK`, `BOW_FORWARD` and `HALF_WIDTH_0` in `wake.ts` all carry the
+factor. `MODEL_WATERLINE_Y` is a model-space number, so `MODEL_MOUNT_Y` scales
+it before subtracting; skip that and the ship floats at the wrong depth. Scale
+is deliberately kept out of the motion constants: `BOB_AMPLITUDE`, the sway and
+the bank are absolute, so a smaller hull moves the same distance in the swell
+and therefore looks livelier in it.
 
 ## The world environment
 `src/env.ts` defines `WorldEnv`: `sunDirection`, `sunColor`, `elapsed`, `timeOfDay`, `dayFactor`.
@@ -121,7 +130,7 @@ shader.
 | `wake.ts` | `createWake()` | ship wake and spray |
 | `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
 | `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env) }` | orchestrator only |
-| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)` | glTF hull + physics + collision; `ready` settles on load |
+| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
@@ -339,7 +348,7 @@ about the *net* result rather than the gross.
 | | |
 |---|---|
 | Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2` |
-| 20 / 10 / 5 kn to dry | 90 s / 5.4 min / 15.6 min |
+| 15 / 7.5 / 5 kn to dry | 90 s / 5.4 min / 10.5 min |
 | Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 120 s at noon, 4.2 min at 30°, negative after dark |
 | Berth | 10 s, overrides solar rather than stacking |
 | Empty | thrust refused until `RESTART_LEVEL` (3%) |
@@ -413,14 +422,16 @@ along/starboard pairs. Being a table rather than a cosine is the design and not
 a shortcut: the player is meant to learn eight distinct behaviours, not a
 continuum. Every entry is a unit vector, so the cap means the same thing on
 every point of sail. The push is then `WIND_GRIP × speed ×` the table entry,
-with `WIND_GRIP` 0.75 — the rule the whole system is tuned around, and the one
-worth remembering: **8 kn of engine under a 10 kn tailwind makes 15.5 kn over
+with `WIND_GRIP` 0.35 — the rule the whole system is tuned around, and the one
+worth remembering: **8 kn of engine under a 10 kn tailwind makes 11.5 kn over
 the ground.** The engine still clamps at `MAX_FORWARD`, but ground speed has no
-ceiling beyond the arithmetic and reaches ~32 kn flat out downwind.
+ceiling beyond the arithmetic and reaches ~20.6 kn flat out downwind under the
+ocean cap. The engine stays the thing the player steers; the wind is a hand on
+it, never the larger half of how fast the ship is going.
 
 The applied vector is **eased** toward the table value with `PUSH_TAU` (0.3 s),
 using the same `1 - exp(-dt / tau)` damping as `bankRoll`. Without it, crossing
-a sector boundary at 16 kn jumps the push by 3.5 kn inside a single frame and
+a sector boundary at the ocean cap jumps the push by 4.3 kn inside a frame and
 the hull visibly snaps sideways. The accepted consequence is that during a
 transition the push is briefly *not* exactly one of the eight table values;
 nothing downstream assumes it is.
@@ -463,13 +474,14 @@ a shore to leeward loses the helm entirely until the wind drops.
 
 **Feedback.** The HUD carries a `WND` row (arrow relative to the bow, matching
 the bow-up scope, or `CALM`) and breaks the `SPD` row down into ground speed
-plus the wind's signed contribution, which is what makes the 0.75 rule legible.
+plus the wind's signed contribution, which is what makes the grip rule legible.
 The radar draws a rim arrow on the wind's *true* bearing in the **overlay**
 pass on the live frame, like the north mark — it is not attached to terrain, so
 the stale-raster-frame rule does not apply to it. `shipfx.ts` streams the flag
-along the **apparent** wind (true wind minus the hull's own motion, so a 20 kn
-ship in a calm still streams astern) and adds the tailwind component to the
-sail's belly. The model only bellies the sail one way, so beam and head winds
+along the **apparent** wind (true wind minus the hull's own motion, so a 15 kn
+ship in a calm streams astern — it used to lean toward the bow, because the
+model was authored around a permanent following wind) and adds the tailwind
+component to the sail's belly. The model only bellies the sail one way, so beam and head winds
 show on the flag and not on the sail.
 
 ## Towns, berths and the dock zones

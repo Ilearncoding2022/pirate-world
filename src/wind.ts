@@ -26,9 +26,10 @@ export interface Wind {
  *
  * Exactly double, and that ratio matters more than either number: the open
  * ocean is where the wind is worth having and the coast is where it stays
- * survivable. At 16 kn the push is 0.75 x 16 = 12 kn, well over half of
- * MAX_FORWARD, so crossing an ocean downwind is a different journey from
- * crossing it upwind -- which is the whole reason for the system.
+ * survivable. At 16 kn the push is 0.35 x 16 = 5.6 kn, better than a third of
+ * MAX_FORWARD, so crossing an ocean downwind is still a different journey from
+ * crossing it upwind -- which is the whole reason for the system -- without the
+ * weather ever being the larger half of how fast the ship is going.
  */
 export const COAST_CAP = 8;
 export const OCEAN_CAP = 16;
@@ -83,19 +84,25 @@ const GUST_RATE = 0.25;
  * Fraction of the wind's speed that reaches the hull as ground velocity.
  *
  * The rule the whole system is tuned around: 8 kn of engine under a 10 kn
- * tailwind makes 8 + 0.75 x 10 = 15.5 kn over the ground. Below 1 because a
- * hull is not a leaf, and high enough that the wind is worth planning a
+ * tailwind makes 8 + 0.35 x 10 = 11.5 kn over the ground. Well below 1 because
+ * a hull is not a leaf, and still enough that the wind is worth planning a
  * crossing around.
+ *
+ * Flat out downwind under the ocean cap the ship makes 15 + 0.35 x 16 = 20.6
+ * kn over the ground, so the weather is worth a third again on top of the
+ * engine at its very best and rather less than that in the ordinary case. The
+ * engine stays the thing the player is steering; the wind is a hand on it.
  */
-const WIND_GRIP = 0.75;
+const WIND_GRIP = 0.35;
 
 /**
  * Time constant, seconds, on the applied push.
  *
  * The sector table below is deliberately coarse, and coarse means the target
- * push jumps the moment the ship's heading crosses a boundary -- at 16 kn that
- * is 3.5 kn of sideways velocity appearing within one frame, and the hull
- * visibly snaps. Easing spreads it over about a third of a second. The
+ * push jumps the moment the ship's heading crosses a boundary. Adjacent
+ * entries are 0.765 apart, so at the ocean cap that is 0.35 x 16 x 0.765 =
+ * 4.3 kn of velocity appearing within one frame, and the hull visibly snaps.
+ * Easing spreads it over about a third of a second. The
  * accepted consequence is that mid-transition the push is briefly not exactly
  * one of the eight table values; nothing downstream assumes it is.
  *

@@ -64,15 +64,19 @@ const SAIL_CHARGE = 0.35;
  * Extra belly, model units, the mainsail takes on in a following wind that is
  * fully outrunning the ship, and the apparent tailwind that counts as "fully".
  *
- * Four rather than the wind's own 16 kn ocean cap, because by the time
- * `ship.ts` works out the apparent wind the hull has already been given 0.75
- * of the true wind as push: a drifting ship in a dead-astern ocean gale keeps
- * only the remaining quarter as air moving past it. Scaling this to the raw
- * cap would divide every real tailwind by four and leave the sail with no
- * visible answer to the one wind it is allowed to react to.
+ * 10.4 rather than the wind's own 16 kn ocean cap, because by the time
+ * `ship.ts` works out the apparent wind the hull has already been given
+ * WIND_GRIP -- 0.35 -- of the true wind as push: a drifting ship in a
+ * dead-astern ocean gale keeps only the remaining 0.65 as air moving past it,
+ * and 16 x 0.65 is 10.4. Scaling this to the raw cap instead would flatten
+ * every real tailwind by a third and leave the sail with a muted answer to the
+ * one wind it is allowed to react to.
+ *
+ * Tied to the grip, so it moves whenever that does. It was 4 while the grip
+ * was 0.75.
  */
 const SAIL_TAILWIND = 0.12;
-const SAIL_TAILWIND_FULL = 4;
+const SAIL_TAILWIND_FULL = 10.4;
 
 /** Fly-end travel of the flag: downwind under way, down at rest, plus flutter. */
 const FLAG_STREAM = 0.3;
@@ -84,13 +88,13 @@ const FLAG_FLUTTER = 0.075;
  *
  * Pinned to MAX_FORWARD rather than to the wind's cap so the oldest case still
  * reads at its old strength: a ship at full throttle in a flat calm makes
- * exactly 20 of air over its own deck, which is the reading the flag has been
+ * exactly 15 of air over its own deck, which is the reading the flag has been
  * fully streamed by since before there was any weather to stream in. Stronger
- * apparent winds -- an ocean gale on the nose adds up to about 36 -- saturate
+ * apparent winds -- an ocean gale on the nose adds up to about 31 -- saturate
  * here, because cloth pinned at the hoist has nowhere further to go and a fly
  * end that kept travelling would read as the mesh tearing off the halyard.
  */
-const FLAG_FULL_WIND = 20;
+const FLAG_FULL_WIND = 15;
 
 /**
  * e-folding time, seconds, of the flag swinging onto a new apparent bearing.

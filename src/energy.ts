@@ -27,11 +27,16 @@ export interface Energy {
  */
 
 /**
- * Seconds of full tank at top speed, ie. flat out at MAX_FORWARD (20.0 kn).
+ * Seconds of full tank at top speed, ie. flat out at MAX_FORWARD (15.0 kn).
  *
- * A full lap of the globe is 2*PI*200 / 20 = 63 s, so 90 s is a lap and a
- * half: enough to cross any ocean on the map at a run, not enough to keep
+ * A full lap of the globe is 2*PI*200 / 15 = 84 s, so 90 s is a lap and a
+ * breath: enough to cross any ocean on the map at a run, not enough to keep
  * running once you are there.
+ *
+ * It bought a lap and a HALF while the ship still made 20 kn. The endurance
+ * was deliberately left at 90 s when top speed came down rather than being
+ * stretched to hold the old range, so a slower ship is a shorter-legged one
+ * too. Raise this number if flat-out passages start ending in the wrong place.
  */
 const FULL_SPEED_ENDURANCE = 90;
 
@@ -73,11 +78,11 @@ const IDLE_DRAIN = 1 / IDLE_ENDURANCE;
  * propulsion draw and cruising slowly is a strategy rather than a slower way
  * to arrive equally empty. Seconds from a full tank to dry, holding a speed:
  *
- *   20.0 kn -> 90 s          10.0 kn -> 325 s (5.4 min)
- *   15.0 kn -> 156 s          5.0 kn -> 938 s (15.6 min)
+ *   15.0 kn -> 90 s           7.5 kn -> 325 s (5.4 min)
+ *   10.0 kn -> 194 s (3.2 min)   5.0 kn -> 630 s (10.5 min)
  *
  * Reverse burns on |speed| exactly like ahead: MAX_REVERSE is 7 kn, so full
- * astern costs 0.0017 level/s and would take about 10 minutes to empty.
+ * astern costs 0.0027 level/s and would take about 6 minutes to empty.
  */
 const FULL_BURN = 1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN;
 
@@ -105,7 +110,7 @@ const DOCK_RATE = 1 / DOCK_FULL_SECONDS;
  *
  * Not zero, because a berth that only pays out at a dead stop makes the player
  * fight STOP_EPSILON for a reward they have already sailed to; and not
- * generous either, because at 20 kn the ship crosses a whole charging zone in
+ * generous either, because at 15 kn the ship crosses a whole charging zone in
  * a second or two and would collect a fifth of a tank for driving past.
  *
  * Tested against GROUND speed, and it is the only test in this file that is.

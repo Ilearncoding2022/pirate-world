@@ -233,8 +233,8 @@ export function createHud(): {
       // SPD is GROUND speed -- what the player watches go past -- with the
       // engine's share subtracted out beside it. Printing engine speed here
       // instead would leave the panel flatly contradicting the sea, and the
-      // difference is the only place the 0.75 grip rule becomes visible: 8 kn
-      // of engine under a 10 kn tailwind reads "15.5 kn +7.5".
+      // difference is the only place the 0.35 grip rule becomes visible: 8 kn
+      // of engine under a 10 kn tailwind reads "11.5 kn +3.5".
       writeSpeed(formatSpeed(ship.groundSpeed));
       writeSpeedWind(formatWindShare(ship.groundSpeed - ship.speed));
 

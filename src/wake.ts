@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { ShipState } from './types';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
+import { MAX_FORWARD, MODEL_SCALE } from './ship';
 
 export interface Wake {
   object: THREE.Object3D;
@@ -32,15 +33,23 @@ const WAKE_LIFE = 4.0;
 /** A jump bigger than this (reverse, a long coast) splits the ribbon. */
 const BREAK_GAP = 2.5;
 
-/** Matches MAX_FORWARD in ship.ts; only used to normalise speed. */
-const MAX_SHIP_SPEED = 20;
 /** Below this the ship leaves no wake at all. Reverse (negative) never does. */
 const MIN_WAKE_SPEED = 1.2;
 
-/** Distance astern of the ship origin where the foam starts. Hull half-length is 2.5. */
-const STERN_BACK = 2.3;
+/*
+ * Where the foam is thrown, relative to the ship's origin.
+ *
+ * Authored against the hull's own half-length, so they are multiplied by the
+ * same MODEL_SCALE the hull is drawn at. Left at full size against a shrunken
+ * ship the wake starts a whole boat-length astern of the transom and the bow
+ * spray erupts out of open water ahead of the stem -- the most visible way
+ * there is to get a scale change wrong.
+ */
+
+/** Distance astern of the ship origin where the foam starts. Hull half-length is 2.5 unscaled. */
+const STERN_BACK = 2.3 * MODEL_SCALE;
 /** Distance forward of the ship origin where bow spray is thrown. */
-const BOW_FORWARD = 2.5;
+const BOW_FORWARD = 2.5 * MODEL_SCALE;
 
 /**
  * Lift above the water sphere.
@@ -55,8 +64,14 @@ const BOW_FORWARD = 2.5;
 const SURFACE_LIFT = 0.1;
 const WAKE_RADIUS = GLOBE_RADIUS + SURFACE_LIFT;
 
-/** Half-width of a freshly laid rib, and how fast a rib keeps spreading. */
-const HALF_WIDTH_0 = 1.15;
+/**
+ * Half-width of a freshly laid rib, and how fast a rib keeps spreading.
+ *
+ * The initial width is the hull's beam, so it scales with the hull. The spread
+ * rate is the sea's answer to being parted and is left alone, so a smaller ship
+ * cuts a narrower wake that opens out just as wide behind it.
+ */
+const HALF_WIDTH_0 = 1.15 * MODEL_SCALE;
 const SPREAD_RATE = 1.95;
 
 /* Bow spray ---------------------------------------------------------- */
@@ -499,7 +514,7 @@ export function createWake(): Wake {
     now += dt;
 
     const speed = ship.speed;
-    const speedFrac = clamp(Math.abs(speed) / MAX_SHIP_SPEED, 0, 1);
+    const speedFrac = clamp(Math.abs(speed) / MAX_FORWARD, 0, 1);
     const makesWake = speed >= MIN_WAKE_SPEED;
     if (makesWake) travelled += speed * dt;
 

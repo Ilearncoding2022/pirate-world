@@ -1,7 +1,26 @@
 # Wind system — implementation plan
 
-Status: **approved, not yet implemented.** No source files have been changed.
-Branch: `claude/wind-system-clarification-97hqa1`.
+Status: **implemented**, on branch `claude/wind-system-clarification-97hqa1`.
+
+This document is kept as the record of what was approved. It is deliberately
+NOT updated to follow later tuning — `docs/ARCHITECTURE.md` is the current
+truth. Three of its decisions have since been changed by the owner:
+
+- the push coefficient is **0.35**, not 0.75, so 8 kn of engine under a 10 kn
+  tailwind makes **11.5 kn**, not 15.5, and ground speed tops out near 20.6
+  rather than ~32;
+- `MAX_FORWARD` is **15 kn**, not 20;
+- the hull is drawn at **0.65** scale.
+
+Two claims below were also wrong when they were written, and are worth knowing
+before trusting the rest:
+
+- the **8 kn shoreline cap is unreachable**. The innermost probe ring is 5
+  world units, so the ramp floors at `8 + 8 × (5/40)` = **9.0 kn**. The two
+  decisions are in tension; the code implements both as written.
+- the flag **did not** previously stream astern. It leaned toward the bow,
+  because the model was authored around a permanent following wind, so the
+  apparent-wind flag is a visible change rather than a preserved one.
 
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially
