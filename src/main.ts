@@ -187,7 +187,7 @@ function frame(): void {
   wind.update(dt, ship.state, energy.state);
   ship.update(dt, controls.input, energy.state, wind.state);
   view.update(dt, ship.state, controls.input);
-  globe.update(dt, env, wind.state);
+  globe.update(dt, env, wind.state, ship.state, view.camera);
   docks.update(dt, env, ship.state, energy.state);
   wake.update(dt, ship.state, env);
   hud.update(ship.state, energy.state, wind.state);
