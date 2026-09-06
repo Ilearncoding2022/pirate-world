@@ -432,6 +432,11 @@ body {
 
 .radar {
   position: relative;
+  /* Sizing context for the position fix inside it, which is written in cqw so
+     it tracks the scope through the clamp below instead of being re-guessed at
+     each breakpoint. `container-type` also implies layout containment, which
+     this already had via `position: relative`. */
+  container-type: inline-size;
   width: clamp(118px, 12vw, 158px);
   aspect-ratio: 1 / 1;
   border-radius: 50%;
@@ -452,6 +457,75 @@ body {
   width: 100%;
   height: 100%;
   border-radius: 50%;
+}
+
+/* ---------------------------------------------------------------------
+   Position fix — LAT and LON, in the scope's upper corners
+   ------------------------------------------------------------------- */
+
+/*
+ * Geometry, since the scope is a disc and its "corners" are not in it.
+ *
+ * At 15% down from the top the circle spans 15.7%..84.3% of the box, so the
+ * blocks are inset 16% and centred on that: the first line clears the rim at
+ * its narrowest, and the second sits where the disc has already widened. Both
+ * are centred rather than edge-aligned so the short label stays over the
+ * middle of the long value instead of hanging off one end of it.
+ *
+ * Everything here is in cqw -- percent of the scope's own width -- because the
+ * scope is fluid (118px to 158px) and the two blocks very nearly meet in the
+ * middle at any size. Fixed px type fits at 158 and collides at 118, which is
+ * a live window between the desktop layout and the 720px breakpoint rather
+ * than a hypothetical: the numbers have to shrink WITH the disc, not at the
+ * points where someone remembered to check.
+ */
+.radar__fix {
+  position: absolute;
+  top: 15%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
+  /* The scope is the instrument; this is an annotation on it. */
+  pointer-events: none;
+  /*
+   * The plot runs bright green land under these numbers as the ship moves, and
+   * magenta on green is the one pairing this palette cannot carry on contrast
+   * alone. A halo alone left the glyphs legible but muddy, so the text sits on
+   * its own dimming plate: enough to hold the tube's colour down behind the
+   * digits, not enough to read as a label stuck on the glass.
+   */
+  padding: 0.5cqw 2cqw 1cqw;
+  border-radius: 2cqw;
+  background: rgba(2, 9, 17, 0.62);
+  text-shadow:
+    0 0 3px var(--bg-deep),
+    0 0 6px var(--bg-deep);
+}
+
+.radar__fix--lat {
+  left: 16%;
+}
+
+.radar__fix--lon {
+  right: 16%;
+}
+
+.radar__fix-key {
+  font-size: 4.4cqw;
+  letter-spacing: 0.14em;
+  color: var(--ink-mute);
+}
+
+/* Magenta, as these read on the telemetry panel, so the fix stays the same
+   colour it has always been while changing where it lives. Tabular figures
+   keep the value from shuffling under its own label as the digits change. */
+.radar__fix-val {
+  font-size: 5.6cqw;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--magenta);
+  white-space: nowrap;
 }
 
 .radar__readout {
@@ -877,6 +951,8 @@ kbd {
   .radar {
     width: 104px;
   }
+  /* Nothing for .radar__fix here: it is sized in cqw off the scope, so the
+     narrower disc below already carries it. */
   .hdg__value {
     font-size: 16px;
   }

@@ -50,15 +50,6 @@
           </span>
         </div>
 
-        <div class="readout">
-          <span class="readout__key">LAT</span>
-          <span class="readout__val readout__val--accent" id="hud-lat">00.0&deg; N</span>
-        </div>
-        <div class="readout">
-          <span class="readout__key">LON</span>
-          <span class="readout__val readout__val--accent" id="hud-lon">000.0&deg; E</span>
-        </div>
-
         <!-- Reserve power. hud.ts swaps one pwr--* modifier on this wrapper
              and every colour below it follows, so the number, the bar and the
              tag can never end up in different states. Segments ship lit and
@@ -113,8 +104,20 @@
         <!-- radar.ts repaints this every frame. Bow-up: own ship is always at
              dead centre pointing at 12 o'clock, and the magenta pip on the rim
              is north. -->
+        <!-- The fix rides in the scope's own upper corners rather than in a
+             telemetry row: position is what the plot is about, so the numbers
+             belong on the plot. Inset off the rim, because the bezel ring and
+             the magenta north pip both live out there. -->
         <div class="radar">
           <canvas class="radar__scope" id="hud-radar" aria-hidden="true"></canvas>
+          <div class="radar__fix radar__fix--lat">
+            <span class="radar__fix-key">LAT</span>
+            <span class="radar__fix-val" id="hud-lat">00.0&deg; N</span>
+          </div>
+          <div class="radar__fix radar__fix--lon">
+            <span class="radar__fix-key">LON</span>
+            <span class="radar__fix-val" id="hud-lon">000.0&deg; E</span>
+          </div>
         </div>
 
         <div class="radar__readout">
