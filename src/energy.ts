@@ -51,11 +51,33 @@ const FULL_SPEED_ENDURANCE = 90;
  */
 const IDLE_ENDURANCE = 42 * 60;
 
-/** Seconds from empty to full at anchor under a sun in the zenith. */
-const SOLAR_FULL_SECONDS = 120;
+/**
+ * Seconds from empty to full at anchor under a sun in the zenith.
+ *
+ * 185 s, up from 120, which is the same panel yielding 65% of what it used to:
+ * the net climb goes 0.00833 -> 0.00541 level/s. Both numbers are NET, so the
+ * 35% comes off the figure the HUD prints and the player watches, not off a
+ * gross yield they never see.
+ *
+ * The useful window narrows with it. A noon charge is now three minutes rather
+ * than two, and the shoulders of the day that used to be worth sitting out --
+ * 30 degrees of elevation was 4.2 minutes to full -- are past six and a half,
+ * which is most of what is left of the afternoon. Drifting is no longer a way
+ * to fill the tank; it is a way to not quite empty it.
+ */
+const SOLAR_FULL_SECONDS = 185;
 
-/** Seconds from empty to full alongside a berth, before the hotel load (10.04 s after it). */
-const DOCK_FULL_SECONDS = 10;
+/**
+ * Seconds from empty to full alongside a berth, before the hotel load
+ * (40.6 s after it).
+ *
+ * 40 s, up from 10, so shore power pays out at a quarter of its old rate.
+ * A berth is still far and away the fastest charge in the world -- 4.6x the
+ * best the sun ever manages, where it used to be 12x -- but it is now a stop
+ * measured in tens of seconds rather than a tap of the brakes, and the choice
+ * of when to break a passage is a real one.
+ */
+const DOCK_FULL_SECONDS = 40;
 
 /**
  * The constant hotel load, level/s. 1 / 2520 = 0.000397.
@@ -87,22 +109,22 @@ const IDLE_DRAIN = 1 / IDLE_ENDURANCE;
 const FULL_BURN = 1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN;
 
 /**
- * Solar with the sun in the zenith, level/s. 1/120 + IDLE_DRAIN = 0.008730.
+ * Solar with the sun in the zenith, level/s. 1/185 + IDLE_DRAIN = 0.005802.
  *
  * IDLE_DRAIN is added back because SOLAR_FULL_SECONDS is a claim about the NET
  * climb, and the hotel load is still being paid while the panels work. The
  * gross figure alone would leave the two minutes about 6 s short.
  *
  * Yield is the sine of the sun's elevation at the ship, so the useful window
- * is much narrower than "daytime": 0.0083 net at local noon (120 s to full),
- * 0.0040 net at 30 degrees of elevation (about 4.2 min), and -0.0004 the
+ * is much narrower than "daytime": 0.0054 net at local noon (185 s to full),
+ * 0.0025 net at 30 degrees of elevation (about 6.6 min), and -0.0004 the
  * moment the sun sets. That last number is intended and is the whole shape of
  * the loop -- a ship left drifting overnight loses ground, and a berth is the
  * only fast way back.
  */
 const SOLAR_PEAK = 1 / SOLAR_FULL_SECONDS + IDLE_DRAIN;
 
-/** Shore power, level/s. 1/10 = 0.1000, so a berth refills a dead ship in 10.04 s. */
+/** Shore power, level/s. 1/40 = 0.0250, so a berth refills a dead ship in 40.6 s. */
 const DOCK_RATE = 1 / DOCK_FULL_SECONDS;
 
 /**
@@ -111,7 +133,8 @@ const DOCK_RATE = 1 / DOCK_FULL_SECONDS;
  * Not zero, because a berth that only pays out at a dead stop makes the player
  * fight STOP_EPSILON for a reward they have already sailed to; and not
  * generous either, because at 15 kn the ship crosses a whole charging zone in
- * a second or two and would collect a fifth of a tank for driving past.
+ * a second or two, which even at the slower rate is a twentieth of a tank for
+ * driving past.
  *
  * Tested against GROUND speed, and it is the only test in this file that is.
  * See the note below on the two speeds: a ship blown through a ring at 12 kn
@@ -198,9 +221,9 @@ export function createEnergy(towns: Towns): Energy {
     const burn = IDLE_DRAIN + FULL_BURN * speedFrac * speedFrac;
 
     // A berth overrides the panels rather than stacking with them. Shore power
-    // is eleven times the best the sun ever manages, so the sum would beat the
-    // berth alone by well under a second over a whole charge -- invisible, and
-    // it would make the rate on the HUD unreadable back to a single cause.
+    // is over four times the best the sun ever manages, so the sum would beat
+    // the berth alone by a couple of seconds over a whole charge -- and it
+    // would make the rate on the HUD unreadable back to a single cause.
     const berth = towns.dockAt(ship.position);
     const docked = berth !== null && Math.abs(ship.groundSpeed) < DOCK_SPEED_LIMIT;
 
