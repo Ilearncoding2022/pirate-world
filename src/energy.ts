@@ -67,30 +67,32 @@ const IDLE_ENDURANCE = 42 * 60;
 /**
  * Seconds from empty to full at anchor under a sun in the zenith.
  *
- * 185 s, up from 120, which is the same panel yielding 65% of what it used to:
- * the net climb goes 0.00833 -> 0.00541 level/s. Both numbers are NET, so the
- * 35% comes off the figure the HUD prints and the player watches, not off a
- * gross yield they never see.
+ * 200 s, so the net climb under a zenith sun is exactly **0.5% of the tank per
+ * second** -- the figure the HUD prints and the player watches. NET, not
+ * gross: the hotel load is still being paid while the panels work, and
+ * SOLAR_PEAK below adds it back so this stays a claim about what is seen.
  *
- * The useful window narrows with it. A noon charge is now three minutes rather
- * than two, and the shoulders of the day that used to be worth sitting out --
- * 30 degrees of elevation was 4.2 minutes to full -- are past six and a half,
- * which is most of what is left of the afternoon. Drifting is no longer a way
- * to fill the tank; it is a way to not quite empty it.
+ * The useful window is much narrower than "daytime", because yield is the sine
+ * of the sun's elevation: 3 min 20 s to full at local noon, about 7 min 15 s at
+ * 30 degrees of elevation, and a net loss the moment the sun sets. Drifting is
+ * not a way to fill the tank; it is a way to not quite empty it.
  */
-const SOLAR_FULL_SECONDS = 185;
+const SOLAR_FULL_SECONDS = 200;
 
 /**
- * Seconds from empty to full alongside a berth, before the hotel load
- * (40.6 s after it).
+ * Seconds from empty to full alongside a berth.
  *
- * 40 s, up from 10, so shore power pays out at a quarter of its old rate.
- * A berth is still far and away the fastest charge in the world -- 4.6x the
- * best the sun ever manages, where it used to be 12x -- but it is now a stop
- * measured in tens of seconds rather than a tap of the brakes, and the choice
- * of when to break a passage is a real one.
+ * 50 s, so shore power nets exactly **2% of the tank per second**. NET, like
+ * SOLAR_FULL_SECONDS and for the same reason: DOCK_RATE below adds the hotel
+ * load back, so this is the number the HUD prints rather than a gross yield
+ * the player never sees.
+ *
+ * A berth remains far and away the fastest charge in the world, four times the
+ * best the sun ever manages, but it is a stop measured in tens of seconds
+ * rather than a tap of the brakes, so when to break a passage is a real
+ * choice.
  */
-const DOCK_FULL_SECONDS = 40;
+const DOCK_FULL_SECONDS = 50;
 
 /**
  * The constant hotel load, level/s. 1 / 2520 = 0.000397.
@@ -129,16 +131,24 @@ const FULL_BURN = 1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN;
  * gross figure alone would leave the two minutes about 6 s short.
  *
  * Yield is the sine of the sun's elevation at the ship, so the useful window
- * is much narrower than "daytime": 0.0054 net at local noon (185 s to full),
- * 0.0025 net at 30 degrees of elevation (about 6.6 min), and -0.0004 the
+ * is much narrower than "daytime": 0.0050 net at local noon (200 s to full),
+ * 0.0023 net at 30 degrees of elevation (about 7.3 min), and -0.0004 the
  * moment the sun sets. That last number is intended and is the whole shape of
  * the loop -- a ship left drifting overnight loses ground, and a berth is the
  * only fast way back.
  */
 const SOLAR_PEAK = 1 / SOLAR_FULL_SECONDS + IDLE_DRAIN;
 
-/** Shore power, level/s. 1/40 = 0.0250, so a berth refills a dead ship in 40.6 s. */
-const DOCK_RATE = 1 / DOCK_FULL_SECONDS;
+/**
+ * Shore power, level/s, gross.
+ *
+ * IDLE_DRAIN is added back for the same reason SOLAR_PEAK adds it: the hotel
+ * load is drawn alongside the berth as it is everywhere else, so a gross
+ * 1/DOCK_FULL_SECONDS would net slightly under the figure that constant
+ * claims. 1/50 + 0.000397 = 0.020397 gross, which nets exactly 0.0200 -- the
+ * 2%/s the HUD reads alongside.
+ */
+const DOCK_RATE = 1 / DOCK_FULL_SECONDS + IDLE_DRAIN;
 
 /**
  * Seconds the ship has to stay inside a berth's ring before it connects.
@@ -189,7 +199,7 @@ const DOCK_DWELL_SECONDS = 2;
  * positive level instead would spend that level on thrust inside the same
  * frame and drop straight back to empty, so the thrusters would stutter on and
  * off every single frame for as long as the panels trickled -- and `mode`
- * would strobe EMPTY/SOLAR along with them. 0.03 is 3.6 s of noon sun or 0.3 s
+ * would strobe EMPTY/SOLAR along with them. 0.03 is 6 s of noon sun or 1.5 s
  * at a berth: long enough to read as a restart, short enough not to feel like
  * a punishment.
  */
