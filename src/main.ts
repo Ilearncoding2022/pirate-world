@@ -9,6 +9,7 @@ import { createFollowCamera } from './camera';
 import { createControls } from './controls';
 import { createHud } from './hud';
 import { createRadar } from './radar';
+import { createTimeDial } from './timedial';
 import { createEnv } from './env';
 import { createEnergy } from './energy';
 import { createWind } from './wind';
@@ -109,6 +110,9 @@ function startGame(): void {
 
   const hud = createHud(records.wallet);
   const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
+  const timeDialCanvas = document.getElementById('hud-timedial');
+  const timeDial =
+    timeDialCanvas instanceof HTMLCanvasElement ? createTimeDial(timeDialCanvas) : null;
   const postFx = createPostFx(renderer, quality);
 
   // The two overlays. Neither is a scene: they own their own DOM over the frozen
@@ -215,6 +219,11 @@ function startGame(): void {
       energy.update(dt, restingSnapshot(), env);
       if (fishing.isOpen) fishing.update(dt);
       hud.update(ship.state, energy.state, wind.state);
+      // Redrawn but not advanced: `env` is frozen with the rest of the world,
+      // so this repaints the same reading. It has to run at all because the
+      // canvas can still be resized behind the overlay, and a resized canvas
+      // that is never drawn into is blank.
+      timeDial?.update(ship.state, env);
       // A zero dt, so nothing animates, but the composer still redraws: the
       // frozen frame has to survive a window resize while the card is over it,
       // and a resized target that is never rendered into is a black screen.
@@ -247,6 +256,9 @@ function startGame(): void {
     wake.update(dt, ship.state, env, renderer);
     hud.update(ship.state, energy.state, wind.state);
     radar.update(dt, ship.state, wind.state);
+    // After globe.update, which is what writes `env.sunDirection`. Reading it
+    // before would put the dial a frame behind the sky it is describing.
+    timeDial?.update(ship.state, env);
 
     postFx.render(dt, scene, view.camera);
     // Reads postFx's rolling means straight back off the frame that just

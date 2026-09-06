@@ -538,6 +538,35 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   Time dial — where the ship stands in its own solar day
+
+   Sits under the scope and shares its width, so the radar panel reads as one
+   instrument stack rather than two. Deliberately smaller than the scope: the
+   plot is what the player steers by, and this is a glance.
+
+   Not a disc like the scope. The scope is a lit tube and earns its housing;
+   giving this one too would make the panel read as two eyes.
+   --------------------------------------------------------------------- */
+.timedial {
+  position: relative;
+  margin-top: 8px;
+  /* Matches .radar's clamp so the two stay the same width at every size. */
+  width: clamp(118px, 12vw, 158px);
+  /* Wider than tall: the dial is a ring with a readout in it, and a square
+     box would leave a band of dead panel under it. */
+  aspect-ratio: 1 / 0.62;
+}
+
+/* timedial.ts sizes the backing store from clientWidth; this owns the CSS size. */
+.timedial__face {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---------------------------------------------------------------------
    Radar head — LAT, heading, LON, in a row above the scope
 
    These lived inside the disc for one revision and came back out. Two
@@ -1014,6 +1043,9 @@ kbd {
   }
   /* The compass now tracks its D-pad cell, so only the radar needs a cap. */
   .radar {
+    width: 104px;
+  }
+  .timedial {
     width: 104px;
   }
   /* The head row is what sets the panel's width now, so it is what has to
