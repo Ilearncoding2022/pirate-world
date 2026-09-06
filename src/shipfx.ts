@@ -1,3 +1,4 @@
+import { Color } from 'three';
 import type { BufferAttribute, BufferGeometry, Material, Mesh, MeshStandardMaterial, Object3D, Texture } from 'three';
 
 /**
@@ -131,6 +132,21 @@ const CHARGE_FLOOR = 0.25;
 const CHARGE_SPAN = 1 - CHARGE_FLOOR;
 
 /**
+ * Colour of the fake hull-neon streak Stream D's water reflection paints
+ * under the ship (`waterreflect.ts`) -- the hull itself cannot appear in that
+ * cube, since its camera sits inside the hull, so the streak stands in for
+ * it and is driven by this colour and by `glow.level` below.
+ *
+ * Pinned to the neon_cyan swatch from ART-DIRECTION.md §2.2 rather than read
+ * off whichever authored lamp happens to be lit or brightest: the hull also
+ * carries violet and lime neon (§2.2), and ART-DIRECTION §2.4's magenta rule
+ * -- magenta never appears on an in-world object -- is a hard constraint this
+ * reflection must keep regardless of what the model happens to be wearing.
+ * Fixing the colour is what makes that a certainty instead of a hope.
+ */
+const REFLECTED_NEON_COLOR = '#59ddff';
+
+/**
  * Multiplier on every emissive while a berth is charging the ship.
  *
  * It reads as the hull drinking from the shore, and it is the only
@@ -192,7 +208,38 @@ interface Cloth {
   invSpanY: number;
 }
 
+/**
+ * The hull's neon as Stream D's water reflection plugin reads it: a fixed
+ * representative colour (`REFLECTED_NEON_COLOR`) and its current dimming, in
+ * [0, 1], under the same flat-battery and dock-flare terms as every other
+ * emissive on the model (see `chargeGlow` in `update` below).
+ *
+ * A module-level singleton rather than only a field on the `ShipFx` returned
+ * below, because `waterreflect.ts`'s plugin `update(dt, env, ship, camera)`
+ * has no way to reach the `ShipFx` instance -- it lives in a closure private
+ * to `ship.ts`, which Stream D does not own and may not edit. The game never
+ * builds more than one ship, so one shared object is exactly as correct as
+ * a per-instance field and needs no wiring through files outside this
+ * stream's ownership. `createShipFx`'s returned `glow` is this same object,
+ * so reading it either way sees one another's writes.
+ *
+ * Starts at level 0 (no streak) rather than at `CHARGE_FLOOR`, so a
+ * reflection built before the glTF hull has streamed in -- or if it never
+ * does -- shows no hull-neon streak instead of a phantom one at floor
+ * brightness with no ship above it.
+ */
+export const shipGlow: { color: Color; level: number } = {
+  color: new Color(REFLECTED_NEON_COLOR),
+  level: 0,
+};
+
 export interface ShipFx {
+  /**
+   * See `shipGlow` above, which this is the same object as. Mutated in place
+   * by `update()`; read it back after calling that, never before the first
+   * call.
+   */
+  readonly glow: { color: Color; level: number };
   /**
    * Called only from `ship.ts`, which owns both halves of this signature: the
    * committed motion and the `EnergyState` it was handed for the same frame.
@@ -455,6 +502,7 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
   }
 
   return {
+    glow: shipGlow,
     update(
       dt: number,
       speedFrac: number,
@@ -488,6 +536,12 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
       // tank as well, for everything that is meant to read as stored charge.
       const flareMul = 1 + (DOCK_FLARE - 1) * flare;
       const chargeGlow = (CHARGE_FLOOR + CHARGE_SPAN * level) * flareMul;
+
+      // Same battery/dock terms as every other emissive, clamped to [0, 1]:
+      // DOCK_FLARE alone can carry chargeGlow up to 1.4, and the fake
+      // reflection this drives has no bloom pass downstream to tame an
+      // over-range value the way the real neon materials do.
+      shipGlow.level = Math.min(1, chargeGlow);
 
       for (const glow of glows) {
         glow.material.emissiveIntensity =

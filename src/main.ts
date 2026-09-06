@@ -17,6 +17,7 @@ import { createRecords } from './save';
 import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
 import { createQuality } from './quality';
+import { createReflection } from './reflection';
 import type { ShipState } from './types';
 
 const host = document.getElementById('app');
@@ -36,7 +37,11 @@ const scene = new THREE.Scene();
 
 const env = createEnv();
 const terrain = createTerrain(DEFAULT_SEED);
-const globe = createGlobe(terrain);
+// Docs/RENDER_PLAN.md Phase 1 Stream D. Built here, not in globe.ts, because
+// its per-frame render pass needs the renderer and the top-level scene,
+// neither of which globe.ts ever sees -- see reflection.ts.
+const reflection = createReflection(quality);
+const globe = createGlobe(terrain, reflection);
 scene.add(globe.group);
 
 const ship = createShip(
@@ -204,6 +209,10 @@ function frame(): void {
   ship.update(dt, controls.input, energy.state, wind.state);
   view.update(dt, ship.state, controls.input);
   globe.update(dt, env, wind.state, ship.state, view.camera);
+  // Before postFx.render: it renders straight into its own cube target and
+  // must restore the renderer's target before the visible frame draws, or
+  // the game renders into its own reflection cube and the canvas goes black.
+  reflection.update(dt, ship.state.position, renderer, scene);
   docks.update(dt, env, ship.state, energy.state);
   wake.update(dt, ship.state, env);
   hud.update(ship.state, energy.state, wind.state);
