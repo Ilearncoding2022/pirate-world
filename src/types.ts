@@ -27,10 +27,26 @@ export interface Terrain {
    * Values above SEA_LEVEL are land. Deterministic for a given seed.
    */
   heightAt(dir: Vector3): number;
-  /** True if the given unit direction is on land (heightAt(dir) > SEA_LEVEL). */
+  /**
+   * True if the given unit direction is on land.
+   *
+   * This is the ship's collision test, and it is deliberately NOT
+   * `heightAt(dir) > seaLevel` once the world is assembled: `globe.ts` installs
+   * the culled height map as a land mask, so the hull agrees with what is
+   * actually drawn instead of with the raw noise field. The difference is every
+   * islet `islets.ts` sank -- land the player cannot see and must not hit.
+   */
   isLand(dir: Vector3): boolean;
   /** Convenience wrapper around isLand using degrees. */
   isLandLatLon(latDeg: number, lonDeg: number): boolean;
+  /**
+   * Point `isLand` at a rasterised height field instead of the noise.
+   *
+   * Called once, by `globe.ts`, after the map has been built and culled.
+   * Passing the map's own `sample` is what makes collision, the land mesh and
+   * the water shader three readings of one field rather than two.
+   */
+  useLandMask(sample: (dir: Vector3) => number): void;
   /** The height threshold that separates water from land. */
   readonly seaLevel: number;
 }

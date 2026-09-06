@@ -18,8 +18,14 @@ export const MAX_LAND_RELIEF = GLOBE_RADIUS * 0.05;
 export const COAST_LIFT = GLOBE_RADIUS * 0.0012;
 /** Height band above sea level rendered as beach. */
 const BEACH_BAND = 0.055;
-/** Faces whose vertices are all below this are dropped from the land mesh. */
-const CULL_MARGIN = 0.10;
+/**
+ * Faces whose vertices are all below this are dropped from the land mesh.
+ *
+ * Exported because `islets.ts` sinks the islands it culls past this depth. A
+ * sunk islet shallower than the margin would keep its faces and go on being
+ * drawn as land the ship can sail straight through.
+ */
+export const CULL_MARGIN = 0.10;
 
 const PALETTE = {
   sand: new THREE.Color('#d9c48b'),

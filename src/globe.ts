@@ -7,6 +7,7 @@ import type { WaterBodies } from './waterbodies';
 import { createLand } from './land';
 import { createWater } from './water';
 import { createWaterBodies } from './waterbodies';
+import { cullIslets } from './islets';
 import { createGrid } from './grid';
 import { createSky } from './sky';
 import { createDayNight } from './daynight';
@@ -38,6 +39,16 @@ export function createGlobe(terrain: Terrain): Globe {
   group.name = 'world';
 
   const heightMap = createHeightMap(terrain);
+
+  // Sink the specks before anything reads the map. Everything downstream --
+  // the flood fill, the berth search, the land mesh, the scope -- then sees one
+  // world, and none of them has to know the cull happened.
+  cullIslets(heightMap, terrain.seaLevel);
+  // Collision is the exception: `ship.ts` asks the terrain, not the map. Hand
+  // the culled map over as the land mask so the hull stops snagging on islets
+  // that no longer exist anywhere else.
+  terrain.useLandMask(heightMap.sample);
+
   // Flooded from the ship's own spawn point, so "reachable" means reachable
   // by the player, not merely connected to some arbitrary sea.
   const waterBodies = createWaterBodies(

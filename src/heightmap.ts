@@ -20,6 +20,18 @@ export interface HeightMap {
   height: number;
   /** Bilinear sample of `data` at a unit direction. Matches the shader lookup. */
   sample(dir: Vector3): number;
+  /**
+   * Overwrite one texel, by index into `data`, in both the CPU array and the
+   * half-float copy the GPU reads. Batch these and call `flush` once: the
+   * upload is per-texture, not per-texel.
+   *
+   * This exists for `islets.ts`, which can only decide what to keep after a
+   * flood fill has told it which texels belong to the same landmass. Nothing
+   * else should be rewriting the terrain behind the generator's back.
+   */
+  setAt(index: number, h: number): void;
+  /** Re-upload the texture after a run of `setAt` calls. */
+  flush(): void;
 }
 
 /**
@@ -88,7 +100,16 @@ export function createHeightMap(terrain: Terrain, width = 2048, height = 1024): 
     return top + (bot - top) * ty;
   }
 
-  return { texture, data, width, height, sample };
+  function setAt(index: number, h: number): void {
+    data[index] = h;
+    half[index] = DataUtils.toHalfFloat(h);
+  }
+
+  function flush(): void {
+    texture.needsUpdate = true;
+  }
+
+  return { texture, data, width, height, sample, setAt, flush };
 }
 
 /**

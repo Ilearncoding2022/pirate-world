@@ -9,6 +9,37 @@ export const DEFAULT_SEED = 1337;
 /** Height threshold separating water from land. */
 export const SEA_LEVEL = 0.08;
 
+/**
+ * Vertical scale and offset applied to the summed noise, before SEA_LEVEL cuts it.
+ *
+ * These two numbers, and only these two, decide how much of the globe is dry.
+ * GAIN spreads the field so coastlines are crisp rather than mushy; BIAS slides
+ * the whole thing under the waterline until the land/water split comes out
+ * where it should. BIAS is the one to reach for: moving SEA_LEVEL instead would
+ * work identically on the shape of the world but would silently retune every
+ * constant expressed as a height ABOVE sea level -- `towns.ts` SHORE_MARGIN and
+ * CENTRE_CEILING, `land.ts` BEACH_BAND and CULL_MARGIN, the water shader's
+ * depth ramp -- because those measure from a line that had moved.
+ *
+ * At GAIN 1.55 / BIAS -0.0964 the world is 25% land, 75% water. `islets.ts`
+ * then sinks the specks, which is worth about a further 0.6% of the land; BIAS
+ * is tuned against the figure AFTER that cull, since that is the world the
+ * player sails.
+ *
+ * GAIN and BIAS are not independent. Land is `raw * GAIN + BIAS > SEA_LEVEL`,
+ * i.e. `raw > (SEA_LEVEL - BIAS) / GAIN`, so the pair only ever expresses ONE
+ * number -- a threshold on the raw noise -- and every (GAIN, BIAS) that yields
+ * the same land fraction yields a bit-identical coastline. Changing GAIN alone
+ * to reshape the world therefore does nothing but move the land fraction, and
+ * the split between open ocean and enclosed water is not separately tunable
+ * here at all: it follows from the threshold. Lower sea, deeper flooding, more
+ * basins joined to the sea. At 33% land the world's lakes were 1.3% of its
+ * water; at 25% they are 0.66%, and no choice of GAIN recovers the difference.
+ * Only a different noise field would.
+ */
+const HEIGHT_GAIN = 1.55;
+const HEIGHT_BIAS = -0.0964;
+
 /** Deterministic 32-bit PRNG. */
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -91,7 +122,7 @@ export function createTerrain(seed: number = DEFAULT_SEED): Terrain {
 
     // Bias the whole field down so the world reads as an ocean world with continents,
     // and gently flatten the extremes.
-    h = h * 1.55 - 0.02;
+    h = h * HEIGHT_GAIN + HEIGHT_BIAS;
 
     // Guarantee open water at the spawn point so the ship never starts beached.
     const d = Math.acos(Math.max(-1, Math.min(1, dir.dot(_spawn))));
@@ -108,8 +139,17 @@ export function createTerrain(seed: number = DEFAULT_SEED): Terrain {
     return Math.max(-1, Math.min(1, h));
   }
 
+  /**
+   * Set once at startup by `globe.ts`, to the culled height map's sampler.
+   *
+   * Until it is installed, `isLand` answers straight from the noise field --
+   * which is what `createHeightMap` needs while it is rasterising that very
+   * field, and what any headless caller gets if it never builds a map.
+   */
+  let landMask: ((dir: Vector3) => number) | null = null;
+
   function isLand(dir: Vector3): boolean {
-    return heightAt(dir) > SEA_LEVEL;
+    return (landMask !== null ? landMask(dir) : heightAt(dir)) > SEA_LEVEL;
   }
 
   return {
@@ -117,6 +157,9 @@ export function createTerrain(seed: number = DEFAULT_SEED): Terrain {
     isLand,
     isLandLatLon(latDeg: number, lonDeg: number): boolean {
       return isLand(latLonToDir(latDeg, lonDeg, _probe));
+    },
+    useLandMask(sample: (dir: Vector3) => number): void {
+      landMask = sample;
     },
     seaLevel: SEA_LEVEL,
   };
