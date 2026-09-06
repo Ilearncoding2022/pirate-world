@@ -191,6 +191,19 @@ body {
   color: var(--ink-mute);
 }
 
+/* GPU/CPU/draw-call line, appended by hud.ts -- absent from index.html
+   because it does not exist for most players. Off by default ([hidden] is
+   the UA's own display:none, undisturbed here), toggled with Backquote. */
+.panel__dev {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--panel-border);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mute);
+}
+
 /* ---------------------------------------------------------------------
    Telemetry panel (top-left)
    ------------------------------------------------------------------- */

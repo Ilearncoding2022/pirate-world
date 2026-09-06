@@ -1,0 +1,152 @@
+/**
+ * quality.ts — quality tiers, resolved once at startup.
+ *
+ * `createQuality()` is called once, near the top of `main.ts`, before
+ * anything that reads a row of the table below is built. Every module built
+ * after it -- this file's own `postfx.ts` and `main.ts`, and Phase 1's A
+ * (wake map), B (displacement patch) and D (reflections) -- treats the
+ * returned object as read-only; this file is the only writer of what the
+ * numbers mean, and the object itself is frozen so nothing downstream can
+ * quietly drift its own copy out of step with the table.
+ *
+ * `wakeMapSize`, `patchSegments`, `reflectionSize` and
+ * `reflectionFacesPerFrame` have no reader yet -- A, B and D are the readers,
+ * and they arrive in Phase 1 -- so they are exported now, exactly as named,
+ * purely so those streams do not also have to agree on a table between them.
+ */
+
+export type QualityTier = 'low' | 'medium' | 'high';
+
+/**
+ * One row of the quality table.
+ *
+ * None of these are world-scale or ship-scale in the sense
+ * docs/ARCHITECTURE.md's "World scale" section means: they are pipeline and
+ * wiring numbers (texel counts, a pixel-ratio ceiling, a vertex count), not
+ * distances or frequencies over the globe.
+ */
+export interface QualitySettings {
+  /** Ceiling passed to `renderer.setPixelRatio` (both call sites, main.ts). */
+  pixelRatioCap: number;
+  /** Whether the water shader's fragment-side chop octave runs at all. Read by water.ts, a later stream -- Q does not consume this. */
+  waveChop: boolean;
+  /** Cap, in device pixels, on the bloom chain's working width (postfx.ts). */
+  bloomMaxWidth: number;
+  /** Wake render-target size in texels, square. Read by Stream A (wakemap.ts), later -- Q does not consume this. */
+  wakeMapSize: number;
+  /** Displacement patch vertices per side. Read by Stream B (waterpatch.ts), later -- Q does not consume this. */
+  patchSegments: number;
+  /** Reflection cube face size in texels; 0 disables the cube outright. Read by Stream D (reflection.ts), later -- Q does not consume this. */
+  reflectionSize: number;
+  /** Reflection cube faces refreshed per frame; 0 disables the cube outright. Read by Stream D, later -- Q does not consume this. */
+  reflectionFacesPerFrame: number;
+}
+
+/**
+ * The authoritative quality table. Q defines every row; nothing here is
+ * tuned by feel -- these are the numbers docs/RENDER_PLAN.md's Phase 0/Q
+ * section specifies verbatim.
+ *
+ * The performance budget in that document also fixes the order features drop
+ * in in when a frame runs over budget: reflection size, wake map size, patch
+ * segments, chop octave, pixel ratio cap -- top to bottom of this table read
+ * right to left. The owner moves a machine to a lower tier rather than a
+ * single feature being cut piecemeal.
+ */
+const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
+  low: {
+    pixelRatioCap: 1,
+    waveChop: false,
+    bloomMaxWidth: 960,
+    wakeMapSize: 256,
+    patchSegments: 96,
+    reflectionSize: 0,
+    reflectionFacesPerFrame: 0,
+  },
+  medium: {
+    pixelRatioCap: 1.5,
+    waveChop: true,
+    bloomMaxWidth: 1280,
+    wakeMapSize: 512,
+    patchSegments: 128,
+    reflectionSize: 128,
+    reflectionFacesPerFrame: 1,
+  },
+  high: {
+    pixelRatioCap: 2,
+    waveChop: true,
+    bloomMaxWidth: 1280,
+    wakeMapSize: 512,
+    patchSegments: 160,
+    reflectionSize: 256,
+    reflectionFacesPerFrame: 2,
+  },
+};
+
+export interface Quality extends QualitySettings {
+  readonly tier: QualityTier;
+}
+
+/**
+ * Same "namespace/name" shape as `SAVE_KEY` in save.ts, and stored the same
+ * tolerant way: a player's chosen tier survives a reload without a `?quality=`
+ * on the URL.
+ */
+export const QUALITY_STORAGE_KEY = 'pirate-world/quality';
+
+function isQualityTier(value: string | null): value is QualityTier {
+  return value === 'low' || value === 'medium' || value === 'high';
+}
+
+/**
+ * `localStorage` throws on access in some private-browsing modes rather than
+ * merely being empty, and a quota error can happen on a machine that was
+ * reading it happily a moment earlier -- same tolerance `save.ts` applies to
+ * every read and write of its own key.
+ */
+function readStoredTier(): QualityTier | null {
+  try {
+    const stored = window.localStorage.getItem(QUALITY_STORAGE_KEY);
+    return isQualityTier(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/** `?quality=` wins outright over a stored choice; a stored choice wins over the default. */
+function resolveTier(search: string): QualityTier {
+  const fromQuery = new URLSearchParams(search).get('quality');
+  if (isQualityTier(fromQuery)) return fromQuery;
+  return readStoredTier() ?? 'high';
+}
+
+declare global {
+  interface Window {
+    /**
+     * Present only when `?quality=` or `?debug` is on the URL -- never in an
+     * ordinary player's session. `import.meta.env.MODE !== 'production'`
+     * would be the wrong guard here: `vite preview` serves a genuine
+     * production build, and the smoke test's `?quality=low` pass needs this
+     * hook to exist under exactly that build.
+     */
+    __pirateWorld?: { quality: Quality };
+  }
+}
+
+/**
+ * Builds the frozen settings for this session and, if the URL asks for it,
+ * publishes the debug hook. Called once, at the top of `main.ts`, before the
+ * two `renderer.setPixelRatio` calls or anything else that reads a row of the
+ * table.
+ */
+export function createQuality(search: string = window.location.search): Quality {
+  const tier = resolveTier(search);
+  const quality: Quality = Object.freeze({ tier, ...QUALITY_TABLE[tier] });
+
+  const params = new URLSearchParams(search);
+  if (params.has('quality') || params.has('debug')) {
+    window.__pirateWorld = { quality };
+  }
+
+  return quality;
+}

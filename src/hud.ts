@@ -1,5 +1,6 @@
 import type { EnergyMode, EnergyState, ShipState, WindState } from './types';
 import type { Wallet } from './wallet';
+import type { GpuFrameStats } from './postfx';
 
 /**
  * hud.ts — formats ShipState into the DOM overlay declared in index.html.
@@ -343,6 +344,36 @@ function trackTelemetryHeight(): void {
 }
 
 /**
+ * The dev telemetry line: GPU ms / CPU ms / draw calls, from Q's frame timer
+ * in postfx.ts. It is not in index.html, because it does not exist for most
+ * players -- appended here, at the foot of the telemetry panel, only once
+ * the game has actually booted, hidden until Backquote asks for it, and
+ * never shipped as a first-class HUD row.
+ */
+function createDevReadout(): { setVisible(visible: boolean): void; setStats(stats: GpuFrameStats): void } {
+  const el = document.createElement('div');
+  el.id = 'hud-dev-timer';
+  el.className = 'panel__dev';
+  el.hidden = true;
+  document.querySelector('.panel--telemetry')?.appendChild(el);
+
+  const writeText = textWriter(el);
+
+  return {
+    setVisible(visible: boolean): void {
+      el.hidden = !visible;
+    },
+    setStats(stats: GpuFrameStats): void {
+      // 'n/a' rather than a wrong number: EXT_disjoint_timer_query_webgl2 is
+      // not on every GPU, and a disjoint frame is also folded into this by
+      // postfx.ts simply never advancing its mean -- see GpuFrameStats.gpuMs.
+      const gpu = stats.gpuMs === null ? 'n/a' : `${stats.gpuMs.toFixed(2)}ms`;
+      writeText(`GPU ${gpu}  CPU ${stats.cpuMs.toFixed(2)}ms  DC ${Math.round(stats.calls)}`);
+    },
+  };
+}
+
+/**
  * Builds the panel writers and subscribes the purse.
  *
  * The wallet is taken rather than read, because gold changes on a catch and
@@ -357,8 +388,13 @@ function trackTelemetryHeight(): void {
  */
 export function createHud(wallet: Wallet): {
   update(ship: ShipState, energy: EnergyState, wind: WindState): void;
+  /** Shows or hides the GPU/CPU/draw-call line. Off by default; main.ts calls this from its Backquote listener. */
+  setDevTimingVisible(visible: boolean): void;
+  /** Feeds this frame's rolling means to the dev line. A no-op while it is hidden costs nothing worth guarding. */
+  updateDevTiming(stats: GpuFrameStats): void;
 } {
   trackTelemetryHeight();
+  const devReadout = createDevReadout();
 
   // Looked up once; every writer tolerates a missing element.
   const writeHeading = textWriter(document.getElementById('hud-heading'));
@@ -450,6 +486,14 @@ export function createHud(wallet: Wallet): {
       // `energy.canThrust` is deliberately not read: `empty` holds for exactly
       // as long as thrust is refused, so a second indicator would say the same
       // thing twice and could only ever contradict the tag.
+    },
+
+    setDevTimingVisible(visible: boolean): void {
+      devReadout.setVisible(visible);
+    },
+
+    updateDevTiming(stats: GpuFrameStats): void {
+      devReadout.setStats(stats);
     },
   };
 }
