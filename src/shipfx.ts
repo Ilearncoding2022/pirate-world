@@ -4,12 +4,16 @@ import type { BufferAttribute, BufferGeometry, Material, Mesh, MeshStandardMater
  * Drives the parts `tools/build_ship.py` deliberately leaves as separate glTF
  * nodes.
  *
- * That script merges the ship by material -- 233 objects down to 26, one draw
- * call per material -- and exempts a short list of parts in its KEEP_SEPARATE
- * tuple "because the game may want to address them: the glows it can pulse,
- * and the two cloth pieces". This module is the other half of that bargain;
- * without it the merge is the only thing the rebuilt model buys us and all
- * that neon sits there dead.
+ * That script joins the ship's static parts by material, collapsing a couple of
+ * hundred authored objects into one draw call per material, and exempts a short
+ * list in its KEEP_SEPARATE tuple "because the game may want to address them:
+ * the glows it can pulse, and the two cloth pieces". This module is the other
+ * half of that bargain; without it the merge is the only thing the rebuilt model
+ * buys us and all that neon sits there dead.
+ *
+ * Deliberately no object counts here: they move on every rebuild, and a stale
+ * number in a comment is worse than none. Run the build script if you want the
+ * current ones -- it prints both.
  *
  * Only the three parts that need bespoke motion are found by node name
  * (`thruster_flame*`, `mainsail`, `flag`). The lamps are found by material
