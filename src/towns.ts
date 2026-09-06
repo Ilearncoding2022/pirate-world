@@ -16,8 +16,17 @@ import { GLOBE_RADIUS, tangentFrame } from './geo';
  */
 export const TOWN_SEED = 0x5eed17;
 
-/** How many settlements to try to place, and how hard to try. */
-const CLUSTER_TARGET = 76;
+/**
+ * How many settlements to try to place, and how hard to try.
+ *
+ * Every settlement is now a port -- a candidate that cannot find a berth is not
+ * founded at all -- so this number is the size of the fleet's worth of charging
+ * stations as well as the size of the world's population. It came down a
+ * quarter, from 76, when that rule came in: 76 towns used to yield 48 berths,
+ * and leaving the target alone would have handed the player half again as many
+ * places to charge as the world was balanced around.
+ */
+const CLUSTER_TARGET = 57;
 const CLUSTER_TRIES = 20000;
 /**
  * Minimum arc, in radians, between two settlement centres. At GLOBE_RADIUS 200
@@ -60,9 +69,10 @@ const DOCK_MIN_COAST = 0.25;
  * stays near its own town, which BERTH_REACH + BERTH_MARGIN below keeps it
  * doing. Where the geometry conspires anyway (two towns either side of the same
  * strait, both berthing toward the middle) the placement loop rejects the
- * second outright, so the no-overlap promise on `Towns.dockAt` holds without
- * relying on the arithmetic. It is also comfortably wider than the 5.6-unit
- * hull, so holding station inside one is steering rather than parking.
+ * second outright -- and with it the town, which is no longer founded at all --
+ * so the no-overlap promise on `Towns.dockAt` holds without relying on the
+ * arithmetic. It is also many times the 3.12-unit hull, so holding station
+ * inside one is steering rather than parking.
  */
 const DOCK_RADIUS = 8;
 
@@ -94,10 +104,12 @@ const BERTH_BEARINGS = 24;
  * still lies mostly on the bank. Sampling a ring at DOCK_RADIUS asks the
  * question the drawn zone actually asks. Three quarters rather than all of it,
  * because a berth inside a harbour SHOULD have land behind it -- that is what a
- * harbour is. What gets turned away is the town with a puddle beside it, and
- * that is most of the difference between "coastal" and "a port": 73 of the 76
- * towns clear DOCK_MIN_COAST, and this leaves just under fifty of them with a
- * berth.
+ * harbour is. What gets turned away is the town with a puddle beside it.
+ *
+ * That used to cost such a town only its dock. Now that every settlement is a
+ * port, it costs the town itself, which makes this constant the sharpest edge
+ * in the file: raise it and the map empties out, lower it and the fleet starts
+ * finding berths in ponds.
  */
 const BERTH_CLEAR = 0.75;
 const BERTH_CLEAR_SAMPLES = 12;
@@ -158,7 +170,7 @@ export function oceanFraction(heightMap: HeightMap, seaLevel: number, dir: Vecto
   return ocean / COAST_PROBE_SAMPLES;
 }
 
-/** A `Town` while it is still being assembled; `dock` is filled in second. */
+/** A `Town` while it is still being assembled; `dock` is tied on at the end. */
 type MutableTown = { -readonly [K in keyof Town]: Town[K] };
 
 /* ------------------------------------------------------------------ */
@@ -166,17 +178,22 @@ type MutableTown = { -readonly [K in keyof Town]: Town[K] };
 /* ------------------------------------------------------------------ */
 
 /**
- * Where the world's settlements are, and which of them the ship can tie up at.
+ * Where the world's settlements are. Every one of them is a port.
  *
- * Two passes, and the split is load bearing. The first rejection-samples
- * centres over the sphere and scores each by how coastal and how low its spot
- * is, so ports along a shoreline are far more likely than towns in the
- * highlands and no two centres land on top of each other. The second walks out
- * from each centre looking for water the ship can actually get to. Only the
- * first pass draws from the PRNG, so adding, retuning or deleting the berth
- * search can never move a single town.
+ * A candidate is rejection-sampled over the sphere and scored by how coastal
+ * and how low its spot is, so shorelines are far more likely than highlands and
+ * no two centres land on top of each other. It then has to find a berth --
+ * water the ship can actually get to, close enough to tie up at -- and a
+ * candidate that cannot is not founded. That is what makes `Town.dock`
+ * non-null for every town in `all`.
  *
- * Reachability is the whole point of the second pass. The height map alone
+ * The berth search draws nothing from the PRNG, only from the height map, so
+ * retuning it moves which candidates survive but never which candidates are
+ * offered: the random stream is identical whatever the search decides. Keep it
+ * that way. A berth test that rolled a die would make every town downstream of
+ * it move whenever the search changed.
+ *
+ * Reachability is the whole point of the search. The height map alone
  * cannot answer it: a crater lake is under sea level and reads as water, but
  * `ship.ts` will never carry the player over the rim to reach it, so a berth
  * there would be a charging station nobody can dock at. `waterBodies`
@@ -200,35 +217,9 @@ export function createTowns(
   const _rimEast = new Vector3();
   const _rimProbe = new Vector3();
 
-  /* ---- 1. Settlement centres -------------------------------------- */
+  /* ---- 1. The berth search ---------------------------------------- */
 
   const towns: MutableTown[] = [];
-  const minDot = Math.cos(CLUSTER_MIN_ARC);
-
-  for (let attempt = 0; attempt < CLUSTER_TRIES && towns.length < CLUSTER_TARGET; attempt++) {
-    randomDirection(rng, _dir);
-    const h = heightMap.sample(_dir);
-    if (h <= seaLevel + SHORE_MARGIN || h > seaLevel + CENTRE_CEILING) continue;
-
-    const coast = oceanFraction(heightMap, seaLevel, _dir);
-    const lowland = 1 - Math.min(1, (h - seaLevel) / CENTRE_CEILING);
-    // Ports first, then flat inland towns, and hardly ever anything else.
-    if (rng() > (0.10 + 0.75 * coast) * (0.35 + 0.65 * lowland)) continue;
-
-    let tooClose = false;
-    for (let i = 0; i < towns.length; i++) {
-      if (towns[i].dir.dot(_dir) > minDot) {
-        tooClose = true;
-        break;
-      }
-    }
-    if (tooClose) continue;
-
-    towns.push({ dir: _dir.clone(), height: h, coast, dock: null });
-  }
-
-  /* ---- 2. Berths --------------------------------------------------- */
-
   const docks: Dock[] = [];
   /** Berth directions, flattened, for the overlap test and for `dockAt`. */
   const berthXyz: number[] = [];
@@ -277,10 +268,15 @@ export function createTowns(
   const steps = Math.round(BERTH_REACH / BERTH_STEP);
   const marginSteps = Math.round(BERTH_MARGIN / BERTH_STEP);
 
-  for (const town of towns) {
-    if (town.coast < DOCK_MIN_COAST) continue;
-
-    tangentFrame(town.dir, _north, _east);
+  /**
+   * The berth for a town at `centre`, or null if it has no water to tie up in.
+   *
+   * Null is now fatal to the town, not merely to its dock, so this is the gate
+   * that decides most of what the world looks like: everything it turns away is
+   * a settlement that never existed.
+   */
+  function findBerth(centre: Vector3): Vector3 | null {
+    tangentFrame(centre, _north, _east);
 
     // The seaward bearing: the one with the most reachable water along it.
     // Scoring the whole ray rather than a single sample is what keeps a berth
@@ -288,18 +284,19 @@ export function createTowns(
     // its length, a pond scores two or three steps and loses. Only this one
     // bearing is ever tried. Falling back to the next best when it fails was
     // tried and abandoned: with 24 bearings to choose from nearly every coastal
-    // town finds water somewhere, which took the fleet from 48 berths to 66 --
-    // and every one of those extra eighteen sits on a bearing with strictly
-    // less water than the town's own best, which is one way of describing the
-    // wrong side of the headland. Ties go to the lower bearing index --
-    // arbitrary, but fixed, so the world does not reshuffle between runs.
+    // town finds water somewhere, which in the world of the day took the fleet
+    // from 48 berths to 66 -- and every one of those extra eighteen sat on a
+    // bearing with strictly less water than the town's own best, which is one
+    // way of describing the wrong side of the headland. Ties go to the lower
+    // bearing index -- arbitrary, but fixed, so the world does not reshuffle
+    // between runs.
     let bearing = 0;
     let bestScore = 0;
     for (let b = 0; b < BERTH_BEARINGS; b++) {
       const a = (b / BERTH_BEARINGS) * Math.PI * 2;
       let open = 0;
-      for (let s = 1; s <= steps; s++) {
-        stepOut(town.dir, _north, _east, a, s * BERTH_STEP * ARC, _probe);
+      for (let st = 1; st <= steps; st++) {
+        stepOut(centre, _north, _east, a, st * BERTH_STEP * ARC, _probe);
         if (reachableWater(_probe)) open++;
       }
       if (open > bestScore) {
@@ -307,43 +304,76 @@ export function createTowns(
         bearing = a;
       }
     }
-    if (bestScore === 0) continue;
+    if (bestScore === 0) return null;
 
     // Walk out to the waterline, then keep going while the water holds, up to
     // MARGIN. Taking the last wet step rather than a fixed push past the first
     // one is what stops the berth crossing onto the far bank of anything
     // narrower than MARGIN.
     let found = -1;
-    for (let s = 1; s <= steps; s++) {
-      stepOut(town.dir, _north, _east, bearing, s * BERTH_STEP * ARC, _probe);
+    for (let st = 1; st <= steps; st++) {
+      stepOut(centre, _north, _east, bearing, st * BERTH_STEP * ARC, _probe);
       if (reachableWater(_probe)) {
-        found = s;
+        found = st;
         break;
       }
     }
-    if (found < 0) continue;
+    if (found < 0) return null;
 
     let last = found;
-    for (let s = found + 1; s <= found + marginSteps; s++) {
-      stepOut(town.dir, _north, _east, bearing, s * BERTH_STEP * ARC, _probe);
+    for (let st = found + 1; st <= found + marginSteps; st++) {
+      stepOut(centre, _north, _east, bearing, st * BERTH_STEP * ARC, _probe);
       if (!reachableWater(_probe)) break;
-      last = s;
+      last = st;
     }
-    stepOut(town.dir, _north, _east, bearing, last * BERTH_STEP * ARC, _probe);
-    if (rimClearance(_probe) < BERTH_CLEAR) continue;
+    stepOut(centre, _north, _east, bearing, last * BERTH_STEP * ARC, _probe);
+    if (rimClearance(_probe) < BERTH_CLEAR) return null;
 
-    let clashes = false;
     for (let i = 0; i < berthXyz.length; i += 3) {
       const d = berthXyz[i] * _probe.x + berthXyz[i + 1] * _probe.y + berthXyz[i + 2] * _probe.z;
-      if (d > berthMinDot) {
-        clashes = true;
+      if (d > berthMinDot) return null;
+    }
+
+    return _probe.clone();
+  }
+
+  /* ---- 2. Settlement centres, each with its berth ------------------ */
+
+  const minDot = Math.cos(CLUSTER_MIN_ARC);
+
+  for (let attempt = 0; attempt < CLUSTER_TRIES && towns.length < CLUSTER_TARGET; attempt++) {
+    randomDirection(rng, _dir);
+    const h = heightMap.sample(_dir);
+    if (h <= seaLevel + SHORE_MARGIN || h > seaLevel + CENTRE_CEILING) continue;
+
+    const coast = oceanFraction(heightMap, seaLevel, _dir);
+    const lowland = 1 - Math.min(1, (h - seaLevel) / CENTRE_CEILING);
+    // Ports first, then flat inland towns, and hardly ever anything else.
+    // The roll stays ahead of every rejection below it: those consume no
+    // randomness, so the stream advances once per candidate regardless.
+    if (rng() > (0.10 + 0.75 * coast) * (0.35 + 0.65 * lowland)) continue;
+
+    // Cheap gates before the expensive one. A spot with almost no water around
+    // it will not find a berth, and a spot too near an existing town cannot be
+    // founded even if it would.
+    if (coast < DOCK_MIN_COAST) continue;
+
+    let tooClose = false;
+    for (let i = 0; i < towns.length; i++) {
+      if (towns[i].dir.dot(_dir) > minDot) {
+        tooClose = true;
         break;
       }
     }
-    if (clashes) continue;
+    if (tooClose) continue;
 
-    const dock: Dock = { dir: _probe.clone(), radius: DOCK_RADIUS, town };
+    const berth = findBerth(_dir);
+    if (berth === null) continue;
+
+    const town: MutableTown = { dir: _dir.clone(), height: h, coast, dock: null };
+    const dock: Dock = { dir: berth, radius: DOCK_RADIUS, town };
     town.dock = dock;
+    towns.push(town);
     docks.push(dock);
     berthXyz.push(dock.dir.x, dock.dir.y, dock.dir.z);
   }
