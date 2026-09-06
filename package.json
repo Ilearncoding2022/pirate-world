@@ -8,8 +8,9 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:smoke": "playwright test",
-    "test:all": "npm run build && npm test && npm run test:smoke",
+    "test:smoke": "npm run build && playwright test",
+    "test:all": "npm run build && npm test && playwright test",
+    "shots": "node tests/shots.mjs",
     "golden:update": "vitest run --config tests/fixtures/vitest.config.ts"
   },
   "devDependencies": {

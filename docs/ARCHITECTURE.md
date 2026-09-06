@@ -2,6 +2,15 @@
 
 Vite + Three.js + TypeScript. No external art assets; everything is procedural.
 
+## Testing, and the budget on it
+`docs/TESTING.md` is the rule set: three tiers, what belongs in each, and a
+hard budget of **under five minutes of testing for a routine feature build,
+in total across the job, not per run**. The short version: `npm test` is two
+seconds and should be run constantly; the browser tier is slow because it
+software-renders, so run it at the boundaries of a piece of work rather than
+gating every step on it; and `npm run shots` gets you a picture without a
+build or a test runner. No test in this project asserts on how anything looks.
+
 ## Conventions (see `src/geo.ts`)
 - `GLOBE_RADIUS = 200`. The water surface sits at exactly this radius. See
   **World scale** below before changing it — half the constants in the project

@@ -71,9 +71,11 @@ export default defineConfig({
     },
   },
   webServer: {
-    // `npm run test:smoke` is just `playwright test`, so the server has to
-    // build and serve itself: a fresh production build on 4173, never 5173.
-    command: `npm run build && npm run preview -- --port ${PREVIEW_PORT} --strictPort`,
+    // Serve only -- do NOT build here. The npm scripts build exactly once
+    // (`test:smoke` and `test:all` each run `npm run build` first), and having
+    // this command build as well meant every full run compiled the project
+    // twice. See docs/TESTING.md.
+    command: `npm run preview -- --port ${PREVIEW_PORT} --strictPort`,
     url: `http://localhost:${PREVIEW_PORT}`,
     reuseExistingServer: false,
     timeout: 120_000,
