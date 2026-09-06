@@ -4,6 +4,18 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { CopyShader } from 'three/examples/jsm/shaders/CopyShader.js';
+import type { Quality } from './quality';
+
+/** One frame's telemetry for the dev overlay (main.ts, Backquote). */
+export interface GpuFrameStats {
+  /** Rolling mean, milliseconds. `null` when EXT_disjoint_timer_query_webgl2
+   * is unavailable, or while the timer is disabled -- see setTimingEnabled. */
+  gpuMs: number | null;
+  /** Rolling mean wall-clock time spent inside render(), milliseconds. */
+  cpuMs: number;
+  /** Rolling mean of renderer.info.render.calls for the whole composer chain. */
+  calls: number;
+}
 
 export interface PostFx {
   /** Draws the frame. Replaces a direct renderer.render() call. */
@@ -16,6 +28,17 @@ export interface PostFx {
    */
   adopt(root: THREE.Object3D): void;
   resize(width: number, height: number): void;
+  /** Rolling 60-frame means for the dev overlay. Cheap to call every frame
+   * regardless of setTimingEnabled -- see GpuFrameStats.gpuMs. */
+  getStats(): GpuFrameStats;
+  /**
+   * Turns the GPU timer query on or off. A disjoint timer query carries a
+   * real, if small, GPU cost, so it only runs while the overlay reading it is
+   * visible -- off by default, toggled with Backquote in main.ts. Switching
+   * it on clears the rolling GPU mean so a stale pre-toggle number never
+   * flashes.
+   */
+  setTimingEnabled(enabled: boolean): void;
   dispose(): void;
 }
 
@@ -40,7 +63,8 @@ const BLOOM_RADIUS = 0.6;
 const BLOOM_KNEE = 0.08;
 
 /**
- * Cap, in device pixels, on the width the bloom chain runs at.
+ * Cap, in device pixels, on the width the bloom chain runs at -- read from
+ * `quality.bloomMaxWidth` (960 / 1280 / 1280 low to high; see quality.ts).
  *
  * The chain is six full screen passes over a five step mip pyramid, so at 2x
  * pixel ratio on a large monitor it is the most expensive thing in the frame --
@@ -49,9 +73,9 @@ const BLOOM_KNEE = 0.08;
  * pixel ratios and window sizes while a normal 1x window still gets the full
  * resolution chain. Do not cap it much lower: small sources need the
  * resolution, and halving this dropped the lantern and the town lights far
- * enough down the mip chain that they visibly stopped glowing.
+ * enough down the mip chain that they visibly stopped glowing -- which is why
+ * only `low` moves it at all.
  */
-const BLOOM_MAX_WIDTH = 1280;
 
 /**
  * Bright-pass keyed on the peak channel instead of Rec.709 luminance.
@@ -126,16 +150,35 @@ const PEAK_HIGH_PASS_FRAGMENT = [
  */
 const SELF_ENCODE_KEY = 'pirate-world/srgb-self-encode';
 
+/**
+ * Used to be a `throw` the moment a material already had an `onBeforeCompile`
+ * hook. That was fine while nothing extended a stock material; Stream C
+ * (docs/RENDER_PLAN.md, land.ts) needs to add its own hook to the same
+ * `MeshStandardMaterial` this patch already targets, so the two now chain
+ * instead: the prior hook runs first, unchanged, and this patch's encode
+ * replacement runs after it.
+ *
+ * `customProgramCacheKey` has to stay unique per *combination* of hooks, not
+ * just per patch. Three's own default implementation is
+ * `this.onBeforeCompile.toString()` -- read here, before `onBeforeCompile` is
+ * overwritten below, so it still describes the prior hook rather than this
+ * one. Skipping that capture (or reading it after the swap) would collapse
+ * every differently-hooked material onto the same cache key, and two
+ * materials sharing a compiled program when their shaders actually differ is
+ * exactly the "genuinely nasty bug" this exists to avoid.
+ */
 function selfEncodeToSRGB(material: THREE.Material): void {
   if (material.userData[SELF_ENCODE_KEY] === true) return;
   // Raw shaders are excluded: they never had an encode and are tuned without one.
   const raw = material as unknown as { isShaderMaterial?: boolean; isRawShaderMaterial?: boolean };
   if (raw.isShaderMaterial === true || raw.isRawShaderMaterial === true) return;
-  if (material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile) {
-    throw new Error(`postfx: material "${material.name || material.type}" already has onBeforeCompile; refusing to clobber it`);
-  }
 
-  material.onBeforeCompile = (shader): void => {
+  const hadPriorHook = material.onBeforeCompile !== THREE.Material.prototype.onBeforeCompile;
+  const priorCompile = material.onBeforeCompile;
+  const priorCacheKey = hadPriorHook ? material.customProgramCacheKey() : '';
+
+  material.onBeforeCompile = (shader, renderer): void => {
+    if (hadPriorHook) priorCompile.call(material, shader, renderer);
     // `sRGBTransferOETF` is declared by <colorspace_pars_fragment>, which every
     // stock fragment shader includes. This replaces the target-dependent
     // `linearToOutputTexel` with an unconditional sRGB encode.
@@ -144,7 +187,8 @@ function selfEncodeToSRGB(material: THREE.Material): void {
       'gl_FragColor = sRGBTransferOETF( gl_FragColor );',
     );
   };
-  material.customProgramCacheKey = (): string => SELF_ENCODE_KEY;
+  material.customProgramCacheKey = (): string =>
+    priorCacheKey ? `${priorCacheKey}|${SELF_ENCODE_KEY}` : SELF_ENCODE_KEY;
   material.userData[SELF_ENCODE_KEY] = true;
   material.needsUpdate = true;
 }
@@ -165,6 +209,160 @@ function patchSceneMaterials(root: THREE.Object3D): number {
 }
 
 /* ------------------------------------------------------------------ */
+/* GPU/CPU timing, for the dev overlay only                            */
+/* ------------------------------------------------------------------ */
+
+/** Frames averaged for the dev overlay's GPU ms / CPU ms / draw-call means. Not world- or ship-scale -- a UI sampling window. */
+const TIMING_WINDOW = 60;
+
+/** A fixed-size rolling mean. Preallocated once; push()/mean() never allocate. */
+interface RollingMean {
+  push(value: number): void;
+  mean(): number;
+  hasSamples(): boolean;
+  reset(): void;
+}
+
+function createRollingMean(size: number): RollingMean {
+  const buf = new Float64Array(size);
+  let head = 0;
+  let filled = 0;
+  let sum = 0;
+  return {
+    push(value: number): void {
+      if (filled < size) {
+        sum += value;
+        filled++;
+      } else {
+        sum += value - buf[head];
+      }
+      buf[head] = value;
+      head = (head + 1) % size;
+    },
+    mean(): number {
+      return filled === 0 ? 0 : sum / filled;
+    },
+    hasSamples(): boolean {
+      return filled > 0;
+    },
+    reset(): void {
+      buf.fill(0);
+      head = 0;
+      filled = 0;
+      sum = 0;
+    },
+  };
+}
+
+/**
+ * How many `TIME_ELAPSED_EXT` queries may be in flight before `begin()`
+ * silently skips a frame's query rather than stall on the async result
+ * queue -- a query issued this frame is never readable this frame, per the
+ * extension's spec, so there is always at least one in flight. Four is
+ * headroom past that without holding a result long enough to read stale on
+ * the overlay.
+ */
+const GPU_QUERY_POOL_SIZE = 4;
+
+interface GpuTimer {
+  /** Issues a new query if the pool has a free slot; a no-op otherwise, or when the extension is unavailable. */
+  begin(): void;
+  /** Ends whichever query begin() issued this frame, if any. */
+  end(): void;
+  /** Checks every in-flight query for a ready result and folds it into the
+   * rolling mean, discarding any result GPU_DISJOINT_EXT marks invalid. */
+  poll(): void;
+  /** null when the extension is unavailable or the rolling mean is empty (including right after reset()). */
+  gpuMeanMs(): number | null;
+  /** Clears the rolling mean, so re-enabling the timer never flashes a stale pre-disable number. */
+  reset(): void;
+  /** Releases the pooled GL query objects. */
+  dispose(): void;
+}
+
+/**
+ * `EXT_disjoint_timer_query_webgl2`, wrapped around `composer.render` in
+ * `render()` below, with the extension's own async result queue: a query's
+ * result is read back on a later frame, never the one that issued it, and
+ * `GPU_DISJOINT_EXT` is checked on every poll so a disjoint frame (a GL
+ * error, a context reset) is dropped rather than shown as a wrong number.
+ * When the extension is missing altogether, every method here is a
+ * documented no-op and `gpuMeanMs()` stays `null` forever, which is what
+ * makes the overlay print `n/a` instead of guessing.
+ */
+function createGpuTimer(renderer: THREE.WebGLRenderer): GpuTimer {
+  const gl = renderer.getContext();
+  const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext;
+  const gl2 = gl as WebGL2RenderingContext;
+  const ext = isWebGL2
+    ? (gl2.getExtension('EXT_disjoint_timer_query_webgl2') as {
+        TIME_ELAPSED_EXT: number;
+        GPU_DISJOINT_EXT: number;
+      } | null)
+    : null;
+
+  const queries: WebGLQuery[] = [];
+  const busy: boolean[] = [];
+  if (ext) {
+    for (let i = 0; i < GPU_QUERY_POOL_SIZE; i++) {
+      const q = gl2.createQuery();
+      if (q) {
+        queries.push(q);
+        busy.push(false);
+      }
+    }
+  }
+
+  const mean = createRollingMean(TIMING_WINDOW);
+  let activeSlot = -1;
+
+  function freeSlot(): number {
+    for (let i = 0; i < queries.length; i++) if (!busy[i]) return i;
+    return -1;
+  }
+
+  return {
+    begin(): void {
+      if (!ext) return;
+      const slot = freeSlot();
+      if (slot === -1) return; // pool exhausted this frame; skip rather than stall on readback
+      gl2.beginQuery(ext.TIME_ELAPSED_EXT, queries[slot]);
+      busy[slot] = true;
+      activeSlot = slot;
+    },
+    end(): void {
+      if (!ext || activeSlot === -1) return;
+      gl2.endQuery(ext.TIME_ELAPSED_EXT);
+      activeSlot = -1;
+    },
+    poll(): void {
+      if (!ext) return;
+      for (let i = 0; i < queries.length; i++) {
+        if (!busy[i]) continue;
+        const q = queries[i];
+        if (!gl2.getQueryParameter(q, gl2.QUERY_RESULT_AVAILABLE)) continue;
+        const disjoint = gl2.getParameter(ext.GPU_DISJOINT_EXT) as boolean;
+        if (!disjoint) {
+          const ns = gl2.getQueryParameter(q, gl2.QUERY_RESULT) as number;
+          mean.push(ns / 1e6);
+        }
+        busy[i] = false;
+      }
+    },
+    gpuMeanMs(): number | null {
+      if (!ext || !mean.hasSamples()) return null;
+      return mean.mean();
+    },
+    reset(): void {
+      mean.reset();
+    },
+    dispose(): void {
+      for (const q of queries) gl2.deleteQuery(q);
+    },
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Composer                                                            */
 /* ------------------------------------------------------------------ */
 
@@ -177,7 +375,7 @@ function patchSceneMaterials(root: THREE.Object3D): number {
  * cost is that over-range highlights clamp to 1.0, which the bloom knee above
  * is sized for.
  */
-export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
+export function createPostFx(renderer: THREE.WebGLRenderer, quality: Quality): PostFx {
   let composer: EffectComposer | null = null;
   let renderPass: RenderPass | null = null;
   let bloomPass: UnrealBloomPass | null = null;
@@ -188,13 +386,25 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
   let width = size.x;
   let height = size.y;
 
+  // The composer issues several internal renderer.render() calls per frame
+  // (render pass, bloom's blur passes, the copy pass), each of which would
+  // otherwise reset renderer.info.render.calls before the frame's total could
+  // be read for the dev overlay -- see render() below, which resets it itself
+  // exactly once per outer frame.
+  renderer.info.autoReset = false;
+
+  const gpuTimer = createGpuTimer(renderer);
+  const cpuMean = createRollingMean(TIMING_WINDOW);
+  const callsMean = createRollingMean(TIMING_WINDOW);
+  let timingEnabled = false;
+
   function applySize(): void {
     if (!composer || !bloomPass) return;
     const pixelRatio = renderer.getPixelRatio();
     composer.setPixelRatio(pixelRatio);
     composer.setSize(width, height);
     const bufferWidth = width * pixelRatio;
-    const scale = pixelRatio * Math.min(1, BLOOM_MAX_WIDTH / Math.max(1, bufferWidth));
+    const scale = pixelRatio * Math.min(1, quality.bloomMaxWidth / Math.max(1, bufferWidth));
     bloomPass.setSize(
       Math.max(1, Math.round(width * scale)),
       Math.max(1, Math.round(height * scale)),
@@ -271,7 +481,18 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
         if (renderPass.scene !== scene) renderPass.scene = scene;
         if (renderPass.camera !== camera) renderPass.camera = camera;
       }
+
+      // Reset once per outer frame -- see the note on renderer.info.autoReset
+      // above -- so the dev overlay's draw-call count is the composer's whole
+      // chain, not whichever internal pass rendered last.
+      renderer.info.reset();
+      const cpuStart = performance.now();
+      if (timingEnabled) gpuTimer.begin();
       active.render(dt);
+      if (timingEnabled) gpuTimer.end();
+      cpuMean.push(performance.now() - cpuStart);
+      callsMean.push(renderer.info.render.calls);
+      gpuTimer.poll();
     },
 
     adopt(root: THREE.Object3D): void {
@@ -288,10 +509,25 @@ export function createPostFx(renderer: THREE.WebGLRenderer): PostFx {
       applySize();
     },
 
+    getStats(): GpuFrameStats {
+      return {
+        gpuMs: timingEnabled ? gpuTimer.gpuMeanMs() : null,
+        cpuMs: cpuMean.mean(),
+        calls: callsMean.mean(),
+      };
+    },
+
+    setTimingEnabled(enabled: boolean): void {
+      if (enabled === timingEnabled) return;
+      timingEnabled = enabled;
+      gpuTimer.reset();
+    },
+
     dispose(): void {
       bloomPass?.dispose();
       copyPass?.dispose();
       composer?.dispose();
+      gpuTimer.dispose();
       composer = null;
       renderPass = null;
       bloomPass = null;

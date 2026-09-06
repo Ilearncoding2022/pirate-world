@@ -16,13 +16,18 @@ import { createPostFx } from './postfx';
 import { createRecords } from './save';
 import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
+import { createQuality } from './quality';
 import type { ShipState } from './types';
 
 const host = document.getElementById('app');
 if (!host) throw new Error('#app host element not found in index.html');
 
+// Resolved once, before anything below reads a row of its table -- see
+// quality.ts. `?quality=` beats a stored choice beats the 'high' default.
+const quality = createQuality();
+
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioCap));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setClearColor(0x05080f, 1);
 host.appendChild(renderer.domElement);
@@ -69,7 +74,7 @@ const records = createRecords();
 
 const hud = createHud(records.wallet);
 const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
-const postFx = createPostFx(renderer);
+const postFx = createPostFx(renderer, quality);
 
 // The two overlays. Neither is a scene: they own their own DOM over the frozen
 // frame, and the only thing this file does for them is stop the world.
@@ -142,11 +147,22 @@ function restingSnapshot(): ShipState {
 void ship.ready.then(() => postFx.adopt(ship.object));
 
 function onResize(): void {
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioCap));
   postFx.resize(window.innerWidth, window.innerHeight);
   view.resize(window.innerWidth / window.innerHeight);
 }
 window.addEventListener('resize', onResize);
+
+// Dev overlay (GPU ms / CPU ms / draw calls): off by default, toggled with
+// Backquote. The query itself has a real GPU cost, so postFx only issues it
+// while this is on; hud.ts owns the DOM row this feeds.
+let devTimingVisible = false;
+window.addEventListener('keydown', (event) => {
+  if (event.code !== 'Backquote') return;
+  devTimingVisible = !devTimingVisible;
+  postFx.setTimingEnabled(devTimingVisible);
+  hud.setDevTimingVisible(devTimingVisible);
+});
 
 const clock = new THREE.Clock();
 
@@ -194,6 +210,10 @@ function frame(): void {
   radar.update(dt, ship.state, wind.state);
 
   postFx.render(dt, scene, view.camera);
+  // Reads postFx's rolling means straight back off the frame that just
+  // rendered. Cheap to call every frame -- hud.ts's write-through cache is
+  // what actually costs nothing while the row is hidden.
+  if (devTimingVisible) hud.updateDevTiming(postFx.getStats());
   controls.endFrame();
 
   requestAnimationFrame(frame);
