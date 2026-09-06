@@ -147,6 +147,18 @@ export interface WindState {
    * two can be subtracted directly. Holds its last value through a calm.
    */
   readonly bearing: number;
+  /**
+   * `bearing` as a unit vector in WORLD space -- the direction the wind
+   * travels, in the tangent plane at the ship.
+   *
+   * The bearing is an angle in a frame that only exists at the ship's own
+   * position, which is no use to a shader that has to move a wave field over
+   * the whole sphere. This is that angle resolved once per frame against the
+   * tangent frame there, so `water.ts` can drift its swell along the wind
+   * without rebuilding the frame itself. Holds its last value through a calm,
+   * exactly as `bearing` does.
+   */
+  readonly direction: Vector3;
   /** The strength ceiling in force at the ship right now, world units/s. */
   readonly cap: number;
   /** Eased push along the ship's forward axis, world units/s. */

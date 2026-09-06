@@ -5,10 +5,12 @@ import type { HeightMap } from './heightmap';
 import { HEIGHTMAP_GLSL } from './heightmap';
 import type { WaterBodies } from './waterbodies';
 import { GLOBE_RADIUS } from './geo';
+import type { WindState } from './types';
+import { OCEAN_CAP } from './wind';
 
 export interface Water {
   mesh: THREE.Mesh;
-  update(dt: number, env: WorldEnv): void;
+  update(dt: number, env: WorldEnv, wind: WindState): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -32,10 +34,44 @@ const SWELL_WAVELENGTH = 22;
 const WAVE_WAVELENGTH = 5.9;
 const CHOP_WAVELENGTH = 1.7;
 
-/** Drift of each layer over the surface, world units per second. */
-const SWELL_DRIFT: [number, number, number] = [1.3, 0.6, -1.0];
-const WAVE_DRIFT: [number, number, number] = [-0.9, 1.4, 0.7];
-const CHOP_DRIFT: [number, number, number] = [0.6, -0.5, 1.7];
+/**
+ * Drift of each layer ALONG THE WIND, world units per second at OCEAN_CAP.
+ *
+ * These were three fixed world-space vectors, each pointing somewhere
+ * arbitrary, and their magnitudes (1.74, 1.78, 1.88) are what these numbers
+ * are built around -- a full gale now runs the sea about as fast as the old
+ * constants did, so the look at the top of the range is the look that was
+ * already tuned.
+ *
+ * They differ from each other because the layers should not travel as one
+ * sheet: chop skitters ahead of the swell it rides on, which is what stops a
+ * single direction from reading as a texture being slid across the globe.
+ */
+const SWELL_SPEED = 1.5;
+const WAVE_SPEED = 1.9;
+const CHOP_SPEED = 2.4;
+
+/**
+ * Fraction of that drift still running in a dead calm.
+ *
+ * Calms last 3 to 15 seconds (`wind.ts`), which is far too long to look at a
+ * sea that has stopped dead: still water is a mirror, and a mirror reads as a
+ * bug rather than as weather. The residue keeps the old swell barely moving on
+ * the last bearing the wind held -- which is what a real sea does, since swell
+ * outlives the wind that raised it.
+ */
+const CALM_DRIFT = 0.2;
+
+/**
+ * Wave height in a dead calm, as a fraction of the height at OCEAN_CAP.
+ *
+ * The brief was intensity proportional to the SQUARE of the wind speed, and
+ * between this floor and 1 that is exactly what happens. The floor itself is
+ * the same argument as CALM_DRIFT: strict proportionality puts a plate of
+ * glass around the ship for up to fifteen seconds at a time. Set it to 0 for
+ * the letter of the rule and a sea that vanishes between gusts.
+ */
+const CALM_INTENSITY = 0.16;
 
 /** Coastal foam: wavelength in world units, drift in world units per second. */
 const FOAM_COARSE_WAVELENGTH = 4.55;
@@ -202,6 +238,21 @@ export function createWater(
     uFoamColor: { value: new THREE.Color('#e8fbff') },
     uSkyColor: { value: new THREE.Color('#3d74b4') },
     uHorizonColor: { value: new THREE.Color('#7ba4d4') },
+    /*
+     * Where each wave layer has drifted to, in direction space.
+     *
+     * A POSITION, accumulated on the CPU below, and not a velocity multiplied
+     * by uTime the way it used to be. That distinction is the whole reason the
+     * wind can steer the sea at all: with `offset = drift * t`, changing the
+     * drift changes where the field has always been, so every shift of the
+     * wind would teleport the ocean by minutes of travel. Integrating instead
+     * means a change of wind changes only where the sea goes NEXT.
+     */
+    uOffsetSwell: { value: new THREE.Vector3() },
+    uOffsetWave: { value: new THREE.Vector3() },
+    uOffsetChop: { value: new THREE.Vector3() },
+    /** Wave height now, as a fraction of the height at a full gale. */
+    uWaveIntensity: { value: CALM_INTENSITY },
     // Surface tuning.
     uWaveStrength: { value: 4.4 },
     uSpecPower: { value: 300 },
@@ -241,6 +292,10 @@ export function createWater(
     'uniform vec3 uSkyColor;',
     'uniform vec3 uHorizonColor;',
     'uniform float uWaveStrength;',
+    'uniform float uWaveIntensity;',
+    'uniform vec3 uOffsetSwell;',
+    'uniform vec3 uOffsetWave;',
+    'uniform vec3 uOffsetChop;',
     'uniform float uSpecPower;',
     'uniform float uSpecStrength;',
     'uniform float uFoamWidth;',
@@ -253,9 +308,7 @@ export function createWater(
     `const float FREQ_SWELL = ${freq(SWELL_WAVELENGTH)};`,
     `const float FREQ_WAVE = ${freq(WAVE_WAVELENGTH)};`,
     `const float FREQ_CHOP = ${freq(CHOP_WAVELENGTH)};`,
-    `const vec3 DRIFT_SWELL = ${drift(SWELL_DRIFT)};`,
-    `const vec3 DRIFT_WAVE = ${drift(WAVE_DRIFT)};`,
-    `const vec3 DRIFT_CHOP = ${drift(CHOP_DRIFT)};`,
+
     // Two fixed world axes the noise domain is stretched along. A plain 3x3
     // scale is continuous over the whole sphere, so unlike a tangent-frame
     // stretch it introduces no pole singularity, and the two axes crossing
@@ -271,17 +324,20 @@ export function createWater(
     'float ridge(float v, float sharp) {',
     '  return 0.5 - sqrt(v * v + mix(0.11, 0.0005, sharp));',
     '}',
-    '// `t` is passed in rather than read from uTime because inland water runs',
-    '// on a slowed clock. The two clocks only ever meet over the strip of bank',
-    '// between a lake and the sea, so the crossfade is hidden under land.',
-    'float waveField(vec3 p, float t, float mid, float fine) {',
+    '// `m` is the motion scale, passed in rather than read off the mask because',
+    '// inland water runs slow. The offsets are positions the CPU integrated, so',
+    '// scaling them scales the distance travelled -- which is exactly what a',
+    '// slower clock means, and is what multiplying uTime used to buy. The two',
+    '// clocks only ever meet over the strip of bank between a lake and the sea,',
+    '// so the crossfade is hidden under land.',
+    'float waveField(vec3 p, float m, float mid, float fine) {',
     '  // Swell: smooth, long undulation. The two layers above it are ridged,',
     '  // which is what makes the glint run in streaks like real sun glitter.',
-    '  float s = snoise((p + DRIFT_SWELL * t) * FREQ_SWELL) * 0.55;',
-    '  vec3 pw = stretch((p + DRIFT_WAVE * t) * FREQ_WAVE, AXIS_WAVE, 1.7);',
+    '  float s = snoise((p + uOffsetSwell * m) * FREQ_SWELL) * 0.55;',
+    '  vec3 pw = stretch((p + uOffsetWave * m) * FREQ_WAVE, AXIS_WAVE, 1.7);',
     '  s += ridge(snoise(pw), mid) * 0.90 * mid;',
     '  if (fine > 0.004) {',
-    '    vec3 pc = stretch((p + DRIFT_CHOP * t) * FREQ_CHOP, AXIS_CHOP, 1.3);',
+    '    vec3 pc = stretch((p + uOffsetChop * m) * FREQ_CHOP, AXIS_CHOP, 1.3);',
     '    s += ridge(snoise(pc), fine) * 0.44 * fine;',
     '  }',
     '  return s;',
@@ -315,13 +371,16 @@ export function createWater(
     '  vec3 tanV = cross(n, tanU);',
     '',
     `  const float EPS = ${(NORMAL_STEP / GLOBE_RADIUS).toFixed(8)};`,
-    '  float w0 = waveField(n, lakeTime, fadeMid, fadeFine);',
-    '  float wu = waveField(n + tanU * EPS, lakeTime, fadeMid, fadeFine);',
-    '  float wv = waveField(n + tanV * EPS, lakeTime, fadeMid, fadeFine);',
+    '  float w0 = waveField(n, motion, fadeMid, fadeFine);',
+    '  float wu = waveField(n + tanU * EPS, motion, fadeMid, fadeFine);',
+    '  float wv = waveField(n + tanV * EPS, motion, fadeMid, fadeFine);',
     '  // Flatten the surface as it recedes, so the ocean reads calm from orbit',
     '  // rather than blotchy, and flatten it again over inland water so a pond',
     '  // is close to a mirror.',
-    '  float tilt = uWaveStrength * mix(0.22, 1.0, nearMid) * motion;',
+    '  // uWaveIntensity is the wind term: it runs as the SQUARE of the wind',
+    '  // speed, so a gale is not twice the sea of half a gale but four times',
+    '  // it, and the difference between weathers is felt rather than measured.',
+    '  float tilt = uWaveStrength * uWaveIntensity * mix(0.22, 1.0, nearMid) * motion;',
     '  vec3 N = normalize(n - (tanU * (wu - w0) + tanV * (wv - w0)) * tilt);',
     '',
     '  // ---- depth colour ----------------------------------------------------',
@@ -436,11 +495,38 @@ export function createWater(
 
   return {
     mesh,
-    update(_dt: number, env: WorldEnv): void {
+    update(dt: number, env: WorldEnv, wind: WindState): void {
       uniforms.uTime.value = env.elapsed;
       uniforms.uDayFactor.value = env.dayFactor;
       uniforms.uSunDirection.value.copy(env.sunDirection);
       uniforms.uSunColor.value.copy(env.sunColor);
+
+      /*
+       * The wind, integrated into the sea.
+       *
+       * `strength` is the wind as a fraction of the strongest the world blows,
+       * which is the same OCEAN_CAP the radar arrow scales its length by -- so
+       * a full-length arrow and a full sea arrive together rather than one of
+       * them topping out first.
+       *
+       * Height goes as the SQUARE of it and drift goes linearly, which is the
+       * asymmetry that makes weather read: a freshening wind lengthens the
+       * swell noticeably before it starts throwing it about, and the last
+       * quarter of the range is where most of the height lives.
+       */
+      const strength = Math.min(1, Math.max(0, wind.speed / OCEAN_CAP));
+      uniforms.uWaveIntensity.value =
+        CALM_INTENSITY + (1 - CALM_INTENSITY) * strength * strength;
+
+      // Integrate, never multiply by elapsed time: see uOffsetSwell. `dir`
+      // holds its last bearing through a calm, so the residual swell keeps
+      // running the way the wind that raised it was going.
+      const flow = CALM_DRIFT + (1 - CALM_DRIFT) * strength;
+      const step = (dt * flow) / GLOBE_RADIUS;
+      const dir = wind.direction;
+      uniforms.uOffsetSwell.value.addScaledVector(dir, SWELL_SPEED * step);
+      uniforms.uOffsetWave.value.addScaledVector(dir, WAVE_SPEED * step);
+      uniforms.uOffsetChop.value.addScaledVector(dir, CHOP_SPEED * step);
     },
   };
 }

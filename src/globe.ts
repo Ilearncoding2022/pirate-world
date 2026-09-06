@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Terrain, Towns } from './types';
+import type { Terrain, Towns, WindState } from './types';
 import type { WorldEnv } from './env';
 import { createHeightMap } from './heightmap';
 import type { HeightMap } from './heightmap';
@@ -25,7 +25,7 @@ export interface Globe {
   waterBodies: WaterBodies;
   /** Settlements and their berths. Shared with docks.ts, radar.ts and energy.ts. */
   towns: Towns;
-  update(dt: number, env: WorldEnv): void;
+  update(dt: number, env: WorldEnv, wind: WindState): void;
 }
 
 /**
@@ -81,9 +81,12 @@ export function createGlobe(terrain: Terrain): Globe {
     heightMap,
     waterBodies,
     towns,
-    update(dt: number, env: WorldEnv): void {
+    update(dt: number, env: WorldEnv, wind: WindState): void {
       dayNight.update(dt, env);
-      water.update(dt, env);
+      // Only the sea reads the weather. It is passed rather than pushed onto
+      // `env` because `env.ts` names day/night as its sole writer, and a second
+      // writer is a harder thing to give up than an extra argument.
+      water.update(dt, env, wind);
       land.update(dt, env);
       cityLights.update(dt, env);
       clouds.update(dt, env);

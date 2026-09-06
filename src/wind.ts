@@ -178,6 +178,7 @@ const _probe = new Vector3();
 interface MutableWindState {
   speed: number;
   bearing: number;
+  direction: Vector3;
   cap: number;
   along: number;
   across: number;
@@ -203,6 +204,9 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
   const state: MutableWindState = {
     speed: 0,
     bearing: 0,
+    // Mutated in place for the life of the run, like everything else on this
+    // object: `water.ts` holds the reference across frames.
+    direction: new Vector3(0, 0, 1),
     cap: COAST_CAP,
     along: 0,
     across: 0,
@@ -318,6 +322,18 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
       // through a calm, which looks like weather that is not there.
       state.speed = 0;
     }
+
+    // ---- Resolve the bearing into world space ----------------------------
+    // Done every frame rather than only when an event sets a new bearing: the
+    // frame itself turns as the ship sails, so a held bearing is a different
+    // world direction a minute later. The sea has to follow the compass, not
+    // the vector it happened to mean when the gust started.
+    tangentFrame(ship.position, _north, _east);
+    state.direction
+      .copy(_north)
+      .multiplyScalar(Math.cos(state.bearing))
+      .addScaledVector(_east, Math.sin(state.bearing))
+      .normalize();
 
     // ---- Resolve onto the hull -------------------------------------------
     // Quantise the wind's travel bearing, relative to the bow, into one of
