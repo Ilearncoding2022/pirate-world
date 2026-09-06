@@ -10,6 +10,7 @@ import { OCEAN_CAP } from './wind';
 import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
+import { SWELL_WAVELENGTH, WAVE_WAVELENGTH, CHOP_WAVELENGTH } from './waveconstants';
 import {
   WATER_UNIFORMS,
   waterWavefield,
@@ -23,6 +24,20 @@ import {
 
 export interface Water {
   mesh: THREE.Mesh;
+  /**
+   * The three wave layers' integrated drift positions, in DIRECTION SPACE
+   * (already divided by GLOBE_RADIUS -- see the module comment on
+   * uOffsetSwell/uOffsetWave/uOffsetChop below). These are the SAME Vector3
+   * objects `update()` mutates in place every frame -- not a copy -- exposed
+   * read-only so `wavefield.ts`'s CPU port of the wave field (Phase 1 stream
+   * B) samples the exact positions the shader does. Stream B's one edit to
+   * this file.
+   */
+  readonly offsets: {
+    readonly swell: THREE.Vector3;
+    readonly wave: THREE.Vector3;
+    readonly chop: THREE.Vector3;
+  };
   update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void;
 }
 
@@ -82,10 +97,11 @@ function pluginHooks(plugins: WaterPlugin[], hook: WaterHook): string[] {
  * swell twice its own length.
  */
 
-/** Wavelengths in world units. The ship is ~5.6 long, so WAVE is hull sized. */
-const SWELL_WAVELENGTH = 22;
-const WAVE_WAVELENGTH = 5.9;
-const CHOP_WAVELENGTH = 1.7;
+/*
+ * Wavelengths in world units. The ship is ~5.6 long, so WAVE is hull sized.
+ * Moved to waveconstants.ts (Phase 1 stream B) so wavefield.ts's CPU port of
+ * this same field reads the identical numbers -- a pure move, values unchanged.
+ */
 
 /**
  * Drift of each layer ALONG THE WIND, world units per second at OCEAN_CAP.
@@ -322,6 +338,11 @@ export function createWater(
 
   return {
     mesh,
+    offsets: {
+      swell: uniforms.uOffsetSwell.value as THREE.Vector3,
+      wave: uniforms.uOffsetWave.value as THREE.Vector3,
+      chop: uniforms.uOffsetChop.value as THREE.Vector3,
+    },
     update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void {
       uniforms.uTime.value = env.elapsed;
       uniforms.uDayFactor.value = env.dayFactor;

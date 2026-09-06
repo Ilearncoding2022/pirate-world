@@ -19,6 +19,10 @@ import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFra
 import { createShipFx } from './shipfx';
 import type { ShipFx } from './shipfx';
 import shipModelUrl from '../assets/pirateship_beginner.glb?url';
+import { sampleWave } from './wavefield';
+import type { WaveOffsets, WaveSample } from './wavefield';
+import { DISPLACE_AMPLITUDE } from './waveconstants';
+import { OCEAN_CAP } from './wind';
 
 /* ------------------------------------------------------------------ */
 /* Tuning constants                                                    */
@@ -119,10 +123,45 @@ const TURN_MIN_SCALE = 0.55; // fraction of TURN_RATE still available at a stand
 /** How far ahead (world units) we probe for land so we stop before the coast. */
 const LOOKAHEAD = 2.2;
 
+/**
+ * Residual idle bob in a dead calm, world units. Absolute (not scaled by
+ * MODEL_SCALE) -- see docs/ARCHITECTURE.md "Ship dynamics" on why the sway
+ * and bank constants stay ship-scale-absolute rather than shrinking with the
+ * hull. `sampleWave`'s real heave (below) does the rest of the work now;
+ * this old fixed sine is kept at 30% of its former amplitude purely so a
+ * flat calm still breathes instead of freezing the hull dead still.
+ */
 const BOB_AMPLITUDE = 0.15; // world units
-const SWAY_ROLL = 0.055; // rad (~3.1 deg)
-const SWAY_PITCH = 0.035; // rad (~2.0 deg)
 const TURN_BANK = 0.13; // rad of bank into a turn at full speed
+
+/**
+ * Fore/aft and beam half-distance from the hull centre the wave field is
+ * sampled at for pitch and roll, world units before MODEL_SCALE (ship-scale:
+ * these describe the physical hull, not the globe). Scaled by MODEL_SCALE
+ * below wherever they are used, exactly as `wake.ts`'s hull-relative
+ * constants are.
+ */
+const HULL_SAMPLE_HALF_LENGTH = 1.4;
+const HULL_SAMPLE_HALF_BEAM = 0.55;
+
+/**
+ * How fast the hull's heave/pitch/roll settle onto a new reading of the sea,
+ * 1/s -- a low-pass on `sampleWave`'s output so the hull doesn't visibly
+ * teleport onto the surface every frame the wave field jitters at high
+ * frequency (the chop layer is fragment-only and never reaches this sample,
+ * but the wave layer's ridge crests are still sharp up close).
+ */
+const HULL_RESPONSE = 3.0;
+
+/**
+ * Fraction of the wave field's full-gale height still felt in a dead calm.
+ * Mirrors `water.ts`'s private `CALM_INTENSITY` (0.16) so the hull never
+ * feels a livelier sea than the one the patch actually draws. Duplicated
+ * rather than imported: this stream's one permitted edit to `water.ts` is
+ * the read-only `offsets` export, nothing else in that file. Keep the two in
+ * sync by hand if `CALM_INTENSITY` is ever retuned.
+ */
+const HULL_CALM_INTENSITY = 0.16;
 
 const TWO_PI = Math.PI * 2;
 
@@ -147,6 +186,12 @@ const _basis = new Matrix4();
 const _baseQuat = new Quaternion();
 const _swayQuat = new Quaternion();
 const _swayEuler = new Euler();
+/** Scratch direction for the four hull-relative wave samples below. */
+const _waveDir = new Vector3();
+/** Scratch output for `sampleWave`, reused across all five samples per frame. */
+const _waveSample: WaveSample = { h: 0, gu: 0, gv: 0 };
+/** A dead-calm sea has no wind offsets to speak of, but still moves in place. */
+const _zeroWaveOffsets: WaveOffsets = { swell: new Vector3(), wave: new Vector3() };
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -335,8 +380,11 @@ export interface Ship {
   /**
    * `energy` gates thrust: a dry tank still steers, coasts and drifts.
    * `wind` supplies the push the hull is carried by on top of its own engine.
+   * `waveOffsets` is `globe.waveOffsets` -- the CPU sea the hull heaves,
+   * pitches and rolls on; omitted, it defaults to a stationary field (see
+   * `tests/unit/ship-physics.test.ts`, which never passes it).
    */
-  update(dt: number, input: InputState, energy: EnergyState, wind: WindState): void;
+  update(dt: number, input: InputState, energy: EnergyState, wind: WindState, waveOffsets?: WaveOffsets): void;
   /**
    * Stops the hull dead, where it stands, this instant.
    *
@@ -448,6 +496,10 @@ export function createShip(
   let elapsed = 0;
   let bob = 0;
   let bankRoll = 0;
+  /** Low-passed heave/pitch/roll from `sampleWave`, radians for the latter two. */
+  let waveHeave = 0;
+  let wavePitch = 0;
+  let waveRoll = 0;
 
   /**
    * Builds `state.forward` from a compass heading. Startup only.
@@ -579,21 +631,39 @@ export function createShip(
     _basis.makeBasis(_right, state.up, _back);
     _baseQuat.setFromRotationMatrix(_basis);
 
-    const speedFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
-    const amp = 0.45 + 0.55 * speedFrac;
-
     // Sway is applied AFTER the base orientation, in the ship's local space.
-    const roll = Math.sin(elapsed * 1.15) * SWAY_ROLL * amp + bankRoll;
-    const pitch = Math.sin(elapsed * 1.73 + 0.9) * SWAY_PITCH * amp;
+    // `waveRoll`/`wavePitch` are the low-passed reading of the sea itself
+    // (see the wave-sampling block in `update`); `bankRoll` is the helm's own
+    // lean into a turn and adds on top, unchanged.
+    const roll = waveRoll + bankRoll;
+    const pitch = wavePitch;
     _swayEuler.set(pitch, 0, roll);
     _swayQuat.setFromEuler(_swayEuler);
     _baseQuat.multiply(_swayQuat);
 
     object.quaternion.copy(_baseQuat);
+    // `bob` folds in both the sampled heave and the calm-water residual sine
+    // (see `update`) -- added to the RADIUS, not just to this visual
+    // transform, so the hull never floats above or sinks below the surface
+    // the patch actually displaces.
     object.position.copy(state.position).multiplyScalar(GLOBE_RADIUS + HULL_OFFSET + bob);
   }
 
-  function update(dt: number, input: InputState, energy: EnergyState, wind: WindState): void {
+  function update(
+    dt: number,
+    input: InputState,
+    energy: EnergyState,
+    wind: WindState,
+    /**
+     * `globe.waveOffsets` -- the same integrated drift `water.ts`'s shader
+     * reads, so the hull samples the identical sea the patch draws. Optional
+     * and defaulting to a stationary field: `tests/unit/ship-physics.test.ts`
+     * calls `update` without it, and the hull's `state.position` direction
+     * (which that test pins to unit length) never depends on wave sampling
+     * either way -- only the visual radius (`bob`) and orientation do.
+     */
+    waveOffsets: WaveOffsets = _zeroWaveOffsets,
+  ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
     elapsed += dt;
@@ -716,10 +786,71 @@ export function createShip(
     transportForward(_prevPosition);
     syncStateGeo();
 
-    // ---- Idle motion ------------------------------------------------------
+    // ---- Idle motion --------------------------------------------------
     const driveFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
-    const bobAmp = BOB_AMPLITUDE * (0.5 + 0.5 * driveFrac);
-    bob = Math.sin(elapsed * 1.6) * bobAmp;
+
+    // ---- Ride the sea: sample the CPU wave field at the hull -----------
+    // Same law as `water.ts`'s uWaveIntensity (height ~ wind speed squared,
+    // floored so a calm sea still moves): see HULL_CALM_INTENSITY's comment
+    // for why this is a second copy of that formula rather than a shared one.
+    const windStrength = clamp(wind.speed / OCEAN_CAP, 0, 1);
+    const waveGain = HULL_CALM_INTENSITY + (1 - HULL_CALM_INTENSITY) * windStrength * windStrength;
+
+    const halfLength = (HULL_SAMPLE_HALF_LENGTH * MODEL_SCALE) / GLOBE_RADIUS;
+    const halfBeam = (HULL_SAMPLE_HALF_BEAM * MODEL_SCALE) / GLOBE_RADIUS;
+
+    // Recomputed against this frame's transported forward -- the copy built
+    // earlier for the ground-velocity step is now a frame stale.
+    _starboard.crossVectors(state.forward, state.up);
+    if (_starboard.lengthSq() > 1e-12) _starboard.normalize();
+    else _starboard.set(0, 0, 0);
+
+    sampleWave(state.position, waveOffsets, 1.0, _waveSample);
+    const centreH = _waveSample.h;
+
+    _waveDir.copy(state.position).addScaledVector(state.forward, halfLength).normalize();
+    sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
+    const bowH = _waveSample.h;
+
+    _waveDir.copy(state.position).addScaledVector(state.forward, -halfLength).normalize();
+    sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
+    const sternH = _waveSample.h;
+
+    _waveDir.copy(state.position).addScaledVector(_starboard, halfBeam).normalize();
+    sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
+    const starboardH = _waveSample.h;
+
+    _waveDir.copy(state.position).addScaledVector(_starboard, -halfBeam).normalize();
+    sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
+    const portH = _waveSample.h;
+
+    const heaveTarget = centreH * DISPLACE_AMPLITUDE * waveGain;
+    // atan2 rather than a bare ratio: the run stays fixed (the sample
+    // baseline) while the rise is the height difference, exactly the small
+    // angle a real deck would tip through.
+    const pitchTarget = Math.atan2(
+      (bowH - sternH) * DISPLACE_AMPLITUDE * waveGain,
+      2 * HULL_SAMPLE_HALF_LENGTH * MODEL_SCALE,
+    );
+    const rollTarget = Math.atan2(
+      (starboardH - portH) * DISPLACE_AMPLITUDE * waveGain,
+      2 * HULL_SAMPLE_HALF_BEAM * MODEL_SCALE,
+    );
+
+    // Low-pass so the hull settles onto a new reading of the sea rather than
+    // visibly snapping to it every frame.
+    const response = 1 - Math.exp(-HULL_RESPONSE * dt);
+    waveHeave += (heaveTarget - waveHeave) * response;
+    wavePitch += (pitchTarget - wavePitch) * response;
+    waveRoll += (rollTarget - waveRoll) * response;
+
+    // A residual of the old fixed sine, well below the sampled heave, so a
+    // dead calm -- where the wave field itself is nearly flat -- still
+    // breathes instead of freezing the hull dead still.
+    const residual = Math.sin(elapsed * 1.6) * BOB_AMPLITUDE * 0.3;
+    // Added to the RADIUS in applyTransform, not just the visual sway, so
+    // the hull never sits below the surface the patch actually displaces.
+    bob = waveHeave + residual;
 
     applyTransform();
 
