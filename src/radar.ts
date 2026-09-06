@@ -1,8 +1,9 @@
 import { Vector3 } from 'three';
 import { GLOBE_RADIUS } from './geo';
 import type { HeightMap } from './heightmap';
-import type { ShipState, Towns } from './types';
+import type { ShipState, Towns, WindState } from './types';
 import type { WaterBodies } from './waterbodies';
+import { OCEAN_CAP } from './wind';
 
 /**
  * radar.ts — the surface plot in the top-right panel.
@@ -42,7 +43,8 @@ const RASTER = 192;
  *
  * The ship covers at most 20 units per second across a scope 200 units wide,
  * so at 10 Hz the picture is never more than a thousandth of the scope stale.
- * The overlay — rings, sweep, blip, north mark — is redrawn every frame.
+ * The overlay — rings, sweep, blip, wind arrow, north mark — is redrawn every
+ * frame.
  */
 const RASTER_HZ = 10;
 
@@ -71,6 +73,40 @@ const TOWN_DOT = 0.019;
 const ICON_FADE = 0.88;
 
 /**
+ * Wind arrow geometry, in scope radii.
+ *
+ * Authored in scope units for the same reason the town icons are: the arrow is
+ * a rim ornament, not a plotted object. Nothing about the wind has a position
+ * on the chart, so nothing about the arrow may scale with the range.
+ *
+ * `WIND_TIP` sits just inside the bezel stroke, so the head reads as a point
+ * rather than as a thickening of the rim.
+ *
+ * Length carries the speed, which is why it has a floor as well as a ceiling.
+ * Scaled honestly off OCEAN_CAP, a 1 kn breath would be a three-pixel stub
+ * indistinguishable from a smudge on the plot -- and "a little wind" versus
+ * "no wind" is precisely the distinction the player needs, because the second
+ * one is drawn as nothing at all. Anything drawn at all must therefore still
+ * read as an arrow.
+ */
+const WIND_TIP = 0.965;
+const WIND_MIN_LENGTH = 0.13;
+const WIND_MAX_LENGTH = 0.3;
+const WIND_HEAD = 0.075;
+const WIND_HALF_WIDTH = 0.05;
+
+/**
+ * Wind arrow colour, deliberately the only warm thing on the scope.
+ *
+ * Every other hue here is already spoken for and already means something:
+ * cyan is the instrument itself (rings, sweep, bezel), magenta is own ship and
+ * north, mint is a berth. Weather is the one mark the player neither steers
+ * nor steers by, so reading the scope should never have to begin with working
+ * out which mark this is.
+ */
+const WIND_FILL = 'rgba(255, 186, 84, 0.9)';
+
+/**
  * Cosine of the scope's angular radius.
  *
  * cos is monotone over [0, PI], so `dir . up >= this` is exactly "within
@@ -81,7 +117,7 @@ const COS_RADAR_RANGE = Math.cos(RADAR_RANGE / GLOBE_RADIUS);
 
 export interface Radar {
   /** Redraws the scope. Safe to call before the first terrain raster. */
-  update(dt: number, ship: ShipState): void;
+  update(dt: number, ship: ShipState, wind: WindState): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -148,6 +184,25 @@ function surfaceColor(h: number, seaLevel: number, inland: number, out: number[]
   if (t < 0.4) mix(GRASS, FOREST, t / 0.4, out);
   else if (t < 0.75) mix(FOREST, ROCK, (t - 0.4) / 0.35, out);
   else mix(ROCK, PEAK, (t - 0.75) / 0.25, out);
+}
+
+/**
+ * A true compass bearing, expressed in the scope's own angle.
+ *
+ * The scope is bow-up, so nothing that comes off a compass is drawn where the
+ * world puts it: every world bearing has to be turned by the ship's heading
+ * first. Both marks that come off a compass -- north and the wind -- are
+ * placed through here, so the turn is defined exactly once. That matters more
+ * than the arithmetic saved: two marks that were each rotated correctly but by
+ * separately written expressions would agree in every screenshot taken head-up
+ * and disagree by a sign only when the player turned, which is when neither is
+ * being watched closely enough to catch it.
+ *
+ * From the returned angle `a`, the point on the rim is `(sin a, -cos a)` --
+ * canvas y runs down while the bow points up the screen.
+ */
+function scopeAngle(bearing: number, heading: number): number {
+  return bearing - heading;
 }
 
 /* ------------------------------------------------------------------ */
@@ -308,7 +363,7 @@ export function createRadar(
     return cssSize;
   }
 
-  function update(dt: number, ship: ShipState): void {
+  function update(dt: number, ship: ShipState, wind: WindState): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
 
@@ -467,8 +522,69 @@ export function createRadar(
       ctx.restore();
     }
 
+    // ---- Wind arrow, on the true bearing, from the LIVE frame -------------
+    /*
+     * Deliberately not held back to the raster's frame the way the terrain and
+     * its icons are.
+     *
+     * That rule exists to keep an icon welded to the coastline underneath it,
+     * and it is worth its staleness precisely because the icon and the picture
+     * are the same subject. The wind is attached to nothing on the picture: it
+     * is this instant's weather turned by this instant's heading, both of them
+     * live. Projected through a frame up to a tenth of a second old it would
+     * simply lag the bow through every turn -- weather that swings when the
+     * ship swings and settles late, which is the reading a player would call
+     * broken. The north mark below is live for exactly the same reason.
+     *
+     * `bearing` holds its last value through a calm rather than going stale in
+     * some detectable way, so the calm has to be tested on `speed`, which
+     * `wind.ts` puts at exactly 0. Drawing the held bearing anyway would put a
+     * short arrow on the rim reporting a wind that is not blowing.
+     */
+    if (wind.speed > 0) {
+      const windAngle = scopeAngle(wind.bearing, ship.heading);
+      const wx = Math.sin(windAngle);
+      const wy = -Math.cos(windAngle);
+      // Perpendicular to the shaft, for the head's two barbs.
+      const px = -wy;
+      const py = wx;
+      /*
+       * Scaled off the imported OCEAN_CAP rather than a literal 16, so the
+       * arrow cannot drift away from the wind it draws. Retune the cap with
+       * the number written here as well and every wind reads full strength at
+       * the old ceiling: an arrow at its stop while the hull is still gaining
+       * speed is a worse lie than no arrow, because it is quietly wrong rather
+       * than obviously missing.
+       */
+      const t = Math.min(1, wind.speed / OCEAN_CAP);
+      const length = WIND_MIN_LENGTH + (WIND_MAX_LENGTH - WIND_MIN_LENGTH) * t;
+      const tail = WIND_TIP - length;
+      const neck = WIND_TIP - WIND_HEAD;
+
+      // Head outward, because `bearing` is the direction the wind travels
+      // toward: the arrow shows where the weather is going, which is the same
+      // way it is pushing the hull.
+      ctx.beginPath();
+      ctx.moveTo(wx * tail, wy * tail);
+      ctx.lineTo(wx * neck, wy * neck);
+      ctx.strokeStyle = WIND_FILL;
+      ctx.lineWidth = 2.2 / R;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(wx * WIND_TIP, wy * WIND_TIP);
+      ctx.lineTo(wx * neck + px * WIND_HALF_WIDTH, wy * neck + py * WIND_HALF_WIDTH);
+      ctx.lineTo(wx * neck - px * WIND_HALF_WIDTH, wy * neck - py * WIND_HALF_WIDTH);
+      ctx.closePath();
+      ctx.fillStyle = WIND_FILL;
+      ctx.fill();
+    }
+
     // ---- North mark: the scope is bow-up, so north swings with heading ----
-    const northAngle = (-ship.headingDeg * Math.PI) / 180;
+    // Drawn after the wind so that a wind blowing due north leaves the compass
+    // on top: the player can lose the weather behind a mark for a moment, but
+    // never the direction they navigate by.
+    const northAngle = scopeAngle(0, ship.heading);
     const nx = Math.sin(northAngle);
     const ny = -Math.cos(northAngle);
     ctx.beginPath();

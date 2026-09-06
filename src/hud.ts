@@ -1,4 +1,4 @@
-import type { EnergyMode, EnergyState, ShipState } from './types';
+import type { EnergyMode, EnergyState, ShipState, WindState } from './types';
 
 /**
  * hud.ts — formats ShipState into the DOM overlay declared in index.html.
@@ -100,10 +100,52 @@ function formatLon(lonDeg: number): string {
   return `${padFixed1(lonDeg, 3)}° ${lonDeg < 0 ? 'W' : 'E'}`;
 }
 
-/** "12.4 kn", or "12.4 kn AST" (astern) while reversing. */
+/**
+ * "12.4 kn", or "12.4 kn AST" (astern) while reversing.
+ *
+ * World units per second are printed as knots one for one -- see **Units,
+ * pinned** in `docs/ARCHITECTURE.md`. This is the only place that claim is
+ * made, so the wind row prints through here too rather than growing a second
+ * conversion that could be retuned on its own.
+ */
 function formatSpeed(speed: number): string {
   const magnitude = Math.abs(speed).toFixed(1);
   return speed < -0.05 ? `${magnitude} kn AST` : `${magnitude} kn`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Wind                                                                */
+/* ------------------------------------------------------------------ */
+
+const RAD_TO_DEG = 180 / Math.PI;
+
+/**
+ * "+7.5" -- the wind's signed share of the ground speed, or "" for none.
+ *
+ * The sign is taken off the *rounded* magnitude, the same guard `formatRate`
+ * uses, and a share that rounds away prints nothing at all. A permanent
+ * "+0.0" hanging off the SPD row would be a value the player has to learn to
+ * ignore, and the point of the suffix is that it only appears when the
+ * weather is actually doing something.
+ */
+function formatWindShare(share: number): string {
+  const magnitude = Math.abs(share).toFixed(1);
+  if (magnitude === '0.0') return '';
+  return `${share > 0 ? '+' : '-'}${magnitude}`;
+}
+
+/**
+ * The wind's bearing as the arrow must be rotated, degrees clockwise in
+ * [0, 360).
+ *
+ * Relative to the bow, not to north: the arrow sits beside a bow-up scope, so
+ * an arrow at 12 o'clock has to mean "pushing you along" and not "blowing
+ * north". `WindState.bearing` and `ShipState.heading` share a convention
+ * precisely so this can be a subtraction.
+ */
+function windArrowDeg(wind: WindState, ship: ShipState): number {
+  const deg = (wind.bearing - ship.heading) * RAD_TO_DEG;
+  return ((deg % 360) + 360) % 360;
 }
 
 /* ------------------------------------------------------------------ */
@@ -151,13 +193,23 @@ function formatRate(rate: number): string {
   return `${sign}${magnitude} %/s`;
 }
 
-export function createHud(): { update(ship: ShipState, energy: EnergyState): void } {
+export function createHud(): {
+  update(ship: ShipState, energy: EnergyState, wind: WindState): void;
+} {
   // Looked up once; every writer tolerates a missing element.
   const writeHeading = textWriter(document.getElementById('hud-heading'));
   const writeNeedle = transformWriter(document.getElementById('hud-compass-needle'));
   const writeSpeed = textWriter(document.getElementById('hud-speed'));
+  const writeSpeedWind = textWriter(document.getElementById('hud-speed-wind'));
   const writeLat = textWriter(document.getElementById('hud-lat'));
   const writeLon = textWriter(document.getElementById('hud-lon'));
+
+  // Calm versus blowing is one modifier on the wrapper, exactly as the power
+  // block does its four states: the dart and the number take their colour and
+  // their visibility from it, so they cannot end up disagreeing.
+  const writeWndState = modifierWriter(document.getElementById('hud-wnd'), 'wnd');
+  const writeWndArrow = transformWriter(document.getElementById('hud-wnd-arrow'));
+  const writeWndValue = textWriter(document.getElementById('hud-wnd-value'));
 
   // The whole power block is coloured from one modifier class on its wrapper,
   // so a state change is a single classList write and the CSS fans it out to
@@ -171,14 +223,30 @@ export function createHud(): { update(ship: ShipState, energy: EnergyState): voi
   const writePwrRate = textWriter(document.getElementById('hud-pwr-rate'));
 
   return {
-    update(ship: ShipState, energy: EnergyState): void {
+    update(ship: ShipState, energy: EnergyState, wind: WindState): void {
       const headingDeg = ship.headingDeg;
 
       writeHeading(`${formatHeading(headingDeg)}°`);
       // The rose is fixed; the needle points where the ship is heading.
       writeNeedle(`rotate(${headingDeg.toFixed(1)}deg)`);
 
-      writeSpeed(formatSpeed(ship.speed));
+      // SPD is GROUND speed -- what the player watches go past -- with the
+      // engine's share subtracted out beside it. Printing engine speed here
+      // instead would leave the panel flatly contradicting the sea, and the
+      // difference is the only place the 0.75 grip rule becomes visible: 8 kn
+      // of engine under a 10 kn tailwind reads "15.5 kn +7.5".
+      writeSpeed(formatSpeed(ship.groundSpeed));
+      writeSpeedWind(formatWindShare(ship.groundSpeed - ship.speed));
+
+      // A calm holds its last bearing rather than clearing it, so the arrow is
+      // hidden by the class instead of being pointed anywhere, and its
+      // transform is left alone: nothing to write for the seconds between
+      // events, and the direction is already correct when one begins.
+      const blowing = wind.speed > 0;
+      writeWndState(blowing ? 'blowing' : 'calm');
+      writeWndValue(blowing ? formatSpeed(wind.speed) : 'CALM');
+      if (blowing) writeWndArrow(`rotate(${windArrowDeg(wind, ship).toFixed(1)}deg)`);
+
       writeLat(formatLat(ship.latDeg));
       writeLon(formatLon(ship.lonDeg));
 

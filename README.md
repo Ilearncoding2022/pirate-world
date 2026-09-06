@@ -58,11 +58,21 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the banks have flat bases, domed tops and real thickness at the horizon. How
   tall a bank builds varies from place to place, between two thirds and all of
   the deck's depth.
+- **Wind.** Gusts blow up on a random bearing, hold for five to thirty seconds
+  and drop away again, with calms between them. It is a real push, not a
+  number: three quarters of the wind's speed is added to your own, so 8 knots
+  of engine under a 10 knot tailwind makes 15.5 over the ground — and a beam
+  wind carries you sideways off your course while the bow holds its heading.
+  The open ocean blows twice as hard as the shoreline, building over the first
+  40 units offshore, so hugging the coast is shelter and standing out to sea is
+  a gamble. A berth is dead calm. The weather is seeded, so the same world
+  always blows the same way.
 - **Ship wake** that follows the curve of the planet and fades behind you.
 - **The ship**: a glTF hull with textured planking, brass rails, rigging and
-  neon thruster pods, floated at its designed waterline. The mainsail bellies
-  and the Jolly Roger streams as you make way, the lamps breathe out of step
-  with each other, and the thrusters flare on the throttle.
+  neon thruster pods, floated at its designed waterline. The Jolly Roger
+  streams down the apparent wind and the mainsail fills when a following
+  breeze outruns you, the lamps breathe out of step with each other, and the
+  thrusters flare on the throttle.
 - **Power, not fuel tanks.** The ship runs on a reserve that burns with the
   *square* of your speed, so half throttle costs a quarter as much and cruising
   slowly is a real strategy: 90 seconds flat out, or fifteen minutes at 5 knots.

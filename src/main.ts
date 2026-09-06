@@ -10,6 +10,7 @@ import { createHud } from './hud';
 import { createRadar } from './radar';
 import { createEnv } from './env';
 import { createEnergy } from './energy';
+import { createWind } from './wind';
 import { createDocks } from './docks';
 import { createPostFx } from './postfx';
 
@@ -44,6 +45,10 @@ scene.add(ship.object);
 // the HUD, the model's neon and the dock rings.
 const energy = createEnergy(globe.towns);
 
+// Weather. Reads the same height field the radar plots, so the sheltered water
+// on the scope is the sheltered water the ship finds.
+const wind = createWind(terrain, globe.heightMap);
+
 const docks = createDocks(globe.towns);
 scene.add(docks.object);
 
@@ -77,13 +82,16 @@ function frame(): void {
   // turns out not to have. `globe.update` is what writes `env`, so the sun the
   // solar panels see is also one frame old -- 16 ms of a 30-minute day.
   energy.update(dt, ship.state, env);
-  ship.update(dt, controls.input, energy.state);
+  // Wind sits between the two: it needs this frame's docked verdict to know
+  // whether the ship is in shelter, and the ship needs this frame's push.
+  wind.update(dt, ship.state, energy.state);
+  ship.update(dt, controls.input, energy.state, wind.state);
   view.update(dt, ship.state, controls.input);
   globe.update(dt, env);
   docks.update(dt, env, ship.state, energy.state);
   wake.update(dt, ship.state, env);
-  hud.update(ship.state, energy.state);
-  radar.update(dt, ship.state);
+  hud.update(ship.state, energy.state, wind.state);
+  radar.update(dt, ship.state, wind.state);
 
   postFx.render(dt, scene, view.camera);
   controls.endFrame();

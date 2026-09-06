@@ -14,7 +14,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { BufferGeometry, Material, Object3D } from 'three';
-import type { EnergyState, InputState, ShipState, Terrain } from './types';
+import type { EnergyState, InputState, ShipState, Terrain, WindState } from './types';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
 import { createShipFx } from './shipfx';
 import type { ShipFx } from './shipfx';
@@ -96,6 +96,9 @@ const _back = new Vector3();
 const _axis = new Vector3();
 const _candidate = new Vector3();
 const _probe = new Vector3();
+const _starboard = new Vector3();
+const _velocity = new Vector3();
+const _course = new Vector3();
 const _basis = new Matrix4();
 const _baseQuat = new Quaternion();
 const _swayQuat = new Quaternion();
@@ -263,6 +266,8 @@ interface MutableShipState {
   heading: number;
   headingDeg: number;
   speed: number;
+  groundSpeed: number;
+  velocity: Vector3;
   latDeg: number;
   lonDeg: number;
 }
@@ -276,8 +281,11 @@ export interface Ship {
    * it to hand the new materials to the post-processing chain.
    */
   ready: Promise<void>;
-  /** `energy` gates thrust: a dry tank still steers, coasts and drifts. */
-  update(dt: number, input: InputState, energy: EnergyState): void;
+  /**
+   * `energy` gates thrust: a dry tank still steers, coasts and drifts.
+   * `wind` supplies the push the hull is carried by on top of its own engine.
+   */
+  update(dt: number, input: InputState, energy: EnergyState, wind: WindState): void;
 }
 
 /** Frees a subtree's GPU resources. Only ever used on the discarded stand-in. */
@@ -363,6 +371,8 @@ export function createShip(
     heading: ((startHeading % TWO_PI) + TWO_PI) % TWO_PI,
     headingDeg: normalizeHeadingDeg(startHeading),
     speed: 0,
+    groundSpeed: 0,
+    velocity: new Vector3(),
     latDeg: startLat,
     lonDeg: startLon,
   };
@@ -388,15 +398,42 @@ export function createShip(
   }
 
   /**
-   * Great-circle step. Rotating `from` by +angle around `axis = from x forward`
-   * moves it toward `forward`, because (p x f) x p = f(p.p) - p(p.f) = f for an
-   * orthonormal pair. Returns false if the axis is degenerate.
+   * Great-circle step along the unit tangent `dir`. Rotating `from` by +angle
+   * around `axis = from x dir` moves it toward `dir`, because
+   * (p x d) x p = d(p.d) - p(p.d) = d for an orthonormal pair. Returns false if
+   * the axis is degenerate.
+   *
+   * `dir` is the direction of TRAVEL, which is no longer always `forward`: a
+   * beam wind carries the hull sideways while the bow holds its heading, so
+   * the caller decides which direction is being walked.
    */
-  function stepAlong(out: Vector3, from: Vector3, angle: number): boolean {
-    _axis.crossVectors(from, state.forward);
+  function stepAlong(out: Vector3, from: Vector3, dir: Vector3, angle: number): boolean {
+    _axis.crossVectors(from, dir);
     if (_axis.lengthSq() < 1e-12) return false;
     _axis.normalize();
     out.copy(from).applyAxisAngle(_axis, angle).normalize();
+    return true;
+  }
+
+  /**
+   * Walks one step of `angle` along `dir` and commits it, unless that would put
+   * the hull on land. Returns whether the ship moved; nothing is written when
+   * it did not.
+   *
+   * The LOOKAHEAD probe runs along the same direction, so we stop just short of
+   * a coastline rather than clipping into it. Because `dir` is always the
+   * direction of travel and `angle` is always positive, the probe no longer
+   * needs the sign of the speed the way it did when everything was walked along
+   * the bow: going astern is now a `dir` of -forward.
+   */
+  function tryStep(dir: Vector3, angle: number): boolean {
+    if (!stepAlong(_candidate, state.position, dir, angle)) return false;
+    let blocked = terrain.isLand(_candidate);
+    if (!blocked && stepAlong(_probe, state.position, dir, angle + LOOKAHEAD / GLOBE_RADIUS)) {
+      blocked = terrain.isLand(_probe);
+    }
+    if (blocked) return false;
+    state.position.copy(_candidate).normalize();
     return true;
   }
 
@@ -432,7 +469,7 @@ export function createShip(
     object.position.copy(state.position).multiplyScalar(GLOBE_RADIUS + HULL_OFFSET + bob);
   }
 
-  function update(dt: number, input: InputState, energy: EnergyState): void {
+  function update(dt: number, input: InputState, energy: EnergyState, wind: WindState): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
     elapsed += dt;
@@ -492,26 +529,59 @@ export function createShip(
       state.speed = 0;
     }
 
-    // ---- Move along the great circle, refusing to enter land -------------
-    if (state.speed !== 0) {
-      const angle = (state.speed * dt) / GLOBE_RADIUS;
-      if (stepAlong(_candidate, state.position, angle)) {
-        let blocked = terrain.isLand(_candidate);
-        if (!blocked) {
-          // Probe further along the direction of travel so we stop just short
-          // of the coastline rather than clipping into it.
-          const probeAngle = angle + (Math.sign(state.speed) * LOOKAHEAD) / GLOBE_RADIUS;
-          if (stepAlong(_probe, state.position, probeAngle)) {
-            blocked = terrain.isLand(_probe);
-          }
+    // ---- Ground velocity: the engine along the bow, plus the wind ---------
+    // `state.speed` is the engine and only the engine. What the hull does over
+    // the ground is that plus the eased push `wind.ts` resolved this frame,
+    // and adding it as a VELOCITY rather than as a turning force is what gives
+    // a beam wind real leeway: the bow holds its heading and the ship crabs
+    // off its course, which the wake behind it will show.
+    _starboard.crossVectors(state.forward, state.up);
+    if (_starboard.lengthSq() > 1e-12) _starboard.normalize();
+    else _starboard.set(0, 0, 0);
+
+    _velocity
+      .copy(state.forward)
+      .multiplyScalar(state.speed + wind.along)
+      .addScaledVector(_starboard, wind.across);
+
+    const groundMag = _velocity.length();
+
+    // ---- Move along the ground velocity, refusing to enter land ----------
+    if (groundMag > 1e-9) {
+      _course.copy(_velocity).multiplyScalar(1 / groundMag);
+      if (!tryStep(_course, (groundMag * dt) / GLOBE_RADIUS)) {
+        // Blocked on the combined course. A beam wind pinning the hull against
+        // a coast must not also stop it sailing ALONG that coast, so try the
+        // engine alone before giving up -- otherwise a player with a shore to
+        // leeward loses the helm entirely until the wind drops.
+        let freed = false;
+        if (state.speed !== 0) {
+          _course.copy(state.forward).multiplyScalar(Math.sign(state.speed));
+          freed = tryStep(_course, (Math.abs(state.speed) * dt) / GLOBE_RADIUS);
         }
-        if (blocked) {
-          state.speed = 0; // beached: hold position; steering still works
+        if (freed) {
+          // Sailing along the coast under engine alone. The leeway was refused
+          // by the land, so it must not survive into what we report.
+          _velocity.copy(state.forward).multiplyScalar(state.speed);
         } else {
-          state.position.copy(_candidate).normalize();
+          // Only now is it truly beached: hold position; steering still works.
+          state.speed = 0;
+          _velocity.set(0, 0, 0);
         }
       }
     }
+
+    // Written from what the hull COMMITTED, never from what it attempted. The
+    // land refuses steps after the velocity above is built, and reporting the
+    // attempt would leave a ship hard aground reading a knot and a half on the
+    // HUD -- and would hand that phantom way to `energy.ts`, which decides
+    // whether a berth may connect on this very number.
+    const committed = _velocity.length();
+    state.velocity.copy(_velocity);
+    // Signed by the forward component rather than by Math.sign of it: a ship
+    // making pure leeway has no forward component at all, and calling that
+    // stopped would hand `energy.ts` a berth it had not earned.
+    state.groundSpeed = _velocity.dot(state.forward) >= 0 ? committed : -committed;
 
     syncStateGeo();
     refreshForward(); // forward must match the committed position
@@ -528,6 +598,27 @@ export function createShip(
     // beside it and is the single place the flames answer to power, so zeroing
     // the throttle here as well would cut the same thing twice and fight the
     // fade `shipfx.ts` puts on it.
+    // Apparent wind, resolved in the ship's own frame. Both terms are already
+    // in that frame -- the ground velocity built above is exactly
+    // (speed + wind.along) forward and wind.across to starboard -- so this
+    // needs no vectors, and it uses the true bearing rather than the quantised
+    // sector because the eye is better at angles than the hull is.
+    //
+    // In a flat calm at 20 kn this comes out as 20 kn from dead ahead, and the
+    // sail only takes on extra belly once a following wind is outrunning the
+    // ship.
+    //
+    // Note this DOES change the hull's look, whatever `docs/WIND_PLAN.md` says
+    // about it matching the old behaviour: before there was weather the flag
+    // leaned toward the bow, because the model was authored around a permanent
+    // following wind. Under an apparent wind a ship making way in a calm has
+    // the air coming over its bow, so the flag now lies astern. That is the
+    // physical answer and the one the plan asked for; the plan was simply
+    // wrong about which way the old flag pointed.
+    const relative = wind.bearing - state.heading;
+    const apparentAlong = wind.speed * Math.cos(relative) - (state.speed + wind.along);
+    const apparentAcross = wind.speed * Math.sin(relative) - wind.across;
+
     fx?.update(
       dt,
       driveFrac,
@@ -535,6 +626,8 @@ export function createShip(
       energy.level,
       energy.canThrust,
       energy.dock !== null,
+      apparentAlong,
+      apparentAcross,
     );
   }
 

@@ -216,6 +216,96 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   SPD — ground speed, and the wind's signed share of it
+
+   The suffix is the quiet half of the reading: the big cyan number is what
+   the ship is doing, the small one is how much of that the weather is
+   lending. Same weight and colour as .pwr__rate, because it plays the same
+   role — a rate of change annotating the headline figure.
+   ------------------------------------------------------------------- */
+
+.spd {
+  display: flex;
+  align-items: baseline;
+}
+
+.spd__wind {
+  margin-left: 7px;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* hud.ts clears the text when the wind contributes nothing, and this is what
+   makes that a real disappearance: an empty span still carries its margin, and
+   the row is right-aligned, so a stale 7px would shunt the speed off the
+   column that LAT and LON line up on. */
+.spd__wind:empty {
+  display: none;
+}
+
+/* ---------------------------------------------------------------------
+   WND — bow-relative arrow and true wind speed
+
+   One modifier class on .wnd carries the whole calm/blowing distinction, the
+   same trick .pwr uses for its four states: hud.ts writes one class and the
+   colour and the arrow follow, so the arrow can never still be pointing
+   somewhere while the text says CALM.
+   ------------------------------------------------------------------- */
+
+.wnd {
+  /* blowing: the base state, same cyan as the rest of the instrument, so
+     .wnd--blowing needs no rule of its own — it is the absence of --calm. */
+  --wnd-accent: var(--cyan);
+  --wnd-glow: rgba(63, 224, 255, 0.45);
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+/* A calm is not an alarm — it recedes to the key colour rather than picking
+   up a warning hue, because nothing is wrong and nothing needs doing. */
+.wnd--calm {
+  --wnd-accent: var(--ink-mute);
+  --wnd-glow: transparent;
+}
+
+.wnd__arrow {
+  /* Centred rather than on the baseline: the dart is a symbol, not a glyph,
+     and a rotating box hung off a text baseline visibly bobs as it turns. */
+  align-self: center;
+  width: 13px;
+  height: 13px;
+  color: var(--wnd-accent);
+  filter: drop-shadow(0 0 6px var(--wnd-glow));
+}
+
+.wnd__arrow svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Points north at rotate(0), so hud.ts can hand it a bearing unaltered. */
+.wnd__dart {
+  fill: currentColor;
+}
+
+/* Hidden, not removed: a calm must not reflow the row, and the transform
+   hud.ts left on the span stays valid for when the wind comes back. */
+.wnd--calm .wnd__arrow {
+  visibility: hidden;
+}
+
+/* Rides on .readout__val for size and tabular figures, and only recolours. */
+.wnd__val {
+  color: var(--wnd-accent);
+  text-shadow: 0 0 12px var(--wnd-glow);
+}
+
+/* ---------------------------------------------------------------------
    PWR — percentage, ten-notch bar, mode tag, signed rate
 
    The four colour states are nothing but a custom-property swap on .pwr,
@@ -804,6 +894,20 @@ kbd {
   }
   .pwr__status {
     gap: 7px;
+  }
+  /* Same reasoning as the status line above: with the panel at content width,
+     SPD and WND are now the two rows carrying a second value each, and they
+     are what would push it wider. Trim the annotations, not the readings. */
+  .spd__wind {
+    font-size: 9.5px;
+    margin-left: 5px;
+  }
+  .wnd {
+    gap: 5px;
+  }
+  .wnd__arrow {
+    width: 11px;
+    height: 11px;
   }
   .legend {
     max-width: 46vw;

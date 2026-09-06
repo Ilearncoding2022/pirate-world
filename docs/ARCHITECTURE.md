@@ -20,6 +20,14 @@ These have bitten us once. Do not reinterpret them in a consumer.
 - `WorldEnv.elapsed` is **seconds** since start. `timeOfDay` is **[0, 1)**.
 - `ShipState.speed` is **world units per second**, which `hud.ts` prints as
   knots. So is `RADAR_RANGE`, and so is the cloud deck's `DRIFT_SPEED`.
+- `ShipState.speed` is the **engine only**. `ShipState.groundSpeed` is engine
+  plus wind. They are different numbers and picking the wrong one is the
+  easiest mistake in the codebase — see **Wind** below for which rule uses
+  which.
+- `WindState.speed` is **world units per second**; `WindState.bearing` is the
+  direction the wind travels **toward**, in radians on the same 0 = north,
+  clockwise-positive convention as `ShipState.heading`, so the two subtract
+  directly. `along` / `across` are already in the ship's frame.
 
 ## World scale
 `GLOBE_RADIUS` in `geo.ts` is the one number that sets how big the world feels,
@@ -94,7 +102,7 @@ shader.
 | File | Exports | Notes |
 |---|---|---|
 | `geo.ts` | `GLOBE_RADIUS`, `latLonToDir`, `dirToLatLon`, `tangentFrame`, `headingToForward`, `normalizeHeadingDeg` | conventions |
-| `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode` | interfaces only |
+| `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode`, `WindState` | interfaces only |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
 | `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once |
 | `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts |
@@ -109,6 +117,7 @@ shader.
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
 | `energy.ts` | `createEnergy(towns)` | burn / solar / dock charge; owns `EnergyState` |
+| `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE` | calm/event weather; owns `WindState`; probes the shared height map for the coast |
 | `wake.ts` | `createWake()` | ship wake and spray |
 | `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
 | `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env) }` | orchestrator only |
@@ -180,13 +189,14 @@ Two more things follow from the stack and are easy to undo by accident:
 ## Frame loop
 ```
 energy.update(dt, shipState, env)          // burn / solar / dock, on last frame's speed
-ship.update(dt, input, energyState)        // thrust gated on energy.canThrust
+wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
+ship.update(dt, input, energyState, windState)  // thrust gated on energy.canThrust
 camera.update(dt, shipState, input)
 globe.update(dt, env)      // daynight first, then water, land, citylights, clouds, sky
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env)
-hud.update(shipState, energyState)
-radar.update(dt, shipState)
+hud.update(shipState, energyState, windState)
+radar.update(dt, shipState, windState)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
@@ -195,6 +205,13 @@ Power runs **before** the ship, so it charges for a frame of travel the ship has
 already made rather than one it might not be able to afford. `globe.update` is
 what writes `env`, so the sun the solar panels see is one frame old too — 16 ms
 of a 30-minute day.
+
+Wind is wedged **between** the two, and the order is load bearing in both
+directions. It runs after energy because a berth is shelter and `energy.ts`
+owns the only definition of docked, so the wind has to see this frame's verdict
+rather than last frame's. It runs before the ship because the ship spends the
+push the same frame it is written. Energy therefore still bills last frame's
+speed, exactly as it did before.
 
 ## TypeScript constraints (tsconfig)
 - `verbatimModuleSyntax`: use `import type { X }` for type-only imports.
@@ -350,6 +367,110 @@ Three subtleties worth keeping:
 `energy.update` runs before `ship.update` and therefore bills last frame's
 speed. That is deliberate: the alternative is the ship spending power it turns
 out not to have.
+
+## Wind
+
+`wind.ts` owns one `WindState`, mutated in place for the life of the run, on
+the same terms as `EnergyState`: `ship.ts`, `hud.ts`, `radar.ts` and `shipfx.ts`
+all hold that one reference. Handing out a copy would leave them reading a wind
+that had stopped moving.
+
+**The state machine** alternates forever between a **calm** (3–15 s, speed
+exactly 0) and an **event** (5–30 s, one fixed bearing drawn uniformly per
+event). Speed during an event is `envelope × gust × cap`:
+
+- the **envelope** fades in over `FADE` (2 s) and out again, *clamped to a
+  quarter of the event's own duration*. Without that clamp a 5 s event spends
+  four of its five seconds fading and never once reaches its cap, so the short
+  half of the duration band would produce nothing the player could feel;
+- the **gust** is smoothed simplex noise remapped from [-1, 1] into
+  `[GUST_FLOOR, 1]` — floored at 0.55, because a wind that dies in the middle
+  of its own event and comes back is a bug report, not weather;
+- the **cap** comes from the coast ramp below.
+
+Randomness comes from one seeded `mulberry32` stream, same house style as
+`towns.ts`, so a given world always blows the same way. That is worth more than
+novelty here: tuning the caps and chasing a drift bug both need the same gust
+to come back on the next run.
+
+**The coast ramp.** The cap is a linear interpolation from `COAST_CAP` (8) at
+the shoreline to `OCEAN_CAP` (16) at `OPEN_SEA_DISTANCE` (40 world units)
+offshore, so there is no line to cross — standing out from a coast, the wind
+builds. Distance to land is probed on the CPU from **the same height map
+`radar.ts` rasterises**, which is the point: the wind and the scope can never
+disagree about where the land is, so the sheltered water on the display is the
+sheltered water the ship actually finds. The probe walks 16 bearings at 5, 10,
+20, 30 and 40 units, stops at the first ring that finds land, and runs at
+`PROBE_HZ` (4) rather than every frame. Its answer steps in rings, so it is
+eased with a ~1 s time constant; that smoothing is also what covers an islet
+the inner ring misses for a beat. The cap is re-evaluated **every frame, never
+locked at the start of an event** — a ship under a 30 s gust crosses 200 units,
+five times the width of the ramp.
+
+**The eight-sector push.** The wind's travel bearing relative to the bow is
+quantised to the nearest 45° and indexed into a fixed table of
+along/starboard pairs. Being a table rather than a cosine is the design and not
+a shortcut: the player is meant to learn eight distinct behaviours, not a
+continuum. Every entry is a unit vector, so the cap means the same thing on
+every point of sail. The push is then `WIND_GRIP × speed ×` the table entry,
+with `WIND_GRIP` 0.75 — the rule the whole system is tuned around, and the one
+worth remembering: **8 kn of engine under a 10 kn tailwind makes 15.5 kn over
+the ground.** The engine still clamps at `MAX_FORWARD`, but ground speed has no
+ceiling beyond the arithmetic and reaches ~32 kn flat out downwind.
+
+The applied vector is **eased** toward the table value with `PUSH_TAU` (0.3 s),
+using the same `1 - exp(-dt / tau)` damping as `bankRoll`. Without it, crossing
+a sector boundary at 16 kn jumps the push by 3.5 kn inside a single frame and
+the hull visibly snaps sideways. The accepted consequence is that during a
+transition the push is briefly *not* exactly one of the eight table values;
+nothing downstream assumes it is.
+
+### The two speeds
+
+This is the split to get right, and the reason `ShipState` carries both.
+
+`ship.ts` no longer steps along its heading. It builds a **ground velocity** —
+`forward × (speed + wind.along)` plus `starboard × wind.across` — and walks the
+great circle along *that*. Adding the wind as a velocity rather than as a
+turning force is what produces real leeway: the bow holds its heading and the
+hull crabs off its course. There is no weathervaning; the bow never turns on
+its own.
+
+| Number | Means | Who reads it |
+|---|---|---|
+| `ShipState.speed` | engine only, along the bow | the burn, turn rate, bob, sway, bank, `MAX_FORWARD` clamp, `STOP_EPSILON`, the solar test |
+| `ShipState.groundSpeed` | engine + wind, signed | the HUD's `SPD` row, the berth connect test |
+
+Two rules in `energy.ts` moved or deliberately did not:
+
+- the **berth test moved to ground speed**, or a ship blown through a ring at
+  12 kn with its engines stopped would read as moored, take on shore power, and
+  — because a berth switches the wind off — be becalmed mid-drift;
+- the **solar test stayed on engine speed** (`ship.speed === 0`), so a dead
+  ship drifting downwind still deploys its panels. That is the entire point of
+  running out of charge in a wind: you are not stranded, you are being carried
+  somewhere while you recover. The `STOP_EPSILON` snap stays on engine speed
+  for the same reason — it is what makes that exact `=== 0` test safe.
+
+The burn also stays on engine speed, so a tailwind extends the ship's range
+rather than costing extra, which is what makes reading the weather worth doing.
+
+**Collision fallback.** When the combined course is blocked by land, `ship.ts`
+retries the step under **engine alone** before giving up, and only zeroes the
+speed when both are blocked. A beam wind pinning the hull against a coast must
+not also stop it sailing *along* that coast — without the retry, a player with
+a shore to leeward loses the helm entirely until the wind drops.
+
+**Feedback.** The HUD carries a `WND` row (arrow relative to the bow, matching
+the bow-up scope, or `CALM`) and breaks the `SPD` row down into ground speed
+plus the wind's signed contribution, which is what makes the 0.75 rule legible.
+The radar draws a rim arrow on the wind's *true* bearing in the **overlay**
+pass on the live frame, like the north mark — it is not attached to terrain, so
+the stale-raster-frame rule does not apply to it. `shipfx.ts` streams the flag
+along the **apparent** wind (true wind minus the hull's own motion, so a 20 kn
+ship in a calm still streams astern) and adds the tailwind component to the
+sail's belly. The model only bellies the sail one way, so beam and head winds
+show on the flag and not on the sail.
 
 ## Towns, berths and the dock zones
 `towns.ts` owns settlement placement, which used to live inside `citylights.ts`

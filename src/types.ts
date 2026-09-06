@@ -108,6 +108,37 @@ export interface EnergyState {
   readonly canThrust: boolean;
 }
 
+/* ------------------------------------------------------------------ */
+/* Wind                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Read-only view of the weather, produced by `wind.ts`.
+ *
+ * Two halves, and they are not the same thing. `speed` and `bearing` are the
+ * TRUE wind -- what the world is doing, what the radar draws and the HUD
+ * prints. `along` and `across` are what that wind has actually managed to do
+ * to this hull: quantised to eight sectors, scaled by the grip factor and
+ * eased, so they lag the true wind by a fraction of a second and are the only
+ * pair `ship.ts` may move on.
+ */
+export interface WindState {
+  /** True wind speed, world units/s. Exactly 0 during a calm. */
+  readonly speed: number;
+  /**
+   * The compass bearing the wind is travelling TOWARD, radians, 0 = north and
+   * clockwise positive -- the same convention as `ShipState.heading`, so the
+   * two can be subtracted directly. Holds its last value through a calm.
+   */
+  readonly bearing: number;
+  /** The strength ceiling in force at the ship right now, world units/s. */
+  readonly cap: number;
+  /** Eased push along the ship's forward axis, world units/s. */
+  readonly along: number;
+  /** Eased push along the ship's starboard axis, world units/s. */
+  readonly across: number;
+}
+
 /** Read-only view of the ship, produced by ship.ts, consumed by camera.ts and hud.ts. */
 export interface ShipState {
   /** Unit vector from globe center to the ship. World position = position * GLOBE_RADIUS. */
@@ -120,8 +151,29 @@ export interface ShipState {
   readonly heading: number;
   /** Heading in degrees, normalized to [0, 360). */
   readonly headingDeg: number;
-  /** Signed surface speed in world units per second. Negative = reversing. */
+  /**
+   * Signed ENGINE speed in world units per second. Negative = reversing.
+   *
+   * What the propulsion is making, along `forward` and nothing else. The wind
+   * never touches it, which is why the burn in `energy.ts`, the turn rate, the
+   * bob, the sway, the bank and the MAX_FORWARD clamp all still read it. For
+   * how fast the hull is actually crossing the water, see `groundSpeed`.
+   */
   readonly speed: number;
+  /**
+   * Signed magnitude of `velocity`, world units per second: engine plus wind,
+   * which is what a player watching the sea go past actually sees.
+   *
+   * Signed by the forward component, so reversing reads negative -- but a ship
+   * making leeway with no way on reads positive rather than zero, because it
+   * is unmistakably moving.
+   */
+  readonly groundSpeed: number;
+  /**
+   * Ground velocity, a tangent vector in world units per second. The direction
+   * the hull is really travelling, which under a beam wind is not `forward`.
+   */
+  readonly velocity: Vector3;
   readonly latDeg: number;
   readonly lonDeg: number;
 }

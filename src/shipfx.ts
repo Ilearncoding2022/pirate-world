@@ -25,9 +25,22 @@ import type { BufferAttribute, BufferGeometry, Material, Mesh, MeshStandardMater
  * beat at their own hashed rates while the whole ship is fading.
  *
  * Local axes inside the glTF root, which the model's 180-degree export yaw
- * makes counter-intuitive: local +Z is the bow and local +X is to port. So the
- * sail bellies and the flag streams along +Z, forward, which is the direction
- * the build script bellied the sail in -- the wind is over the stern.
+ * makes counter-intuitive: local +Z is the bow and local +X is to port -- the
+ * mirror of the bow--Z, starboard-+X convention `ship.ts` works in outside the
+ * root. Traced back to `tools/build_ship.py` rather than taken on trust: it
+ * authors the hull bow-toward--Y in Blender, parents every part to an empty,
+ * and yaws only that empty 180 degrees about Z before an export that maps
+ * Blender (x, y, z) onto glTF (x, z, -y). The yaw therefore lands on the root
+ * node and the parts keep their authored coordinates, so bow--Y becomes local
+ * +Z and the porthole the script builds on -X is the one it calls starboard.
+ * The consequence for everything below: a wind vector arriving in the ship's
+ * frame has its across component negated and its along component left alone.
+ *
+ * The sail's baked belly still points +Z, forward, because the build script
+ * bellied it for a following wind and the mesh bends the one way only. That is
+ * now a fact about the cloth rather than about the weather: since `wind.ts`
+ * the air can arrive from any quarter, so a head or beam wind shows on the
+ * flag, which swings, and never on the sail, which only ever deepens.
  */
 
 /* ------------------------------------------------------------------ */
@@ -47,10 +60,50 @@ const SAIL_LUFF = 0.045;
 /** How far either side of its authored strength the sail's circuitry charges. */
 const SAIL_CHARGE = 0.35;
 
-/** Fly-end travel of the flag: forward under way, down at rest, plus flutter. */
+/**
+ * Extra belly, model units, the mainsail takes on in a following wind that is
+ * fully outrunning the ship, and the apparent tailwind that counts as "fully".
+ *
+ * Four rather than the wind's own 16 kn ocean cap, because by the time
+ * `ship.ts` works out the apparent wind the hull has already been given 0.75
+ * of the true wind as push: a drifting ship in a dead-astern ocean gale keeps
+ * only the remaining quarter as air moving past it. Scaling this to the raw
+ * cap would divide every real tailwind by four and leave the sail with no
+ * visible answer to the one wind it is allowed to react to.
+ */
+const SAIL_TAILWIND = 0.12;
+const SAIL_TAILWIND_FULL = 4;
+
+/** Fly-end travel of the flag: downwind under way, down at rest, plus flutter. */
 const FLAG_STREAM = 0.3;
 const FLAG_DROOP = 0.2;
 const FLAG_FLUTTER = 0.075;
+
+/**
+ * Apparent wind, world units per second, at which the flag streams flat out.
+ *
+ * Pinned to MAX_FORWARD rather than to the wind's cap so the oldest case still
+ * reads at its old strength: a ship at full throttle in a flat calm makes
+ * exactly 20 of air over its own deck, which is the reading the flag has been
+ * fully streamed by since before there was any weather to stream in. Stronger
+ * apparent winds -- an ocean gale on the nose adds up to about 36 -- saturate
+ * here, because cloth pinned at the hoist has nowhere further to go and a fly
+ * end that kept travelling would read as the mesh tearing off the halyard.
+ */
+const FLAG_FULL_WIND = 20;
+
+/**
+ * e-folding time, seconds, of the flag swinging onto a new apparent bearing.
+ *
+ * Matched to `wind.ts`'s PUSH_TAU. The push on the hull is eased over that long
+ * precisely so that crossing a sector boundary at speed does not snap the ship
+ * sideways; a flag that answered the same boundary within one frame would put
+ * the snap straight back, on the one part of the model a player reads the wind
+ * off. Eased as a vector rather than as a bearing, so a wind that dies and
+ * returns from the opposite quarter swings the flag down through the calm
+ * instead of spinning it the long way round at full stretch.
+ */
+const FLAG_SWING_TIME = 0.3;
 
 /** Thruster flame flicker, as a fraction of its authored strength. */
 const THRUSTER_FLICKER = 0.13;
@@ -144,6 +197,13 @@ export interface ShipFx {
    * @param canThrust `EnergyState.canThrust`. False fades the flames out.
    * @param docked    `EnergyState.dock !== null`, ie. a berth is actually
    *   charging the ship rather than merely being sailed over. Flares everything.
+   * @param apparentAlong apparent wind resolved onto the hull, world units per
+   *   second, positive toward the bow. Apparent, not true: `ship.ts` has
+   *   already taken the ship's own motion out of it, so a positive value means
+   *   a following wind genuinely outrunning the ship and a negative one is the
+   *   headwind every ship under way makes for itself -- 20 of it at full
+   *   throttle in a flat calm.
+   * @param apparentAcross the same wind athwartships, positive to starboard.
    */
   update(
     dt: number,
@@ -152,6 +212,8 @@ export interface ShipFx {
     level: number,
     canThrust: boolean,
     docked: boolean,
+    apparentAlong: number,
+    apparentAcross: number,
   ): void;
 }
 
@@ -314,10 +376,24 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
   let flameGate = 1;
   let flare = 0;
 
-  function updateSail(cloth: Cloth, drive: number): void {
+  // The apparent wind, eased, already turned into the root's local axes. Two
+  // scalars living in the closure rather than a Vector2, because this is the
+  // per-frame path and nothing else in it allocates either.
+  let windX = 0; // toward port
+  let windZ = 0; // toward the bow
+  // The first frame snaps instead of easing, for the same reason `flameGate`
+  // starts lit: the model streams in mid-voyage, so a flag that spent its
+  // first third of a second swinging up out of a calm it was never in would
+  // read as the rig settling rather than as a ship already under way.
+  let windSeeded = false;
+
+  function updateSail(cloth: Cloth, drive: number, tailwind: number): void {
     const out = cloth.position.array as Float32Array;
     const rest = cloth.rest;
-    const belly = SAIL_BELLY * drive;
+    // Two sources, summed rather than blended: the speed term is simply what a
+    // sail under way looks like and has to survive a windless day, while the
+    // tailwind term is the weather's own contribution on top of it.
+    const belly = SAIL_BELLY * drive + tailwind;
     const luff = SAIL_LUFF * (0.35 + 0.65 * drive);
     for (let i = 0; i < rest.length; i += 3) {
       const u = (rest[i] - cloth.minX) * cloth.invSpanX; // 0 luff .. 1 leech
@@ -333,19 +409,38 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
     cloth.geometry.computeVertexNormals();
   }
 
-  function updateFlag(cloth: Cloth, drive: number): void {
+  /**
+   * Leans the flag downwind, given the fly-end travel already resolved into the
+   * root's local axes: `streamX` toward port, `streamZ` toward the bow.
+   *
+   * The fly end is displaced; the flag is not yawed bodily onto the wind. A
+   * yaw would be the truer swing, but the build script hangs the Jolly Roger
+   * with its span athwartships and its face square to the chase camera, so
+   * turning it to point dead astern -- the commonest wind there is, since a
+   * ship under way makes its own -- would leave the player watching an edge-on
+   * sliver of the one texture on this model worth looking at. Leaning keeps the
+   * skull broadside. The price is that an athwartships wind reaches the fly out
+   * or crumples it back toward the mast instead of turning it, which is the
+   * most a card pinned along one edge can honestly do; it is bounded, because
+   * a beam wind is only ever apparent at all when the ship is nearly stopped.
+   *
+   * The flutter stays on local Z whatever the wind is doing, because Z is the
+   * flag's own normal and out of plane is the only direction its cloth can
+   * actually flap in.
+   */
+  function updateFlag(cloth: Cloth, drive: number, streamX: number, streamZ: number): void {
     const out = cloth.position.array as Float32Array;
     const rest = cloth.rest;
-    const stream = FLAG_STREAM * drive;
     const droop = FLAG_DROOP * (1 - drive);
     const flutter = FLAG_FLUTTER * (0.4 + 0.6 * drive);
     for (let i = 0; i < rest.length; i += 3) {
       // f = 0 at the hoist, bent to the masthead and so pinned, 1 at the fly.
       const f = (rest[i] - cloth.minX) * cloth.invSpanX;
       const wave = Math.sin(elapsed * 5.5 - f * 6.0);
+      out[i] = rest[i] + f * streamX;
       out[i + 1] =
         rest[i + 1] - f * f * droop + f * flutter * 0.4 * Math.cos(elapsed * 4.1 - f * 5.0);
-      out[i + 2] = rest[i + 2] + f * (stream + flutter * wave);
+      out[i + 2] = rest[i + 2] + f * (streamZ + flutter * wave);
     }
     cloth.position.needsUpdate = true;
     cloth.geometry.computeVertexNormals();
@@ -359,8 +454,21 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
       level: number,
       canThrust: boolean,
       docked: boolean,
+      apparentAlong: number,
+      apparentAcross: number,
     ): void {
       elapsed += dt;
+
+      // Into the root's local axes, and eased on the way. The across component
+      // -- and only the across component -- changes sign, because `ship.ts`
+      // measures it to starboard while local +X is to port; see the axis note
+      // in the module docstring. Worth being deliberate about: a sign slip here
+      // mirrors the flag and leaves every other thing in the frame looking
+      // exactly right, so nothing would point at it.
+      const swing = windSeeded ? 1 - Math.exp(-dt / FLAG_SWING_TIME) : 1;
+      windSeeded = true;
+      windX += (-apparentAcross - windX) * swing;
+      windZ += (apparentAlong - windZ) * swing;
 
       // Exponential approach, so both ramps are frame-rate independent -- the
       // same idiom `ship.ts` banks its turns with.
@@ -403,7 +511,17 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
 
       // Cloth never goes fully slack: a dead sail at a standstill reads as a bug.
       const drive = 0.25 + 0.75 * speedFrac;
-      if (sail !== null) updateSail(sail, drive);
+      if (sail !== null) {
+        // Only a positive `windZ` fills the sail, because only a positive
+        // `windZ` is air still overtaking a ship that is already moving. The
+        // moment the hull outruns the wind -- which is most of the time, and
+        // always in a calm -- this goes negative and the sail is back to
+        // whatever the helm alone earns it. The eased vector rather than the
+        // raw argument, so the sail and the flag are answering one wind on one
+        // clock instead of the sail pumping to gusts the flag has smoothed.
+        const tailwind = Math.min(1, Math.max(0, windZ) / SAIL_TAILWIND_FULL);
+        updateSail(sail, drive, SAIL_TAILWIND * tailwind);
+      }
       if (sailMaterial !== null) {
         // Speed decides how hard the traces run; the tank decides how much
         // light there is to run them with. Multiplied, not blended, so the
@@ -411,7 +529,22 @@ export function createShipFx(model: Object3D, maxAnisotropy: number): ShipFx {
         sailMaterial.emissiveIntensity =
           sailBase * (1 - SAIL_CHARGE + SAIL_CHARGE * 2 * drive) * chargeGlow;
       }
-      if (flag !== null) updateFlag(flag, drive);
+      if (flag !== null) {
+        // The flag left the helm behind here: it answers the air, not the
+        // throttle. `Math.sqrt` over `Math.hypot`, which is the slower call and
+        // is only worth it for the overflow guard two numbers this size will
+        // never need.
+        const mag = Math.sqrt(windX * windX + windZ * windZ);
+        // Same 0.25 floor as the sail's drive, for the same reason.
+        const flagDrive = 0.25 + 0.75 * Math.min(1, mag / FLAG_FULL_WIND);
+        // Unit direction times the travel that strength has earned, folded into
+        // one divide. Collapsing to zero in a true calm -- a stopped ship in
+        // still air -- is the point of dividing rather than clamping: with no
+        // wind at all there is no bearing to stream along, so the flag simply
+        // hangs and flutters instead of picking one.
+        const reach = mag > 1e-4 ? (FLAG_STREAM * flagDrive) / mag : 0;
+        updateFlag(flag, flagDrive, windX * reach, windZ * reach);
+      }
     },
   };
 }

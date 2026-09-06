@@ -107,8 +107,31 @@ const DOCK_RATE = 1 / DOCK_FULL_SECONDS;
  * fight STOP_EPSILON for a reward they have already sailed to; and not
  * generous either, because at 20 kn the ship crosses a whole charging zone in
  * a second or two and would collect a fifth of a tank for driving past.
+ *
+ * Tested against GROUND speed, and it is the only test in this file that is.
+ * See the note below on the two speeds: a ship blown through a ring at 12 kn
+ * with its engines stopped has `speed === 0`, and against that it would read
+ * as moored, take on shore power and -- because `wind.ts` shelters whatever is
+ * docked -- have the wind switched off around it mid-drift.
  */
 const DOCK_SPEED_LIMIT = 3;
+
+/*
+ * The two speeds, and which one each rule here uses.
+ *
+ * `ship.speed` is the ENGINE. `ship.groundSpeed` is the engine plus the wind.
+ * The split is deliberate and this file is where it is easiest to get wrong:
+ *
+ *   - The burn is on ENGINE speed, because the engines are what draw power.
+ *     A tailwind therefore extends the ship's range rather than costing extra,
+ *     which is what makes reading the weather worth doing.
+ *   - The solar test is on ENGINE speed, so a dead ship drifting downwind
+ *     still deploys its panels. That is the entire point of running out of
+ *     charge in a wind: you are not stranded, you are being carried somewhere
+ *     while you recover.
+ *   - The berth test is on GROUND speed, so a ring cannot be collected by
+ *     drifting through it.
+ */
 
 /**
  * Charge the reserve has to climb back to before the thrusters relight, level.
@@ -174,7 +197,7 @@ export function createEnergy(towns: Towns): Energy {
     // berth alone by well under a second over a whole charge -- invisible, and
     // it would make the rate on the HUD unreadable back to a single cause.
     const berth = towns.dockAt(ship.position);
-    const docked = berth !== null && speed < DOCK_SPEED_LIMIT;
+    const docked = berth !== null && Math.abs(ship.groundSpeed) < DOCK_SPEED_LIMIT;
 
     let charge = 0;
     if (docked) {
