@@ -5,16 +5,23 @@ import { ATMOSPHERE_COLOR } from './sky';
 /**
  * Aerial-perspective density, as a FRACTION OF GLOBE_RADIUS (world-scale).
  *
- * `applyAerial` (`fogglsl.ts`) uses this as the rate in
- * `1 - exp(-dist * uFogDensity)`, so it has to fall off over a fraction of
- * the globe rather than a fixed number of world units -- written literally as
- * `0.004` it would leave the horizon haze exactly as thick the moment
- * `GLOBE_RADIUS` doubled, when the horizon itself moved twice as far away.
- * 0.8 is the opening bid: at GLOBE_RADIUS = 200 it reproduces the same 0.004
- * the placeholder shipped with, so this change is silent until the radius
- * moves.
+ * `applyAerial` (`fogglsl.ts`) uses this as the base rate in
+ * `FOG_MAX_AMOUNT * (1 - exp(-dist * density))`, so it has to fall off over a
+ * fraction of the globe rather than a fixed number of world units -- written
+ * literally it would leave the same absolute haze at the horizon whatever
+ * `GLOBE_RADIUS` was, when the horizon itself moves with the radius.
+ *
+ * The first version of this constant was `0.8 / GLOBE_RADIUS` (0.004 at
+ * GLOBE_RADIUS = 200) and was wrong: combined with `FOG_GRAZE_BOOST` and no
+ * ceiling, `1 - exp(-200 * 0.004)` alone is already 0.55, so the whole ocean
+ * washed pale well before mid zoom, erasing the depth ramp
+ * (`uShallow`..`uAbyss` in `water.ts`) that is one of the most deliberately
+ * tuned things in the project. `fogglsl.ts` now also caps the blend at
+ * `FOG_MAX_AMOUNT` and fades the whole effect with camera altitude, so 2.0 is
+ * calibrated against those two together rather than against this rate alone
+ * -- see `fogglsl.ts`'s comments on both.
  */
-const FOG_DENSITY = 0.8 / GLOBE_RADIUS;
+const FOG_DENSITY = 2.0 / GLOBE_RADIUS;
 
 /**
  * How much of the day fog colour is the sun's own current tint, versus the
