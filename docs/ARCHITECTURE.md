@@ -135,7 +135,11 @@ shader.
 | `islets.ts` | `cullIslets(heightMap, seaLevel)`, `MIN_ISLAND_AREA` | sinks landmasses too small to see; runs once, before anything reads the map |
 | `waterbodies.ts` | `WaterBodies`, `createWaterBodies(heightMap, seaLevel, spawnDir)` | built once; ocean vs. inland mask, texture + CPU `sample` |
 | `land.ts` | `createLand(terrain, heightMap)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water |
-| `water.ts` | `createWater(terrain, heightMap, waterBodies)` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind)` — the only module that reads the weather |
+| `noiseglsl.ts` | `NOISE_GLSL` | inlined Ashima/Gustavson simplex noise; `water.ts` and `land.ts` share this one copy |
+| `waterglsl.ts` | `WATER_UNIFORMS`, `waterWavefield`, `waterDepth`, `WATER_LIGHTING_HEAD`/`_TAIL`, `waterFoam`, `WATER_FOAM_TAIL`, `WATER_OUTPUT` | the water fragment shader, as named chunks `water.ts` assembles; see **Shader notes** for the plugin hook seams between them |
+| `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective placeholder; body is currently the identity |
+| `fog.ts` | `fogUniforms`, `updateFog(env)` | owns the three uniforms `applyAerial` reads; called from `globe.update` before water and land |
+| `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; see **Shader notes** for the plugin contract |
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()` | atmosphere shell + starfield |
 | `daynight.ts` | `createDayNight()` | lights, writes `WorldEnv` |
@@ -147,7 +151,7 @@ shader.
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE` | calm/event weather; owns `WindState`; probes the shared height map for the coast |
 | `wake.ts` | `createWake()` | ship wake and spray |
 | `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
-| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env, wind) }` | orchestrator only; culls islets and installs the land mask before anything reads the map |
+| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map |
 | `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
@@ -270,7 +274,7 @@ energy.update(dt, shipState, env)          // burn / solar / dock, on last frame
 wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
 ship.update(dt, input, energyState, windState)  // thrust gated on energy.canThrust
 camera.update(dt, shipState, input)
-globe.update(dt, env, wind.state)  // daynight first, then water (reads wind), land, citylights, clouds, sky
+globe.update(dt, env, wind.state, shipState, camera)  // daynight, fog, then water (reads wind), land, citylights, clouds, sky
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env)
 hud.update(shipState, energyState, windState)
@@ -299,6 +303,15 @@ already made rather than one it might not be able to afford. `globe.update` is
 what writes `env`, so the sun the solar panels see is one frame old too — 16 ms
 of a 30-minute day.
 
+`globe.update` takes `shipState` and `camera` because two of the water's
+plugins (Phase 1 streams A and D) follow the ship: a wake map and a reflection
+cube, neither of which is available from `env` or `wind`. `globe.ts` forwards
+both straight through to `water.update`, which hands them to every plugin's
+own `update`; the sphere's own shading ignores them. `globe.update` also calls
+`fog.ts`'s `updateFog(env)` first, right after `dayNight.update`, so water and
+land sample this frame's fog colours rather than last frame's — see **Shader
+notes** for the plugin and fog contracts.
+
 Wind is wedged **between** the two, and the order is load bearing in both
 directions. It runs after energy because a berth is shelter and `energy.ts`
 owns the only definition of docked, so the wind has to see this frame's verdict
@@ -320,6 +333,62 @@ speed, exactly as it did before.
 - Do not add `uniform`s that Three already injects (`modelMatrix`, `viewMatrix`,
   `projectionMatrix`, `normalMatrix`, `cameraPosition`) — redeclaring them fails
   to compile.
+
+### The water plugin contract
+
+`water.ts` no longer holds the whole fragment shader inline. The chunks live in
+`waterglsl.ts` as named exports (`WATER_UNIFORMS`, `waterWavefield`,
+`waterDepth`, `WATER_LIGHTING_HEAD`/`_TAIL`, `waterFoam`/`WATER_FOAM_TAIL`,
+`WATER_OUTPUT` — see that file's top-of-file comment for the exact assembly
+order), and `noiseglsl.ts` holds the inlined Ashima/Gustavson simplex noise
+(`NOISE_GLSL`) so `land.ts` can share the same function instead of a second
+copy drifting out of sync.
+
+`createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])` takes
+an optional list of plugins, each shaped:
+
+```ts
+export interface WaterPlugin {
+  name: string;
+  uniforms: Record<string, THREE.IUniform>;
+  /** GLSL pasted before main(): uniforms, samplers, helper functions. */
+  declarations: string;
+  /** Each hook is a GLSL statement block, or omitted. See the slots. */
+  hooks: Partial<Record<WaterHook, string>>;
+  update?(dt: number, env: WorldEnv, ship: ShipState, camera: THREE.Camera): void;
+}
+export type WaterHook = 'normal' | 'foam' | 'reflection' | 'colour';
+```
+
+Four hook slots, in shader order, with the GLSL variables in scope at each
+(also documented in `waterglsl.ts` above the chunk that contains the seam):
+
+| Hook | Where | May modify | Also in scope |
+|---|---|---|---|
+| `normal` | after `N` is built, before lighting | `N` (unit) | `n`, `vWorldPos`, `camDist`, `w0`, `motion`, `lakeTime`, `lod`, `nearMid`, `tanU`, `tanV`, `wu`, `wv`, `tilt` |
+| `reflection` | right after `skyCol` is computed | `skyCol` | everything `normal` could read, plus `ndv`, `fres`, `refl`, `skyUp`, `lightAmt` |
+| `foam` | inside the foam section, before `foamLit`/the mix into `col`; **also runs when `fd >= 2.6`** | `foam` (0–1 mask) | `fd`, `depth`, `inland`, `col`, everything above |
+| `colour` | after all lighting and foam, before `applyAerial` and the sRGB encode | `col` | everything above |
+
+The `foam` hook is the one slot that fires on every pixel, not just near a
+shore: `fd` and `foam` are declared unconditionally, the coastal shoreline
+computation that raises `foam` above zero still only runs `if (fd < 2.6)`, and
+the hook runs after that `if` closes but before `foam` is lit and mixed into
+`col`. That is what lets a plugin's own foam (a ship's wake, out in open water)
+appear far from any coastline.
+
+Uniform names are prefixed per plugin (`uWake…`, `uRefl…`, …) so two plugins
+sharing one shader can never collide.
+
+`fogglsl.ts` is the aerial-perspective **contract**: `applyAerial(col,
+worldPos, camPos, sunDir, dayFactor)` is called from the water's `colour`
+position (after any plugin `colour` hooks, before the sRGB encode) and,
+once `land.ts` calls it too, from the land shader. Its body is currently the
+identity (`return col;`); a later stream fills in the real blend. The three
+uniforms it reads (`uFogColorDay`, `uFogColorNight`, `uFogDensity`) are owned
+by `fog.ts`, which exposes them as one shared `fogUniforms` object — merged
+into every caller's material uniforms, so there is exactly one writer — and
+`updateFog(env)`, called from `globe.update` before water and land.
 
 ## Post-processing and colour management
 The frame goes through an `EffectComposer` in `postfx.ts`: render → bloom →

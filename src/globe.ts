@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Terrain, Towns, WindState } from './types';
+import type { Terrain, Towns, ShipState, WindState } from './types';
 import type { WorldEnv } from './env';
 import { createHeightMap } from './heightmap';
 import type { HeightMap } from './heightmap';
@@ -16,6 +16,7 @@ import { createCityLights } from './citylights';
 import { createTowns } from './towns';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import { latLonToDir } from './geo';
+import { updateFog } from './fog';
 
 export interface Globe {
   group: THREE.Group;
@@ -25,7 +26,12 @@ export interface Globe {
   waterBodies: WaterBodies;
   /** Settlements and their berths. Shared with docks.ts, radar.ts and energy.ts. */
   towns: Towns;
-  update(dt: number, env: WorldEnv, wind: WindState): void;
+  /**
+   * `ship` and `camera` exist for the water's plugins (Phase 1 streams A and
+   * D): the wake map and the reflection cube both follow the ship, and
+   * neither is available from `env` or `wind`.
+   */
+  update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void;
 }
 
 /**
@@ -81,12 +87,16 @@ export function createGlobe(terrain: Terrain): Globe {
     heightMap,
     waterBodies,
     towns,
-    update(dt: number, env: WorldEnv, wind: WindState): void {
+    update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void {
       dayNight.update(dt, env);
+      // Before water and land, so both shaders sample this frame's fog
+      // colours rather than last frame's -- the same ordering rule as the sun.
+      updateFog(env);
       // Only the sea reads the weather. It is passed rather than pushed onto
       // `env` because `env.ts` names day/night as its sole writer, and a second
-      // writer is a harder thing to give up than an extra argument.
-      water.update(dt, env, wind);
+      // writer is a harder thing to give up than an extra argument. `ship` and
+      // `camera` are for its plugins; the sphere itself ignores them.
+      water.update(dt, env, wind, ship, camera);
       land.update(dt, env);
       cityLights.update(dt, env);
       clouds.update(dt, env);
