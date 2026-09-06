@@ -169,6 +169,14 @@ const _east = new Vector3();
 const _bearingDir = new Vector3();
 const _axis = new Vector3();
 const _probe = new Vector3();
+const _starboard = new Vector3();
+/** Where the ship stood when the wind was last carried. */
+const _lastShipPos = new Vector3();
+
+/** Wraps an angle into [0, 2*PI). */
+function normalizeAngle(a: number): number {
+  return ((a % TWO_PI) + TWO_PI) % TWO_PI;
+}
 
 /* ------------------------------------------------------------------ */
 /* Wind                                                                */
@@ -211,6 +219,23 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
     along: 0,
     across: 0,
   };
+
+  /**
+   * Resolve a compass bearing at `at` into the world vector the wind keeps.
+   *
+   * The one direction this conversion runs: an event is authored as an angle
+   * and immediately becomes a vector. Nothing converts back except the reading
+   * taken for the HUD.
+   */
+  function setDirectionFromBearing(bearing: number, at: Vector3): void {
+    tangentFrame(at, _north, _east);
+    state.direction
+      .copy(_north)
+      .multiplyScalar(Math.cos(bearing))
+      .addScaledVector(_east, Math.sin(bearing))
+      .normalize();
+    state.bearing = normalizeAngle(bearing);
+  }
 
   // Open on a calm. The first thing a new player meets should be the sea as
   // the rest of the game already taught it, not a gust they have no name for.
@@ -295,7 +320,10 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
       inEvent = !inEvent;
       if (inEvent) {
         phaseDuration = EVENT_MIN + rng() * (EVENT_MAX - EVENT_MIN);
-        state.bearing = rng() * TWO_PI;
+        // A bearing is how an event is AUTHORED -- one compass angle, drawn
+        // once -- but it is not how it is kept. Resolved into a world vector
+        // here and carried as one from then on; see the transport below.
+        setDirectionFromBearing(rng() * TWO_PI, ship.position);
         gustLane = rng() * 1000;
       } else {
         phaseDuration = CALM_MIN + rng() * (CALM_MAX - CALM_MIN);
@@ -323,23 +351,59 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
       state.speed = 0;
     }
 
-    // ---- Resolve the bearing into world space ----------------------------
-    // Done every frame rather than only when an event sets a new bearing: the
-    // frame itself turns as the ship sails, so a held bearing is a different
-    // world direction a minute later. The sea has to follow the compass, not
-    // the vector it happened to mean when the gust started.
+    // ---- Carry the wind across the ship's own motion ----------------------
+    /*
+     * The wind is a direction in the world, not an angle in a chart.
+     *
+     * It used to be the angle: `bearing` was held for the length of an event
+     * and re-resolved against the tangent frame at the ship every frame. That
+     * is stable anywhere the frame is, and near a pole the frame is not --
+     * meridians converge, so a held bearing swings through the compass in a
+     * few metres of travel and the push swung with it. A ship up there twisted
+     * on the spot, driven round by its own weather.
+     *
+     * So the vector is transported instead, by exactly the rotation that
+     * carried the hull, and the bearing is read back off it. A steady wind now
+     * stays a steady wind: on a great-circle course it holds its angle to the
+     * bow, and its COMPASS bearing changes, which is what a real wind does on
+     * a real course. At the pole the reading spins and the wind does not.
+     */
+    _axis.crossVectors(_lastShipPos, ship.position);
+    const sin = _axis.length();
+    if (sin > 1e-12) {
+      _axis.multiplyScalar(1 / sin);
+      const cos = Math.max(-1, Math.min(1, _lastShipPos.dot(ship.position)));
+      state.direction.applyAxisAngle(_axis, Math.atan2(sin, cos));
+    }
+    // Rounding walks it off the tangent plane over a long passage.
+    state.direction.addScaledVector(ship.position, -state.direction.dot(ship.position));
+    if (state.direction.lengthSq() > 1e-12) state.direction.normalize();
+    else setDirectionFromBearing(state.bearing, ship.position);
+    _lastShipPos.copy(ship.position);
+
+    // The reading, for the HUD's arrow and the scope's. Derived, never stored
+    // as the truth -- exactly as `ship.ts` now derives its heading.
     tangentFrame(ship.position, _north, _east);
-    state.direction
-      .copy(_north)
-      .multiplyScalar(Math.cos(state.bearing))
-      .addScaledVector(_east, Math.sin(state.bearing))
-      .normalize();
+    state.bearing = normalizeAngle(
+      Math.atan2(state.direction.dot(_east), state.direction.dot(_north)),
+    );
 
     // ---- Resolve onto the hull -------------------------------------------
-    // Quantise the wind's travel bearing, relative to the bow, into one of
-    // eight sectors and read the push straight out of the table.
-    let relative = (state.bearing - ship.heading) % TWO_PI;
-    if (relative < 0) relative += TWO_PI;
+    /*
+     * Quantise the wind's angle to the BOW into one of eight sectors and read
+     * the push straight out of the table.
+     *
+     * Measured between two world vectors rather than as a difference of two
+     * compass bearings. Algebraically the same wherever a tangent frame exists,
+     * and unlike the subtraction it still means something where one does not:
+     * this is the number that decides which way the hull is shoved, so it is
+     * the last place that should depend on a chart.
+     */
+    _starboard.crossVectors(ship.forward, ship.up);
+    if (_starboard.lengthSq() > 1e-12) _starboard.normalize();
+    const relative = normalizeAngle(
+      Math.atan2(state.direction.dot(_starboard), state.direction.dot(ship.forward)),
+    );
     const sector = Math.round(relative / SECTOR_ARC) % 8;
 
     let targetAlong = WIND_GRIP * state.speed * SECTOR_ALONG[sector];

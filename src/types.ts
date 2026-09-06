@@ -145,18 +145,26 @@ export interface WindState {
    * The compass bearing the wind is travelling TOWARD, radians, 0 = north and
    * clockwise positive -- the same convention as `ShipState.heading`, so the
    * two can be subtracted directly. Holds its last value through a calm.
+   *
+   * A READING, derived each frame from `direction`, and not what the wind is
+   * kept as. It used to be the other way round, and near a pole that put the
+   * weather in a frame that spins: see `direction`.
    */
   readonly bearing: number;
   /**
    * `bearing` as a unit vector in WORLD space -- the direction the wind
    * travels, in the tangent plane at the ship.
    *
-   * The bearing is an angle in a frame that only exists at the ship's own
-   * position, which is no use to a shader that has to move a wave field over
-   * the whole sphere. This is that angle resolved once per frame against the
-   * tangent frame there, so `water.ts` can drift its swell along the wind
-   * without rebuilding the frame itself. Holds its last value through a calm,
-   * exactly as `bearing` does.
+   * This is what the wind IS. An event is authored as a bearing and resolved
+   * into this vector once; from then on it is carried across the ship's own
+   * motion by parallel transport, and `bearing` is read back off it.
+   *
+   * The order matters at the poles. A bearing is an angle in the tangent frame
+   * at one point, and that frame spins arbitrarily fast where the meridians
+   * converge -- so a wind held as a bearing swung round the compass in a few
+   * metres of travel, shoving the hull in a circle. Held as a vector it simply
+   * blows the way it was blowing. Holds its last value through a calm, as
+   * `bearing` does.
    */
   readonly direction: Vector3;
   /** The strength ceiling in force at the ship right now, world units/s. */
@@ -173,9 +181,25 @@ export interface ShipState {
   readonly position: Vector3;
   /** Local up = position (unit). */
   readonly up: Vector3;
-  /** Unit forward direction, tangent to the sphere, derived from heading. */
+  /**
+   * Unit forward direction, tangent to the sphere. Where the bow points.
+   *
+   * This is the ship's orientation, not a value computed from one. The helm
+   * turns it about `up` and each step of travel carries it by parallel
+   * transport, so a ship with its helm amidships runs a great circle and never
+   * needs a compass frame to know where it is pointing. Prefer it to `heading`
+   * for anything geometric; `wake.ts`, `camera.ts` and `radar.ts` all do.
+   */
   readonly forward: Vector3;
-  /** Heading in radians, 0 = north, clockwise positive (east = PI/2). */
+  /**
+   * Heading in radians, 0 = north, clockwise positive (east = PI/2).
+   *
+   * A READING taken off `forward` each frame, for the compass, the HUD and the
+   * scope. It is meaningless at the poles, where the tangent frame is
+   * arbitrary and this number spins -- which is what a real compass does
+   * there, and is now only cosmetic. It was once the stored truth, and the
+   * hull spun with it.
+   */
   readonly heading: number;
   /** Heading in degrees, normalized to [0, 360). */
   readonly headingDeg: number;

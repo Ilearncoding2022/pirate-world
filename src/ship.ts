@@ -136,6 +136,8 @@ const _forward = new Vector3();
 const _right = new Vector3();
 const _back = new Vector3();
 const _axis = new Vector3();
+/** Where the hull stood before this frame's step, for the bow's transport. */
+const _prevPosition = new Vector3();
 const _candidate = new Vector3();
 const _probe = new Vector3();
 const _starboard = new Vector3();
@@ -428,19 +430,74 @@ export function createShip(
   let bankRoll = 0;
 
   /**
-   * Rebuilds `state.forward` from the current position + heading.
-   * north/east come from geo.tangentFrame; heading 0 = north, +PI/2 = east.
+   * Builds `state.forward` from a compass heading. Startup only.
+   *
+   * This used to run at the end of every frame, and it was the pole bug. A
+   * compass heading is an angle in the tangent frame at one point, and near a
+   * pole that frame spins arbitrarily fast against the ground: the meridians
+   * converge, so a few metres of travel can swing north through ninety
+   * degrees. Rebuilding the bow from a held heading therefore SWUNG THE BOW,
+   * and a ship crossing high latitudes twisted on the spot. With a wind up it
+   * was worse than that -- `wind.ts` held its bearing in the same collapsing
+   * frame, so the push swung too, and the two drove each other in circles.
+   *
+   * `forward` is now the state and heading is the reading taken off it. See
+   * `transportForward`.
    */
-  function refreshForward(): void {
+  function forwardFromHeading(headingRad: number): void {
     tangentFrame(state.position, _north, _east);
     _forward
       .copy(_north)
-      .multiplyScalar(Math.cos(state.heading))
-      .addScaledVector(_east, Math.sin(state.heading));
+      .multiplyScalar(Math.cos(headingRad))
+      .addScaledVector(_east, Math.sin(headingRad));
     const len = _forward.length();
     if (len > 1e-8) _forward.multiplyScalar(1 / len);
     else _forward.copy(_north);
     state.forward.copy(_forward);
+  }
+
+  /**
+   * Carries the bow across a step, from `from` to the committed position.
+   *
+   * Parallel transport: the bow is turned by exactly the rotation that carried
+   * the hull, so a ship holding its helm steady runs a great circle -- which is
+   * what sailing straight ahead means on a sphere -- and nothing about the step
+   * is expressed as an angle in any frame. That is what makes it work at the
+   * pole, where frames stop being usable but rotations are still rotations.
+   *
+   * The re-orthogonalisation afterwards is not decoration. Each step leaves
+   * `forward` a rounding error out of the tangent plane, and over a long
+   * passage those errors accumulate into a bow that is visibly not level.
+   */
+  function transportForward(from: Vector3): void {
+    _axis.crossVectors(from, state.position);
+    const sin = _axis.length();
+    if (sin > 1e-12) {
+      _axis.multiplyScalar(1 / sin);
+      const cos = Math.max(-1, Math.min(1, from.dot(state.position)));
+      state.forward.applyAxisAngle(_axis, Math.atan2(sin, cos));
+    }
+    state.forward.addScaledVector(state.position, -state.forward.dot(state.position));
+    const len = state.forward.length();
+    if (len > 1e-8) state.forward.multiplyScalar(1 / len);
+    else {
+      tangentFrame(state.position, _north, _east);
+      state.forward.copy(_north);
+    }
+  }
+
+  /**
+   * The compass heading the bow is currently pointing, radians.
+   *
+   * Derived, every frame, and never stored as the truth. At the pole the
+   * tangent frame is arbitrary and so is this number -- which is correct, and
+   * is what a real compass does there. The difference is that it is now only a
+   * READING: `wind.ts` and the HUD may spin with it, the hull does not.
+   */
+  function headingFromForward(): number {
+    tangentFrame(state.position, _north, _east);
+    const h = Math.atan2(state.forward.dot(_east), state.forward.dot(_north));
+    return ((h % TWO_PI) + TWO_PI) % TWO_PI;
   }
 
   /**
@@ -485,6 +542,7 @@ export function createShip(
 
   function syncStateGeo(): void {
     state.up.copy(state.position);
+    state.heading = headingFromForward();
     state.headingDeg = normalizeHeadingDeg(state.heading);
     const ll = dirToLatLon(state.position);
     state.latDeg = ll.latDeg;
@@ -528,18 +586,18 @@ export function createShip(
     const speedFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
     const turnRate = TURN_RATE * (TURN_MIN_SCALE + (1 - TURN_MIN_SCALE) * speedFrac);
     if (turnInput !== 0) {
-      // Heading is clockwise-positive looking down at the surface from
-      // outside, so right/D increases heading and the bow swings clockwise
-      // from the player's chase-camera view.
-      state.heading += turnInput * turnRate * dt;
-      state.heading = ((state.heading % TWO_PI) + TWO_PI) % TWO_PI;
+      // The bow turns about the surface normal. Clockwise-positive looking
+      // down from outside, so right/D swings it clockwise from the player's
+      // chase-camera view -- the same sense the old heading counter had, but
+      // applied to the vector itself so it means the same thing at the pole
+      // as it does at the equator. A negative angle because applyAxisAngle is
+      // counter-clockwise about `up`, and `up` points at the camera.
+      state.forward.applyAxisAngle(state.up, -turnInput * turnRate * dt);
     }
 
     // Subtle bank into the turn, damped so it eases in and out.
     const bankTarget = -turnInput * TURN_BANK * (0.25 + 0.75 * speedFrac);
     bankRoll += (bankTarget - bankRoll) * (1 - Math.exp(-4 * dt));
-
-    refreshForward();
 
     // ---- Throttle --------------------------------------------------------
     // A dry tank cuts thrust in both directions and nothing else. Steering,
@@ -593,6 +651,10 @@ export function createShip(
     const groundMag = _velocity.length();
 
     // ---- Move along the ground velocity, refusing to enter land ----------
+    // Held before the first attempt, because the bow is carried by where the
+    // hull ENDED UP relative to where it began, and `tryStep` may write the
+    // position more than once below.
+    _prevPosition.copy(state.position);
     if (groundMag > 1e-9) {
       _course.copy(_velocity).multiplyScalar(1 / groundMag);
       if (!tryStep(_course, (groundMag * dt) / GLOBE_RADIUS)) {
@@ -629,8 +691,10 @@ export function createShip(
     // stopped would hand `energy.ts` a berth it had not earned.
     state.groundSpeed = _velocity.dot(state.forward) >= 0 ? committed : -committed;
 
+    // The bow is carried across whatever the hull actually committed -- one
+    // transport for the whole step, however many attempts `tryStep` made.
+    transportForward(_prevPosition);
     syncStateGeo();
-    refreshForward(); // forward must match the committed position
 
     // ---- Idle motion ------------------------------------------------------
     const driveFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
@@ -677,8 +741,9 @@ export function createShip(
     );
   }
 
-  // Place the ship correctly before the first frame is drawn.
-  refreshForward();
+  // Place the ship correctly before the first frame is drawn. This is the one
+  // place a heading is an input rather than a reading.
+  forwardFromHeading(state.heading);
   syncStateGeo();
   applyTransform();
 
