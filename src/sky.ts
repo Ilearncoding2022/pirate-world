@@ -17,6 +17,16 @@ export interface Sky {
  */
 const ATMOSPHERE_SCALE = 1.068;
 
+/**
+ * Base tint of the atmosphere shell, read by `fog.ts` (Stream E,
+ * docs/RENDER_PLAN.md Phase 1) so the aerial-perspective haze fades toward
+ * the same blue the limb glows, rather than an unrelated colour. A plain
+ * constant rather than something read off the live uniform: the shell's own
+ * tint never changes at runtime, only its intensity and its sunset warmth do,
+ * both of which are `update()`'s job below.
+ */
+export const ATMOSPHERE_COLOR: Readonly<THREE.Color> = new THREE.Color('#4fbaff');
+
 /** Fresnel rim glow shell around the planet. */
 function buildAtmosphere(): THREE.Mesh {
   const geometry = new THREE.SphereGeometry(GLOBE_RADIUS * ATMOSPHERE_SCALE, 96, 64);
@@ -53,13 +63,19 @@ function buildAtmosphere(): THREE.Mesh {
     '  float rimWarm = 1.0 - smoothstep(0.0, 0.45, abs(sun));',
     '  vec3 tint = mix(uColor, uSunsetColor, rimWarm * 0.75);',
     '  glow *= mix(0.12, 1.0, lit);',
-    '  gl_FragColor = vec4(tint * glow, glow);',
+    '  // Ordered/hash dither, ±0.5/255. The rim is a smooth exponential falloff',
+    '  // written straight into the composer\'s 8-bit target (this material is',
+    '  // hand-written and, unlike water.ts, was never gamma-encoded -- see',
+    '  // ARCHITECTURE, Post-processing and colour management), so without this',
+    '  // it quantizes into visible concentric rings instead of a smooth glow.',
+    '  float ditherAmt = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;',
+    '  gl_FragColor = vec4(tint * glow + ditherAmt, glow);',
     '}',
   ].join('\n');
 
   const material = new THREE.ShaderMaterial({
     uniforms: {
-      uColor: { value: new THREE.Color('#4fbaff') },
+      uColor: { value: ATMOSPHERE_COLOR.clone() },
       uSunsetColor: { value: new THREE.Color('#ff7a4f') },
       uSunDirection: { value: new THREE.Vector3(0.62, 0.42, 0.66).normalize() },
       uIntensity: { value: 1.15 },

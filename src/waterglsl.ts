@@ -223,7 +223,18 @@ export const WATER_LIGHTING_HEAD: string[] = [
  * `n`, `N`, `viewDir`, `refl`, `skyUp`, `lightAmt`, `fres`, `camDist`, etc.
  */
 
-/** Second half of the lighting chunk: specular, then the day/night mix. */
+/**
+ * Second half of the lighting chunk: specular, backscatter, then the
+ * day/night mix.
+ *
+ * Stream E (docs/RENDER_PLAN.md, Phase 1) rewrote this half: the old two-lobe
+ * Blinn-Phong glint (`glintSharp` + `glintWide`) is now a single GGX `D` term
+ * (no Smith visibility, no extra Fresnel lobe of its own -- `fres` and `road`
+ * below already do that job) widened by the sun's own angular radius, plus a
+ * backscatter term that lights up a wave crest when the camera looks toward
+ * the sun through it. Both are art choices tuned by eye, not a physical
+ * sun/ocean model.
+ */
 export const WATER_LIGHTING_TAIL: string[] = [
   '',
   '  vec3 halfVec = normalize(sunDir + viewDir);',
@@ -233,19 +244,42 @@ export const WATER_LIGHTING_TAIL: string[] = [
   '  // reflection has to tighten to a small spot instead of a white continent.',
   '  float rough = mix(0.28, 1.0, nearMid);',
   '  float specPow = uSpecPower / rough;',
-  '  float glintSharp = pow(nh, specPow);',
-  '  float glintWide = pow(nh, specPow * 0.14) * rough;',
+  '  // `alpha` is the standard Blinn-Phong-exponent -> GGX-roughness',
+  '  // conversion, so uSpecPower keeps its old meaning and tuning range while',
+  '  // the lobe itself becomes a proper GGX normal distribution.',
+  '  float alpha = sqrt(2.0 / (specPow + 2.0));',
+  '  // The sun is drawn with an angular radius, not as a point: without this,',
+  '  // `alpha` shrinks toward the far/orbital view until the highlight is a',
+  '  // sub-pixel spike -- scattered pin pricks rather than a road of small',
+  '  // discs. SUN_DISC_RADIANS is an art choice, deliberately larger than the',
+  '  // real sun (about 0.0047 rad) so the discs read at all against the chop.',
+  '  const float SUN_DISC_RADIANS = 0.03;',
+  '  float alphaDisc = alpha + SUN_DISC_RADIANS;',
+  '  float a2 = alphaDisc * alphaDisc;',
+  '  float ggxDenom = nh * nh * (a2 - 1.0) + 1.0;',
+  '  float ggxD = a2 / (3.14159265 * ggxDenom * ggxDenom);',
   '  // Gate on the SMOOTH normal too, so the sparkle gathers into a sun road',
   '  // around the mirror direction instead of covering the whole ocean.',
   '  float road = pow(clamp(dot(n, halfVec), 0.0, 1.0), 10.0 / rough);',
-  '  float glint = (glintSharp + glintWide * 0.045) * lightAmt',
-  '              * (0.30 + 0.70 * fres) * (0.08 + 0.92 * road);',
+  '  float glint = ggxD * lightAmt * (0.30 + 0.70 * fres) * (0.08 + 0.92 * road);',
+  '',
+  '  // Backscatter: light glowing through a wave crest, seen when sailing',
+  '  // toward the sun so the crest is lit from behind. `w0` is the same wave-',
+  '  // height field already sampled for the normal; the tint reuses the',
+  '  // existing shallow-water colour (uShallow) rather than adding a new one,',
+  '  // and it is gated on daylight -- there is nothing to scatter once the sun',
+  '  // is below the horizon.',
+  '  const float SCATTER_POWER = 4.0;',
+  '  const float SCATTER_STRENGTH = 0.35;',
+  '  float scatter = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), SCATTER_POWER)',
+  '                * max(w0, 0.0) * uWaveIntensity * lightAmt;',
   '',
   '  vec3 dayCol = base * (0.20 + 0.72 * diff) * sunTint;',
   '  dayCol += skyCol * fres * 0.085;',
   '  vec3 nightCol = mix(base, uAbyss, 0.60) * 0.075 + skyCol * fres * 0.015;',
   '  vec3 col = mix(nightCol, dayCol, lightAmt);',
   '  col += uSunColor * glint * uSpecStrength;',
+  '  col += uShallow * scatter * SCATTER_STRENGTH;',
   '  col += base * mix(0.012, 0.030, clamp(uDayFactor, 0.0, 1.0));',
 ];
 
@@ -331,12 +365,25 @@ export const WATER_FOAM_TAIL: string[] = [
  * is then applied over -- not the other way round.
  */
 
-/** Manual linear -> sRGB encode, and the end of `main()`. */
+/**
+ * Manual linear -> sRGB encode, and the end of `main()`.
+ *
+ * The dither (Stream E, docs/RENDER_PLAN.md Phase 1) is what kills the
+ * concentric rings on smooth colour ramps (the deep-water gradient here, the
+ * atmosphere shell in `sky.ts`) once they hit the composer's 8-bit target.
+ * The target stays RGBA8 by deliberate choice -- multisampled half float is
+ * not renderable on every GPU, see ARCHITECTURE's Post-processing section --
+ * so the fix is noise, not more bits: a hash of the screen position gives
+ * every pixel an independent ±0.5/255 offset, applied to the linear colour
+ * before this encode, so the banding breaks up into dither too fine to see
+ * instead of a visible step.
+ */
 export const WATER_OUTPUT: string[] = [
   '',
+  '  float ditherAmt = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;',
   '  // Manual linear -> sRGB. ShaderMaterial output is not converted for us,',
   '  // so without this the ocean sits a stop darker than the land beside it.',
-  '  col = max(col, vec3(0.0));',
+  '  col = max(col + ditherAmt, vec3(0.0));',
   '  gl_FragColor = vec4(pow(col, vec3(0.4545454545)), 1.0);',
   '}',
 ];
