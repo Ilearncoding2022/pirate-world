@@ -87,9 +87,27 @@ const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y * MODEL_SCALE;
  * `wake.ts` imports it for the same reason.
  */
 export const MAX_FORWARD = 15;
-/** Linear drag coefficient, 1/s. Also sets how long the ship coasts. */
-const DRAG = 0.7;
-/** Thrust while a throttle key is held, world units / s^2. */
+/**
+ * Linear drag coefficient, 1/s. Also sets how long the ship coasts.
+ *
+ * 0.35 is half what it was, which is how the ship came to accelerate half as
+ * hard WITHOUT losing a knot off the top. The two facts are the same fact:
+ * thrust balances drag at ACCEL / DRAG, so halving ACCEL on its own would have
+ * halved the top speed to 7.5 and left MAX_FORWARD asserting a 15 it could
+ * never reach -- exactly the silent disagreement its own comment warns about.
+ * Halving DRAG instead halves the derived ACCEL with it and leaves the ratio,
+ * and therefore the top speed, untouched.
+ *
+ * What it does change, unavoidably, is the other half of this constant's job.
+ * The time constant is 1 / DRAG, so it is now 2.9 s rather than 1.4: the ship
+ * takes about twice as long to work up to a cruise, and twice as long to shed
+ * it when the throttle comes off. A hull that gathers way slowly and carries
+ * it a long time is the same hull -- there is no way to slow the pickup and
+ * keep the old stopping distance while thrust is a constant against linear
+ * drag. Plan the approach to a berth earlier.
+ */
+const DRAG = 0.35;
+/** Thrust while a throttle key is held, world units / s^2. Now 5.25. */
 const ACCEL = MAX_FORWARD * DRAG;
 
 const MAX_REVERSE = 7; // world units / s (magnitude); clamp-limited, not drag-limited
