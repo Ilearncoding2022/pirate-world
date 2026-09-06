@@ -32,3 +32,6 @@ test-results/
 
 # Python bytecode from the Blender build scripts
 tools/__pycache__/
+
+# Agent worktrees. Real git worktrees of this same repo, never content.
+.claude/worktrees/

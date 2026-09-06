@@ -4,6 +4,7 @@ import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from './ter
 import { createGlobe } from './globe';
 import { createShip } from './ship';
 import { createWake } from './wake';
+import { createWaterWakePlugin } from './waterwake';
 import { createFollowCamera } from './camera';
 import { createControls } from './controls';
 import { createHud } from './hud';
@@ -18,6 +19,7 @@ import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
 import { createQuality } from './quality';
 import { createReflection } from './reflection';
+import { createWaterReflectPlugin } from './waterreflect';
 import type { ShipState } from './types';
 
 const host = document.getElementById('app');
@@ -37,12 +39,24 @@ const scene = new THREE.Scene();
 
 const env = createEnv();
 const terrain = createTerrain(DEFAULT_SEED);
-// Docs/RENDER_PLAN.md Phase 1 Stream D. Built here, not in globe.ts, because
-// its per-frame render pass needs the renderer and the top-level scene,
-// neither of which globe.ts ever sees -- see reflection.ts.
+// The two things that add themselves to the water shader. Both are built here
+// rather than inside `globe.ts` because both need something that module never
+// sees: the wake plugin needs the ribbon it samples, and the reflection cube
+// needs the renderer and the top-level scene. Both must exist before
+// `createGlobe`, because a plugin can only be woven in while the water shader
+// is being assembled -- registering one later would mean recompiling it.
+//
+// `createReflection` returns a null texture on the low quality tier, and the
+// plugin list simply stays shorter: reflections are absent, never idle.
+const wake = createWake(quality.wakeMapSize);
 const reflection = createReflection(quality);
-const globe = createGlobe(terrain, reflection);
+
+const waterPlugins = [createWaterWakePlugin(wake)];
+if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
+
+const globe = createGlobe(terrain, waterPlugins);
 scene.add(globe.group);
+scene.add(wake.object);
 
 const ship = createShip(
   terrain,
@@ -65,9 +79,6 @@ const wind = createWind(terrain, globe.heightMap);
 
 const docks = createDocks(globe.towns);
 scene.add(docks.object);
-
-const wake = createWake();
-scene.add(wake.object);
 
 const view = createFollowCamera(window.innerWidth / window.innerHeight);
 const controls = createControls();
@@ -214,7 +225,7 @@ function frame(): void {
   // the game renders into its own reflection cube and the canvas goes black.
   reflection.update(dt, ship.state.position, renderer, scene);
   docks.update(dt, env, ship.state, energy.state);
-  wake.update(dt, ship.state, env);
+  wake.update(dt, ship.state, env, renderer);
   hud.update(ship.state, energy.state, wind.state);
   radar.update(dt, ship.state, wind.state);
 

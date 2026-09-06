@@ -3,6 +3,8 @@ import type { ShipState } from './types';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
 import { MAX_FORWARD, MODEL_SCALE } from './ship';
+import { createWakeMap } from './wakemap';
+import type { WakeMap } from './wakemap';
 
 /**
  * Read-only introspection of the ribbon's ring buffer, for
@@ -32,8 +34,22 @@ export interface WakeDebug {
 
 export interface Wake {
   object: THREE.Object3D;
-  update(dt: number, ship: ShipState, env: WorldEnv): void;
+  /**
+   * `renderer` is optional so callers with no live GPU context (unit tests)
+   * keep working unchanged: when it is absent the wake map is simply not
+   * filled this frame. In the running game `main.ts` always passes it.
+   *
+   * Filling the map happens at the END of this function, after `now` and
+   * every rib/spray bookkeeping value for this frame are final -- see
+   * `docs/RENDER_PLAN.md`'s render-order hazard for why it belongs here
+   * rather than in an `onBeforeRender` callback: this runs once, at a fixed
+   * point before `postFx.render` draws the water, where the render target
+   * can always be restored predictably.
+   */
+  update(dt: number, ship: ShipState, env: WorldEnv, renderer?: THREE.WebGLRenderer): void;
   readonly debug: WakeDebug;
+  /** The wake as an input to the water shader; see `waterwake.ts`. */
+  readonly wakeMap: WakeMap;
 }
 
 /* ------------------------------------------------------------------ */
@@ -345,7 +361,14 @@ function buildSprayMaterial(): THREE.ShaderMaterial {
 /* createWake                                                          */
 /* ------------------------------------------------------------------ */
 
-export function createWake(): Wake {
+/**
+ * `wakeMapSize` is `quality.wakeMapSize` (256 low, 512 medium/high), passed
+ * down by `main.ts` rather than read from `quality.ts` directly so this file
+ * does not need to know that module exists. Defaults to 512 (medium/high) so
+ * `createWake()` -- used by `tests/unit/wake-ring.test.ts`, which has no
+ * renderer to size a map for -- keeps compiling with no arguments.
+ */
+export function createWake(wakeMapSize = 512): Wake {
   const object = new THREE.Group();
   object.name = 'wake';
 
@@ -415,6 +438,12 @@ export function createWake(): Wake {
   ribbon.frustumCulled = false;
   ribbon.renderOrder = 1;
   object.add(ribbon);
+
+  // The wake as an input to the water shader (see waterwake.ts). Shares this
+  // same live ring-buffer geometry -- not a clone -- with its own material,
+  // so its ribbon-map draw always matches whatever the on-screen ribbon
+  // currently holds.
+  const wakeMap = createWakeMap(wakeMapSize, ribbonGeo);
 
   /* ---- Spray geometry -------------------------------------------- */
 
@@ -535,7 +564,7 @@ export function createWake(): Wake {
     upload(sprayParamsAttr);
   }
 
-  function update(dt: number, ship: ShipState, env: WorldEnv): void {
+  function update(dt: number, ship: ShipState, env: WorldEnv, renderer?: THREE.WebGLRenderer): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
     now += dt;
@@ -618,6 +647,12 @@ export function createWake(): Wake {
     sprayU.uSunDirection.value.copy(env.sunDirection);
     // gl_PointSize is in device pixels, so it needs the drawing-buffer height.
     sprayU.uPixelScale.value = window.innerHeight * Math.min(window.devicePixelRatio, 2) * 0.5;
+
+    // ---- Fill the wake map ------------------------------------------------
+    // Last, so `now` and every buffer above are final for this frame. See the
+    // `Wake.update` doc comment for why this belongs here and not in an
+    // `onBeforeRender` callback.
+    if (renderer) wakeMap.render(renderer, now, ship);
   }
 
   const debug: WakeDebug = {
@@ -635,5 +670,5 @@ export function createWake(): Wake {
     },
   };
 
-  return { object, update, debug };
+  return { object, update, debug, wakeMap };
 }

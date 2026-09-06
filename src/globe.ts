@@ -8,8 +8,6 @@ import { createLand } from './land';
 import { createWater } from './water';
 import type { WaterPlugin } from './water';
 import { createWaterBodies } from './waterbodies';
-import type { Reflection } from './reflection';
-import { createWaterReflectPlugin } from './waterreflect';
 import { cullIslets } from './islets';
 import { createGrid } from './grid';
 import { createSky } from './sky';
@@ -43,13 +41,13 @@ export interface Globe {
  * Ordering matters: the day/night rig writes the environment, then every other
  * module reads it, so all shaders agree on sun direction within a frame.
  *
- * @param reflection Stream D's cube, built by `main.ts` (it needs the
- *   renderer, which this module never sees). Its own per-frame render pass is
- *   driven separately, straight from `main.ts`'s frame loop -- see
- *   `reflection.ts` -- this function only wires its texture into the water's
- *   plugin list.
+ * @param waterPlugins Everything that adds to the water shader, built by
+ *   `main.ts` and handed in already constructed. Each one needs something this
+ *   module never sees -- the wake needs the ribbon it is drawn from, the
+ *   reflection cube needs the renderer and the top-level scene -- and each
+ *   one's per-frame work is driven from the frame loop, not from here.
  */
-export function createGlobe(terrain: Terrain, reflection: Reflection): Globe {
+export function createGlobe(terrain: Terrain, waterPlugins: WaterPlugin[] = []): Globe {
   const group = new THREE.Group();
   group.name = 'world';
 
@@ -77,12 +75,11 @@ export function createGlobe(terrain: Terrain, reflection: Reflection): Globe {
   const towns = createTowns(heightMap, waterBodies, terrain.seaLevel);
 
   const dayNight = createDayNight();
-  // Docs/RENDER_PLAN.md Phase 1 Stream D: registered only when the cube
-  // actually exists (`quality.reflectionSize > 0`) -- on `?quality=low` this
-  // list stays empty and the water shader compiles and runs with reflections
-  // simply absent, never present-but-idle.
-  const waterPlugins: WaterPlugin[] = [];
-  if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
+  // Every water plugin is built by `main.ts` and handed in, because each one
+  // needs something this module never sees: the wake needs the ribbon it is
+  // drawn from, the reflection cube needs the renderer and the top-level
+  // scene. Streams A and D each arrived wanting their own parameter here; one
+  // list is what stops the next one adding a third.
   const water = createWater(terrain, heightMap, waterBodies, waterPlugins);
   const land = createLand(terrain, heightMap);
   const cityLights = createCityLights(terrain, heightMap, towns);
