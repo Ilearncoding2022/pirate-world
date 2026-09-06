@@ -107,6 +107,44 @@ const WIND_HALF_WIDTH = 0.05;
 const WIND_FILL = 'rgba(255, 186, 84, 0.9)';
 
 /**
+ * The gust glyph that sits on the arrow's tail, as SVG path data.
+ *
+ * Byte-for-byte the same three strokes `index.html` puts in front of the SPD
+ * row's wind share, because it has to be recognised as the same mark: the
+ * panel says how many knots the weather is worth and the scope says which way
+ * it is going, and a player should not have to learn that twice. Path2D parses
+ * the same syntax the SVG does, so the two cannot drift apart by a curve.
+ *
+ * Authored in the icon's own 24x16 viewBox and scaled to WIND_GLYPH_SIZE scope
+ * radii below.
+ */
+const WIND_GLYPH_PATH =
+  'M2 4h11a2.6 2.6 0 1 0-2.6-2.6 M2 8h15a2.9 2.9 0 1 1-2.9 2.9 M2 12h8';
+
+/**
+ * Glyph size in scope radii, its floor in pixels, and its gap from the tail.
+ *
+ * It rides on the tail rather than the head because the head is the reading --
+ * where the weather is going -- and a mark on top of it would be read as part
+ * of the arrowhead's shape. On the tail it is unambiguously a label: this
+ * arrow is the wind.
+ *
+ * The pixel floor is the whole reason there are two numbers. Everything else
+ * on this scope is authored in radii and looks after itself, but this mark is
+ * three strokes 4 viewBox units apart: below about 20px wide they close up
+ * into a smear that reads as a scuff on the tube. The scope runs from 118px to
+ * 158px, so 0.13 radii is 8 to 10px -- comfortably inside the smear. The floor
+ * wins at every size the panel actually uses; the radii figure is what keeps
+ * it sane if the scope is ever made much bigger.
+ */
+const WIND_GLYPH_SIZE = 0.13;
+const WIND_GLYPH_MIN_PX = 20;
+const WIND_GLYPH_GAP = 0.055;
+
+/** Parsed once. Path2D is immutable, so the same object strokes every frame. */
+const WIND_GLYPH = typeof Path2D === 'undefined' ? null : new Path2D(WIND_GLYPH_PATH);
+
+/**
  * Cosine of the scope's angular radius.
  *
  * cos is monotone over [0, PI], so `dir . up >= this` is exactly "within
@@ -573,6 +611,32 @@ export function createRadar(
       ctx.closePath();
       ctx.fillStyle = WIND_FILL;
       ctx.fill();
+
+      // The glyph, inboard of the tail and turned to run with the shaft, so
+      // its strokes stream the way the arrow points. It keeps a fixed size:
+      // length already carries the speed, and a glyph that grew with it would
+      // say the same thing twice while getting hard to read at the bottom of
+      // the range.
+      if (WIND_GLYPH !== null) {
+        const glyph = Math.max(WIND_GLYPH_SIZE, WIND_GLYPH_MIN_PX / R);
+        const centre = tail - WIND_GLYPH_GAP - glyph * 0.5;
+        // 24 is the glyph viewBox's width; the translate centres its 24x16 box
+        // on the origin before it is placed.
+        const scale = glyph / 24;
+        ctx.save();
+        ctx.translate(wx * centre, wy * centre);
+        ctx.rotate(Math.atan2(wy, wx));
+        ctx.scale(scale, scale);
+        ctx.translate(-12, -8);
+        ctx.strokeStyle = WIND_FILL;
+        // Two nested scales are in force here -- the scope's R and the glyph's
+        // own -- so the width has to be divided by both to land on 1.7 pixels.
+        ctx.lineWidth = 1.5 / (R * scale);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.stroke(WIND_GLYPH);
+        ctx.restore();
+      }
     }
 
     // ---- North mark: the scope is bow-up, so north swings with heading ----
