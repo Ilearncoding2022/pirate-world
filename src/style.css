@@ -18,6 +18,20 @@
   --ink: #cfeffb;
   --ink-mute: #6f93a6;
 
+  /* Money. Warm brass against the cold HUD, so a gold figure never reads as
+     another instrument. It is the one warm colour on the panel, which is the
+     whole point: see ART-DIRECTION.md on wood-and-brass against neon. */
+  --gold: #ffc44d;
+  --gold-dim: #8a6620;
+
+  /* Tier colours. One source for the fishing card, the catch flash and the
+     Fish Book, so a legendary is the same orange in all three. */
+  --tier-1: #9fb3c8;
+  --tier-2: #4bf0a6;
+  --tier-3: #3fe0ff;
+  --tier-4: #b05cff;
+  --tier-5: #ffb445;
+
   --panel-bg: rgba(6, 14, 24, 0.62);
   --panel-border: rgba(63, 224, 255, 0.28);
   --panel-glow: 0 0 0 1px rgba(63, 224, 255, 0.08), 0 0 18px rgba(63, 224, 255, 0.12),
@@ -1064,3 +1078,722 @@ kbd {
     transition: none;
   }
 }
+
+/* =====================================================================
+   HUD DOCK — the [FISH] / [FISH BOOK] buttons and the GOLD readout.
+   Owned by agent D. Edit between these markers; do not rewrite the file.
+   ===================================================================== */
+/* HUD DOCK */
+
+/* ---------------------------------------------------------------------
+   GOLD — the purse, in the telemetry panel between WND and PWR.
+   ------------------------------------------------------------------- */
+
+/*
+ * Rides on .readout__val for its size and its tabular figures, and only
+ * recolours — the same arrangement .pwr__val and .wnd__val use, so the four
+ * readings on the panel cannot end up different sizes. Tabular numerals are
+ * inherited rather than restated: a purse ticking 995 -> 1005 must not shuffle
+ * the digits to its left, and one declaration is one place to keep that true.
+ *
+ * Brass, not cyan. Every other figure on this panel is an instrument reading;
+ * this one is a possession, and the warm colour is what says so before the key
+ * beside it is read. See ART-DIRECTION.md on wood-and-brass against neon.
+ */
+.gold__val {
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(255, 196, 77, 0.35);
+}
+
+/* ---------------------------------------------------------------------
+   The dock — [FISH] and [FISH BOOK], under the telemetry panel.
+   ------------------------------------------------------------------- */
+
+/*
+ * The panel is content-sized and absolutely positioned, so nothing in CSS can
+ * see where its bottom edge falls: an absolutely positioned sibling cannot be
+ * laid out under a box it is not in flow with. `--telemetry-h` is that height,
+ * measured by hud.ts and written onto .hud whenever it changes.
+ *
+ * A hard offset was the obvious alternative and would already be wrong: the
+ * panel grew by a row the moment GOLD landed in it, and it will grow again the
+ * next time an instrument is added by somebody who never reads this file. The
+ * fallback below is only what is used for the frame before the first
+ * measurement lands.
+ */
+.dock {
+  position: absolute;
+  top: calc(var(--hud-pad) + var(--telemetry-h, 232px) + 10px);
+  left: var(--hud-pad);
+  display: flex;
+  /* The helm pad's gap, so the two controls read as one family of keys. */
+  gap: 7.875px;
+}
+
+/*
+ * .dbtn carries the whole key: the pointer-events opt-in, the glass, the
+ * border, the hover and the focus ring. Only the shape changes here — these
+ * are labels rather than glyphs, so they are as wide as their word instead of
+ * square.
+ */
+.dock__btn {
+  flex-direction: row;
+  height: 30px;
+  padding: 0 12px;
+}
+
+/*
+ * Authored at 10px, and on a machine with a minimum-font-size preference set
+ * it will render at 12. That is fine HERE and is worth saying why, because
+ * ARCHITECTURE.md records a real bug from the opposite case: .dbtn__label is
+ * sized to fit inside a fixed 42px key, so the floor made it spill over its
+ * neighbours and it had to be drawn through a transform. These keys are sized
+ * BY their label rather than the label being fitted into them, so the floor
+ * costs a few pixels of button width and nothing else — the pair still comes
+ * in under the panel above them at either size.
+ */
+.dock__key {
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-shadow: 0 0 10px rgba(63, 224, 255, 0.5);
+}
+
+/*
+ * The brackets are chrome, not content: they are what makes a word on this
+ * HUD read as a thing to press. Drawn in CSS so the button's accessible name
+ * stays "FISH" and not "left bracket FISH right bracket".
+ */
+.dock__key::before {
+  content: "[";
+  margin-right: 3px;
+  color: var(--cyan-dim);
+}
+
+.dock__key::after {
+  content: "]";
+  margin-left: 1px;
+  color: var(--cyan-dim);
+}
+
+/*
+ * Dead below half a tank. hud.ts writes the `disabled` attribute and the
+ * `title` that says why; this only has to make the key look like what it is.
+ */
+.dock__btn:disabled {
+  cursor: not-allowed;
+  color: var(--ink-mute);
+  background: linear-gradient(180deg, rgba(10, 20, 30, 0.5), rgba(4, 9, 16, 0.5));
+  border-color: rgba(63, 224, 255, 0.12);
+  box-shadow: inset 0 -6px 14px rgba(0, 0, 0, 0.45);
+}
+
+.dock__btn:disabled .dock__key {
+  text-shadow: none;
+}
+
+.dock__btn:disabled .dock__key::before,
+.dock__btn:disabled .dock__key::after {
+  color: var(--ink-mute);
+  opacity: 0.6;
+}
+
+/* .dbtn:hover lights the key. A dead key must not light, or the disabled
+   attribute and the glass would be telling the player opposite things. */
+.dock__btn:disabled:hover {
+  border-color: rgba(63, 224, 255, 0.12);
+  box-shadow: inset 0 -6px 14px rgba(0, 0, 0, 0.45);
+}
+
+@media (max-width: 720px) {
+  /* Same trim as the panel above: the dock is as wide as its words, and this
+     is where the words come in. */
+  .dock__btn {
+    height: 27px;
+    padding: 0 9px;
+  }
+  .dock__key {
+    font-size: 9.5px;
+    letter-spacing: 0.14em;
+  }
+}
+
+/* END HUD DOCK */
+
+/* =====================================================================
+   FISHING — the backdrop, the 9:16 card, its chrome and the summary.
+   Owned by agent B. Edit between these markers; do not rewrite the file.
+   ===================================================================== */
+/* FISHING */
+
+/* The backdrop. Outside .hud, so it gets the pointer and the whole viewport
+   rather than the HUD's padding. The 3D view is still rendering behind it —
+   main.ts keeps drawing the frozen frame — so this is what turns the world
+   into scenery. */
+.fishing {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 4, 10, 0.72);
+  backdrop-filter: blur(3px) saturate(0.85);
+  -webkit-backdrop-filter: blur(3px) saturate(0.85);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: fishing-in 180ms ease-out;
+}
+
+/* The UA's own [hidden] rule is display:none, which the display:flex above
+   beats. Say it here or the card ships visible. */
+.fishing[hidden] {
+  display: none;
+}
+
+@keyframes fishing-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* 9:16, sized off the viewport HEIGHT with a width cap for narrow phones.
+   Written as a width rather than as `height + width:auto` so that both caps
+   are expressed in the same axis and the aspect ratio derives the other one:
+   with the constraint split across the two axes, whichever one clamps second
+   silently loses. 506px is 900 * 9/16, the plan's desktop ceiling. */
+.fishing__card {
+  position: relative;
+  width: min(94vw, calc(92vh * 9 / 16), 506px);
+  aspect-ratio: 9 / 16;
+  /* Type inside the card is sized in container units, per the HUD text sizing
+     note in docs/ARCHITECTURE.md: the card is a fluid element and pixels on
+     one are only ever right at one width. */
+  container-type: inline-size;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: var(--panel-glow);
+  background: var(--panel-bg);
+  overflow: hidden;
+}
+
+/* The same clipped corner notch every .panel carries, so the card reads as
+   part of the same instrument set. */
+.fishing__card::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(225deg, var(--bg-deep) 0 50%, transparent 50%);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Fills the card. fishrender.ts sizes the drawing buffer off clientWidth and
+   the device pixel ratio; the height here is the card's, and the two agree
+   because the aspect ratio above is the same 9/16 the renderer derives. */
+.fishing__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* Rides over the canvas's sky band — the top 15.75% of the card, which the
+   picture deliberately leaves empty. pointer-events:none so a shot fired at
+   the top of the card is still a shot. */
+.fishing__chrome {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  /* Fluid, but floored at 12px: a browser's minimum font size preference
+     clamps anything below its floor anyway, so asking for less only flattens
+     the hierarchy on the machines that set one. */
+  font-size: clamp(12px, 3.4cqi, 15px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(63, 224, 255, 0.5);
+  pointer-events: none;
+}
+
+.fishing__shots {
+  color: var(--ink-mute);
+  text-shadow: none;
+}
+
+/* The one warm figure on the card, for the same reason the HUD's GOLD row is:
+   money must never read as another instrument. */
+.fishing__gold {
+  color: var(--gold);
+  text-shadow: 0 0 10px rgba(255, 196, 77, 0.45);
+  white-space: nowrap;
+}
+
+/* ---- the summary ---------------------------------------------------- */
+
+.fishing__summary {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+  width: 86%;
+  max-height: 78%;
+  overflow-y: auto;
+  padding: 14px 15px 15px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: rgba(4, 10, 18, 0.92);
+  box-shadow: var(--panel-glow);
+  font-size: clamp(12px, 3.2cqi, 14px);
+}
+
+.fishing__summary[hidden] {
+  display: none;
+}
+
+.fishing__summary-title {
+  margin: 0 0 10px;
+  font-size: clamp(12px, 3cqi, 13px);
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(63, 224, 255, 0.55);
+}
+
+.fishing__catches {
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+/* Sprite, name, count, gold. The name takes the slack so the two numbers stay
+   in their own columns however long a species is called. */
+.fcatch {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.fcatch--empty {
+  display: block;
+  color: var(--ink-mute);
+  letter-spacing: 0.16em;
+}
+
+.fcatch__sprite {
+  font-size: 1.25em;
+  line-height: 1;
+}
+
+.fcatch__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fcatch__count {
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+.fcatch__gold {
+  min-width: 3.5em;
+  text-align: right;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.fishing__total {
+  margin: 0 0 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--cyan-ghost);
+  text-align: right;
+  color: var(--gold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.14em;
+  text-shadow: 0 0 12px rgba(255, 196, 77, 0.4);
+}
+
+.fishing__actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* ---- the two buttons ------------------------------------------------- */
+
+/* Keyed to the D-pad keys in the HUD: a hairline cyan box that lights on
+   hover, rather than anything resembling a system button. */
+.fbtn {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 9px 6px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: rgba(63, 224, 255, 0.06);
+  color: var(--ink);
+  font: inherit;
+  font-size: clamp(12px, 3cqi, 13px);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition:
+    background-color 120ms linear,
+    box-shadow 120ms linear;
+}
+
+.fbtn:hover:not(:disabled) {
+  background: rgba(63, 224, 255, 0.16);
+  box-shadow: 0 0 14px rgba(63, 224, 255, 0.28);
+}
+
+.fbtn:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.fbtn--go {
+  color: var(--cyan);
+  border-color: rgba(63, 224, 255, 0.5);
+}
+
+/* The price, said quietly UNDER the offer rather than in the same voice.
+   On its own line by construction: at the card's narrowest the two halves wrap
+   anyway, and a deliberate second line is a price tag where an accidental one
+   is a broken button. */
+.fbtn__cost {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.82em;
+  color: var(--ink-mute);
+  letter-spacing: 0.08em;
+}
+
+.fbtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+  border-color: rgba(111, 147, 166, 0.35);
+  background: transparent;
+  color: var(--ink-mute);
+}
+
+.fbtn:disabled .fbtn__cost {
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fishing {
+    animation: none;
+  }
+  .fbtn {
+    transition: none;
+  }
+}
+/* END FISHING */
+
+/* =====================================================================
+   FISH BOOK — the species record panel.
+   Owned by agent C. Edit between these markers; do not rewrite the file.
+   ===================================================================== */
+/* FISH BOOK */
+
+/*
+ * The overlay lives outside `.hud`, so none of the HUD's inherited type is
+ * available here: `.hud` sets 13px, uppercase and the letter-spacing, and this
+ * panel gets its own because it is a document to be read rather than an
+ * instrument to be glanced at. It borrows the chrome tokens and nothing else.
+ *
+ * `display: flex` would beat the UA's `[hidden] { display: none }`, so the
+ * hidden case is spelled out. It ships hidden and `fishbook.ts` toggles the
+ * attribute; there is no other way to open it.
+ */
+.fishbook {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--hud-pad);
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+.fishbook[hidden] {
+  display: none;
+}
+
+/* Deep enough that the frozen world behind reads as a backdrop rather than as
+   something still being played. Same figure the fishing card uses. */
+.fishbook__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 4, 10, 0.72);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.fishbook__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(92vw, 640px);
+  /* Tall, but never taller than the viewport: the body scrolls, the head and
+     the footer do not, so the count and the total stay on screen while the
+     player reads down the catalogue. */
+  max-height: min(86vh, 780px);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: var(--panel-glow);
+  backdrop-filter: blur(9px) saturate(1.25);
+  -webkit-backdrop-filter: blur(9px) saturate(1.25);
+  overflow: hidden; /* keeps the scrolling body inside the rounded corners */
+}
+
+/* The same clipped corner notch `.panel::after` draws, reproduced rather than
+   inherited: `.panel` is `position: absolute`, which would drop this element
+   out of the flex centring above. */
+.fishbook__panel::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 14px;
+  height: 14px;
+  background: linear-gradient(225deg, var(--bg-deep) 0 50%, transparent 50%);
+  pointer-events: none;
+}
+
+/* --- head ------------------------------------------------------------ */
+
+.fishbook__head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid var(--cyan-ghost);
+}
+
+.fishbook__title {
+  flex: 1;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(63, 224, 255, 0.55);
+}
+
+.fishbook__close {
+  appearance: none;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  /* The notch is in this corner. Nudged clear of it rather than moved, so the
+     button still reads as being in the corner it belongs to. */
+  margin-right: 4px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-mute);
+  background: transparent;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.fishbook__close:hover,
+.fishbook__close:focus-visible {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  outline: none;
+}
+
+/* --- body ------------------------------------------------------------ */
+
+.fishbook__body {
+  flex: 1;
+  min-height: 0; /* or the flex child refuses to shrink and the panel overflows */
+  overflow-y: auto;
+  overscroll-behavior: contain; /* the world behind must not scroll */
+  padding: 4px 16px 12px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--cyan-dim) transparent;
+}
+
+.fishbook__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.fishbook__body::-webkit-scrollbar-thumb {
+  background: var(--cyan-dim);
+  border-radius: 4px;
+}
+
+/* --- one tier -------------------------------------------------------- */
+
+/* `--tier` is set from `TIERS` in species.ts, so this heading and the catch
+   flash in the fishing card cannot end up disagreeing about what colour a
+   legendary is. The --tier-N tokens are for CSS with no species in hand. */
+.fishbook__group {
+  --tier: var(--ink-mute);
+}
+
+.fishbook__tier {
+  margin: 14px 0 6px;
+  font-size: 9.5px;
+  font-weight: 400;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--tier);
+  text-shadow: 0 0 10px color-mix(in srgb, var(--tier) 45%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--tier) 22%, transparent);
+  padding-bottom: 5px;
+}
+
+/* --- one species ----------------------------------------------------- */
+
+/* Four columns: sprite, name, gold, count. The two figures are fixed-width and
+   right-aligned so they form columns down the page — the whole panel is a
+   ledger, and a ragged right edge is what stops one being readable. */
+.fishbook__row {
+  --tint: var(--ink-mute);
+  display: grid;
+  grid-template-columns: 34px 1fr auto 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+}
+
+.fishbook__sprite {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+}
+
+/* The tint glow behind the sprite, at the same 35% the fishing card draws it,
+   so a species is recognisable in the book by the light it throws before the
+   name is read. */
+.fishbook__sprite::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--tint) 0%, transparent 68%);
+  opacity: 0.35;
+}
+
+.fishbook__glyph {
+  position: relative;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.fishbook__name {
+  color: var(--ink);
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fishbook__gold {
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+  text-shadow: 0 0 10px rgba(255, 196, 77, 0.35);
+}
+
+.fishbook__count {
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--cyan);
+}
+
+/* --- an uncaught species --------------------------------------------- */
+
+/*
+ * A silhouette, and the tier it belongs to. The plan is explicit that the
+ * shape and the tier both show while the name does not: the player is meant to
+ * be able to see what they are missing and how good it is.
+ *
+ * `brightness(0)` alone — as the plan writes it — flattens the emoji to pure
+ * black, which on a panel this dark is not a silhouette but an empty space.
+ * The `invert` lifts it to a mid grey: still unmistakably a blanked-out shape,
+ * still no colour to read a species off, and actually visible. `grayscale`
+ * runs first so the invert cannot pull a hue back out of a coloured glyph.
+ */
+.fishbook__row--unknown .fishbook__glyph {
+  filter: grayscale(1) brightness(0) invert(0.42);
+}
+
+/* The glow goes with the name: a tint is a fingerprint, and leaving it lit
+   would name the fish in colour while the row said UNKNOWN in words. */
+.fishbook__row--unknown .fishbook__sprite::before {
+  background: radial-gradient(circle, var(--ink-mute) 0%, transparent 68%);
+  opacity: 0.1;
+}
+
+.fishbook__row--unknown .fishbook__name,
+.fishbook__row--unknown .fishbook__gold,
+.fishbook__row--unknown .fishbook__count {
+  color: var(--ink-mute);
+  text-shadow: none;
+}
+
+/* --- footer ---------------------------------------------------------- */
+
+.fishbook__foot {
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--cyan-ghost);
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mute);
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .fishbook__row {
+    grid-template-columns: 30px 1fr auto 48px;
+    font-size: 11.5px;
+  }
+
+  .fishbook__sprite {
+    width: 30px;
+  }
+}
+
+/* END FISH BOOK */

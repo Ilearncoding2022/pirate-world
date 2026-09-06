@@ -20,6 +20,10 @@ Then open the URL Vite prints (http://localhost:5173 by default).
 | `A` / `←` / on-screen ◀ | Turn to port |
 | `D` / `→` / on-screen ▶ | Turn to starboard |
 | Mouse wheel | Zoom the follow camera |
+| on-screen `[FISH]` | Start a fishing session — costs half the reserve |
+| on-screen `[FISH BOOK]` | Open the record of every species |
+| `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
+| `Esc` | End a fishing session, or close the fish book |
 
 The ship cannot sail onto land. Running at a coastline stops the ship; turn away to get free.
 
@@ -99,13 +103,27 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   moored; drive through it and you are not, which is the whole rule. Forty
   seconds alongside fills the tank from empty. Berths are plotted on the radar,
   so the scope is also the fuel map.
+- **Fishing.** Anywhere on the globe, docked or not, day or night: press
+  `[FISH]` and the world stops. The ship comes to a dead halt, the sea and the
+  sky freeze behind a dimmed 9:16 card, and you get thirty seconds and ten
+  harpoon shots at five rows of fish. The harpoon swings under the boat and
+  fires straight along whatever angle it is at, so the whole game is timing.
+  The deeper the row the better the odds, and the two rarest tiers *fight* —
+  the line runs a tension bar the whole way in and you have to tap to keep it
+  from snapping. Twenty species in five tiers, each worth gold, each recorded
+  in a fish book that shows a silhouette and `UNKNOWN` until you have landed
+  one. Gold and the book survive a reload.
+  The session costs **half the reserve**, taken the moment it starts, and the
+  button is dead below that — but the panels keep charging while you fish, at
+  the elevation the sun was frozen at. There is no refund for quitting early.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   100 units in every direction, drawn on the CPU from the same height field the
   world is built from. Latitude, longitude and heading sit above the glass; the
   wind rides the rim as a warm arrow, signed on its tail with the same gust
   glyph the speed readout uses, so the two marks are legibly one subject.
   Speeds are whole knots — the tenth only ever flickered. The compass sits in
-  the middle of the helm pad.
+  the middle of the helm pad, and the purse rides the telemetry panel in brass,
+  the one warm figure on a cold instrument.
 
 ## Structure
 

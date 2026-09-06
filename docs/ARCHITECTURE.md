@@ -152,8 +152,15 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud()` | compass needle, speed, power; heading and lat/long live on the radar panel |
+| `hud.ts` | `createHud(wallet)` | compass needle, speed, wind, gold, power, and the dock's two buttons; heading and lat/long live on the radar panel |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
+| `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
+| `fishsim.ts` | `createFishingSim(rng?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
+| `fishrender.ts` | `createFishRenderer(canvas)` | 2D canvas, like `radar.ts`; the only reader of `SpeciesArt` |
+| `fishing.ts` | `createFishing(deps)`, `SESSION_COST` | the overlay: card DOM, input capture, gold and book bookkeeping |
+| `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
+| `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers |
+| `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `main.ts` | — | bootstrap and frame loop |
 
 ## Land / water split
@@ -271,6 +278,21 @@ radar.update(dt, shipState, windState)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
+
+While a fishing overlay is up the loop takes a different branch and stops after
+five calls:
+
+```
+energy.update(dt, restingShip, env)   // restingShip = { ...ship.state, speed: 0 }
+fishing.update(dt)                    // only while the card itself is open
+hud.update(shipState, energyState, windState)
+postFx.render(0, scene, camera)       // zero dt: freeze the frame, survive a resize
+controls.endFrame()                   // zoomDelta must not accumulate under the card
+```
+
+Everything else — wind, ship, camera, globe, docks, wake, radar — is skipped.
+See **Fishing** for why each of those five is in the list and what happens to
+the world while it runs.
 
 Power runs **before** the ship, so it charges for a frame of travel the ship has
 already made rather than one it might not be able to afford. `globe.update` is
@@ -406,6 +428,13 @@ key as narrow as 42px — so it is sized from `--key-size` and drawn through a
 layout box is therefore ten times wider than its ink and reaches over the
 neighbouring keys, which is why it carries `pointer-events: none`. Do not
 "simplify" that back to a plain `font-size`.
+
+The dock's `[FISH]` / `[FISH BOOK]` keys are the counter-example, and they are
+authored at 10px on purpose. They are sized *by* their label rather than the
+label being fitted into them — the key is as wide as its word plus padding —
+so a browser floor raising them to 12px widens two buttons by a few pixels and
+collides with nothing. The rule is not "never author under 12px"; it is
+**never let a floor break a layout that assumed the smaller size**.
 
 A second sizing rule, learned the same way. **Type on a fluid element belongs
 in container units, not pixels.** The scope runs from 118px to 158px, and the
@@ -739,6 +768,134 @@ Two traps, both paid for once:
 The 3 units/s charging limit lives in `energy.ts` and reaches the rings only as
 `EnergyState.mode`, so an amber ring can never disagree with the power plant
 about whether it is paying out.
+
+## Fishing
+`docs/FISHING_PLAN.md` is the approved brief and the record of what was
+decided; this section is the contract the rest of the codebase has to keep.
+
+Seven modules, one HUD button and one branch in the frame loop. It is the first
+thing in the project that **stops the world**, and the first that persists
+anything across a reload.
+
+### The pause contract
+`main.ts` holds no `paused` field. Every frame it asks the two overlays:
+
+```ts
+if (fishing.isOpen || fishBook.isOpen) { /* frozen frame */ return; }
+```
+
+**Derived, not latched.** The fish book closes on its own Escape key and its
+own close button, and it tells nobody when it does; a flag set where `open()`
+is called would strand the world stopped the first time a player dismissed the
+book. The cost of deriving it is a contract on the two modules: `isOpen` must
+be a **live getter**. A module returning a plain `false` property — which is
+what the stubs did — would freeze the game the first time it opened and never
+thaw.
+
+Exactly five things run in a frozen frame:
+
+| Call | Why it is not skipped |
+|---|---|
+| `energy.update(dt, restingShip, env)` | a session costs half the tank and the sun is still up. Recharging *through* one is the point, and the ship may be at a berth |
+| `fishing.update(dt)` | the sim and its canvas — guarded on `fishing.isOpen`, so the fish book alone does not tick a session that is not running |
+| `hud.update(...)` | the power bar is still moving, and it is the thing the player is watching |
+| `postFx.render(0, scene, camera)` | a resize while the card is up rebuilds the composer's targets, and a target that is never rendered into is a black screen behind the card. The `0` is what makes it a freeze rather than a slow-motion world |
+| `controls.endFrame()` | `zoomDelta` accumulates from the wheel whether anything reads it or not. Without this, a player scrolling under the card banks a minute of notches and dumps the lot into the camera on the frame it closes |
+
+Everything else is skipped, and skipping it is the freeze: no wind, no ship, no
+camera, no `globe.update` — so `env` is not rewritten either and the sun the
+panels see is the sun that was up when the card opened, which is the "frozen
+sun's elevation" the brief promises.
+
+`controls.ts` keeps its listeners through all of this. Nothing reads
+`InputState` while paused, but key *releases* are still tracked, so a W held
+across a session does not stick to the throttle when it ends. `fishing.ts` adds
+its own `window` keydown for Space and Escape.
+
+### The resting snapshot
+Energy is billed against a snapshot of the ship with the engine pinned at zero,
+never against the live state:
+
+```ts
+const restingShip = { ...ship.state };   // built once, refreshed in place
+restingShip.speed = 0;
+```
+
+`ship.halt()` has already zeroed the speed by the time the first paused frame
+runs, so on that frame the two agree — the snapshot is there for the frame
+that *straddles* the purchase. `open()` is called from a pointer event, which
+lands between frames but after the frame that billed the hull for its last
+knot; pinning the speed here means a session can never be charged at
+travelling rates however the timing falls.
+
+Two details that are load bearing:
+
+- **It is built once and refreshed in place.** This runs at 60fps for as long
+  as a card is open, and a fresh object per frame is a collection pause in the
+  middle of a mini-game.
+- **The vectors are shared by reference, not copied.** `position` and `up` are
+  the two fields the berth and solar rules actually read, and they are the same
+  `Vector3` objects `ship.ts` mutates — the same rule `EnergyState` and
+  `WindState` are handed out under. Only the scalars are copies, which is why
+  `Object.assign` refreshes them rather than the snapshot being built once and
+  trusted forever.
+
+### Where the 50% goes, and why the world resumes from rest
+The charge is taken **inside `fishing.open()`**, through `energy.spend(0.5)`,
+and nowhere else. `open()` returns `false` and leaves the tank untouched if it
+cannot pay, so a refusal is not a half-purchase. `hud.ts` puts a `disabled`
+attribute and a `Needs 50% power` title on `[FISH]` below that level, but that
+is an **affordance and never the lock** — the HUD cannot spend anything, and
+`open()` re-tests on its own account.
+
+`main.ts`'s `onOpen` hook calls `ship.halt()` before the first frozen frame
+runs — `open()` flips its own flag and calls the hook synchronously inside the
+click, so no frame of the loop ever sees an overlay up over a ship still
+making way. A ship that kept its way through a paused minute would have travelled
+nowhere and would leap forward on the frame the card closes, having banked
+sixty seconds of momentum against zero seconds of ocean. `halt()` also unwinds
+`bankRoll`, because a hull leaning into a turn it is no longer making reads as
+a bug in the still frame behind the card. Nothing about *where* the ship is is
+touched: it is a stop, not a teleport.
+
+The power is not refunded on an abort. Escape ends the session and shows the
+summary; it does not undo the purchase.
+
+### Card units
+The simulation runs in **card units** and knows nothing about pixels: x in
+[0, 1] across, y in [0, 16/9 = 1.778] down from the top, which is the card's
+own 9:16 aspect. The waterline is at y = 0.28, the harpoon pivots at
+(0.5, 0.30), the five fish rows are centred at 0.55 / 0.78 / 1.01 / 1.24 /
+1.47, and a fish is 0.06 card widths long before its `size` multiplier.
+
+`fishrender.ts` scales that to the canvas through one `setTransform`, sizing
+the drawing buffer to `clientWidth x devicePixelRatio` (capped at 2) on open
+and on resize. This is the same split `radar.ts` keeps and for the same
+reason: a sim written in pixels would have to be retuned every time the card
+changed size, and every constant in `FISHING_PLAN.md`'s geometry table would
+mean something different on a phone.
+
+### Persistence
+`save.ts` owns one versioned localStorage key and `createRecords()` is its
+only entry point — it loads the file, builds the wallet and the fish book from
+it, and subscribes both to a writer. Three separate calls would let a caller
+wire two of them and end up with a save that silently stopped updating.
+
+Gold reaches the HUD by **subscription, not by polling**: `wallet.onChange`
+fires once immediately with the current figure and again only when it moves, so
+the GOLD row costs nothing between catches and cannot be a frame behind one.
+It is the only reading on the telemetry panel not taken off a live sim state
+each frame.
+
+**Gold is grouped from four digits up**, with a thin space: `1 565`. The same
+purse is printed in three places — the telemetry row, the card's chrome and the
+book's footer — so the rule is one rule; the one failure that matters is the
+HUD reading `1565` while the book reads `1 565`. `FISHING_PLAN.md` contradicts
+itself on this (its prose says no separator under 10 000, its mock-ups group
+from four), and the mock-ups won. The separator is written out by hand rather
+than through `toLocaleString`, which would print `12,400` here and `12.400` on
+a German machine: the HUD is one instrument in one language.
+
 
 ## The ship model
 `assets/pirateship_beginner.glb` is built by `tools/build_ship.py` (headless

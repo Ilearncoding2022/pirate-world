@@ -1,4 +1,5 @@
 import type { EnergyMode, EnergyState, ShipState, WindState } from './types';
+import type { Wallet } from './wallet';
 
 /**
  * hud.ts — formats ShipState into the DOM overlay declared in index.html.
@@ -35,6 +36,33 @@ function attrWriter(el: HTMLElement | null, name: string): (value: string) => vo
     if (el === null || value === last) return;
     last = value;
     el.setAttribute(name, value);
+  };
+}
+
+/**
+ * Returns a setter that arms or dims a button, carrying the reason with it.
+ *
+ * `disabled` and the tooltip are one fact wearing two attributes — a button
+ * that explains why it is dead while it is alive is worse than one that never
+ * explains itself at all — so they are written together or not at all.
+ *
+ * The shipped state is read back off the markup for the same reason
+ * `modifierWriter` reads its class back: index.html ships [FISH] armed to
+ * match the full tank the sim starts with, so a first frame that has not moved
+ * off that state touches no attribute.
+ */
+function gateWriter(el: HTMLElement | null, reason: string): (armed: boolean) => void {
+  let last: boolean | null = el === null ? null : !el.hasAttribute('disabled');
+  return (armed: boolean): void => {
+    if (el === null || armed === last) return;
+    last = armed;
+    if (armed) {
+      el.removeAttribute('disabled');
+      el.removeAttribute('title');
+    } else {
+      el.setAttribute('disabled', '');
+      el.setAttribute('title', reason);
+    }
   };
 }
 
@@ -122,6 +150,62 @@ function formatLon(lonDeg: number): string {
 function formatSpeed(speed: number): string {
   return `${Math.round(Math.abs(speed))} kn`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Gold                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Below this a gold figure is printed bare; at or above it, grouped.
+ *
+ * Four digits up, so 1565 reads "1 565".
+ *
+ * `FISHING_PLAN.md` contradicts itself here: its prose asks for no separator
+ * under 10 000 while its own card and Fish Book mock-ups group from four
+ * digits ("1 565"). Settled with the owner in favour of the mock-ups, because
+ * the same purse is printed in three places — this row, the card's chrome and
+ * the book's footer — and the one thing that must not happen is the HUD saying
+ * 1565 while the book says 1 565. One rule, one number, three readings of it.
+ */
+const GOLD_GROUPED_FROM = 1000;
+
+/**
+ * The separator. A thin space rather than a comma or a full space: this HUD
+ * has no other punctuation on it, and a comma in a mono face at 16px reads as
+ * a decimal point at the exact moment the number stops being small.
+ */
+const THIN_SPACE = '\u2009';
+
+/**
+ * "0", "1 565", "12 400" — the purse.
+ *
+ * Grouped by hand rather than through `toLocaleString`, which would follow
+ * the browser's locale and print "12,400" here and "12.400" on a German
+ * machine. The HUD is one instrument in one language; the figure it shows must
+ * not depend on where the player's browser thinks it is.
+ *
+ * Negative gold is not a thing the game can produce — `wallet.ts` only ever
+ * adds — so the floor is a guard against a bug printing a minus sign, not a
+ * feature.
+ */
+function formatGold(gold: number): string {
+  const purse = Math.max(0, Math.round(gold));
+  const digits = String(purse);
+  if (purse < GOLD_GROUPED_FROM) return digits;
+  return digits.replace(/\B(?=(\d{3})+$)/g, THIN_SPACE);
+}
+
+/**
+ * The tank a fishing session costs, and therefore the level under which the
+ * [FISH] button is dead.
+ *
+ * It is deliberately NOT imported from `fishing.ts`'s `SESSION_COST`. The two
+ * numbers happen to be equal and are not the same claim: one is what the
+ * overlay charges, the other is what the panel promises before it is charged.
+ * `fishing.open()` re-tests the tank itself and refuses on its own account, so
+ * this is an affordance, never the gate — the HUD cannot spend anything.
+ */
+const FISH_MIN_LEVEL = 0.5;
 
 /* ------------------------------------------------------------------ */
 /* Wind                                                                */
@@ -225,9 +309,57 @@ function formatRate(rate: number): string {
   return `${sign}${magnitude} %/s`;
 }
 
-export function createHud(): {
+/**
+ * Publishes the telemetry panel's height as `--telemetry-h` on the HUD root.
+ *
+ * The dock hangs under that panel, and nothing in CSS can see where its bottom
+ * edge falls: both boxes are absolutely positioned, so they are not in flow
+ * with each other and no selector relates their geometry. The panel is also
+ * content-sized — it grew a row the day GOLD landed in it — so a hard offset
+ * in the stylesheet would be a number that goes stale the next time somebody
+ * adds an instrument and never opens style.css.
+ *
+ * Same write-through discipline as everything else in this file: the property
+ * is set only when the measured height actually changes, which after startup
+ * is a window resize and nothing else.
+ */
+function trackTelemetryHeight(): void {
+  const panel = document.querySelector<HTMLElement>('.panel--telemetry');
+  const hud = document.querySelector<HTMLElement>('.hud');
+  if (panel === null || hud === null) return;
+
+  let last = -1;
+  const publish = (): void => {
+    const height = Math.round(panel.getBoundingClientRect().height);
+    if (height === last) return;
+    last = height;
+    hud.style.setProperty('--telemetry-h', `${height}px`);
+  };
+
+  publish();
+  // Fires after layout and before paint, so the CSS fallback is only ever
+  // seen on a browser without the observer at all.
+  new ResizeObserver(publish).observe(panel);
+}
+
+/**
+ * Builds the panel writers and subscribes the purse.
+ *
+ * The wallet is taken rather than read, because gold changes on a catch and
+ * not on a frame: `onChange` fires once immediately with the current figure
+ * and again only when it moves, so the GOLD row costs nothing between catches
+ * and cannot be a frame behind one. Everything else here is a reading off a
+ * live sim state and is therefore still polled in `update`.
+ *
+ * The subscription is never dropped. The HUD is built once and lives as long
+ * as the page does, so an unsubscribe would only ever be dead code — and a
+ * `dispose` nobody calls is a promise nobody keeps.
+ */
+export function createHud(wallet: Wallet): {
   update(ship: ShipState, energy: EnergyState, wind: WindState): void;
 } {
+  trackTelemetryHeight();
+
   // Looked up once; every writer tolerates a missing element.
   const writeHeading = textWriter(document.getElementById('hud-heading'));
   const writeNeedle = transformWriter(document.getElementById('hud-compass-needle'));
@@ -257,6 +389,15 @@ export function createHud(): {
   const writePwrAria = attrWriter(pwrBar, 'aria-valuenow');
   const writePwrMode = textWriter(document.getElementById('hud-pwr-mode'));
   const writePwrRate = textWriter(document.getElementById('hud-pwr-rate'));
+
+  // The purse pushes; it is not pulled. See the note on createHud above.
+  const writeGold = textWriter(document.getElementById('hud-gold'));
+  wallet.onChange((gold) => writeGold(formatGold(gold)));
+
+  // [FISH] is an affordance, not a lock: `fishing.open()` re-tests the tank
+  // and refuses on its own account. What this buys is the player learning why
+  // the button is dead without having to press it and get nothing.
+  const writeFishGate = gateWriter(document.getElementById('btn-fish'), 'Needs 50% power');
 
   return {
     update(ship: ShipState, energy: EnergyState, wind: WindState): void {
@@ -302,6 +443,10 @@ export function createHud(): {
       writePwrSegments(litSegments(clamped));
       writePwrMode(PWR_TAG[state] ?? state.toUpperCase());
       writePwrRate(formatRate(energy.rate));
+
+      // Tested on the raw level rather than the clamped one, so the button
+      // answers to the sim and not to the panel's own presentation of it.
+      writeFishGate(level >= FISH_MIN_LEVEL);
       // `energy.canThrust` is deliberately not read: `empty` holds for exactly
       // as long as thrust is refused, so a second indicator would say the same
       // thing twice and could only ever contradict the tag.

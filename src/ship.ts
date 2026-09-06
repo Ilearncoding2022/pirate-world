@@ -163,7 +163,8 @@ function clamp(v: number, lo: number, hi: number): number {
  *
  * Convention, shared with the glTF: the bow points along local -Z, the deck
  * normal is local +Y and starboard is local +X, matching
- * `makeBasis(right, up, back)`. Overall length ~5.6 units (globe radius 100).
+ * `makeBasis(right, up, back)`. Hull ~5 units long before `MODEL_SCALE`,
+ * matching the glTF it stands in for.
  */
 function buildStandInHull(): Group {
   const group = new Group();
@@ -193,18 +194,24 @@ function buildStandInHull(): Group {
     side: DoubleSide,
     flatShading: true,
   });
+  // Neon here has to match the glTF's, or the swap on load reads as a colour
+  // change rather than a detail change. These two are `neon_cyan` and
+  // `neon_violet` from `tools/build_ship.py` converted out of linear into the
+  // sRGB hex Three reads: (0.10, 0.72, 1.0) and (0.62, 0.20, 1.0). Magenta,
+  // which this stand-in used to glow, belongs to the HUD alone -- see
+  // ART-DIRECTION.md section 2.4.
   const neonCyan = new MeshStandardMaterial({
     color: 0x0a2a30,
-    emissive: 0x22e6ff,
+    emissive: 0x59ddff,
     emissiveIntensity: 2.2,
     roughness: 0.4,
     metalness: 0.2,
     flatShading: true,
   });
-  const neonMagenta = new MeshStandardMaterial({
-    color: 0x2a0a24,
-    emissive: 0xff3ce0,
-    emissiveIntensity: 2.6,
+  const neonViolet = new MeshStandardMaterial({
+    color: 0x1a0a2a,
+    emissive: 0xce7cff,
+    emissiveIntensity: 2.2,
     roughness: 0.4,
     metalness: 0.2,
     flatShading: true,
@@ -287,11 +294,11 @@ function buildStandInHull(): Group {
   prowGlow.position.set(0, 0.42, -2.3);
   group.add(prowGlow);
 
-  const lantern = new Mesh(new SphereGeometry(0.17, 8, 6), neonMagenta);
+  const lantern = new Mesh(new SphereGeometry(0.17, 8, 6), neonViolet);
   lantern.position.set(0, 1.62, 1.75);
   group.add(lantern);
 
-  const mastLight = new Mesh(new SphereGeometry(0.11, 6, 5), neonMagenta);
+  const mastLight = new Mesh(new SphereGeometry(0.11, 6, 5), neonViolet);
   mastLight.position.set(0, 4.02, -0.15);
   group.add(mastLight);
 
@@ -330,6 +337,19 @@ export interface Ship {
    * `wind` supplies the push the hull is carried by on top of its own engine.
    */
   update(dt: number, input: InputState, energy: EnergyState, wind: WindState): void;
+  /**
+   * Stops the hull dead, where it stands, this instant.
+   *
+   * The fishing overlay freezes the world, and a frozen world has to resume
+   * from rest: a ship that kept its way through a paused minute would leap
+   * forward on the frame the card closes, having travelled nowhere while it
+   * was shut. Position and heading are untouched — this is a stop, not a
+   * teleport.
+   *
+   * The bank angle is unwound with it, because a hull leaning into a turn it
+   * is no longer making reads as a bug in the still frame behind the card.
+   */
+  halt(): void;
 }
 
 /** Frees a subtree's GPU resources. Only ever used on the discarded stand-in. */
@@ -747,5 +767,20 @@ export function createShip(
   syncStateGeo();
   applyTransform();
 
-  return { object, state: state as ShipState, ready, update };
+  /**
+   * See `Ship.halt`. Every quantity that carries motion across a frame goes to
+   * zero; nothing that describes where the ship IS is touched.
+   *
+   * `bankRoll` is a private easing term rather than published state, which is
+   * why it is unwound here and not by the caller — the caller cannot reach it.
+   */
+  function halt(): void {
+    state.speed = 0;
+    state.groundSpeed = 0;
+    state.velocity.set(0, 0, 0);
+    bankRoll = 0;
+    applyTransform();
+  }
+
+  return { object, state: state as ShipState, ready, update, halt };
 }

@@ -11,6 +11,19 @@ export interface Energy {
    * spending power it turns out not to have.
    */
   update(dt: number, ship: ShipState, env: WorldEnv): void;
+  /**
+   * Takes `level` off the reserve in one go, if it is there to take.
+   *
+   * Returns whether it was spent, so a caller cannot half-buy anything: the
+   * fishing card charges 50% of the tank and must not open on a refusal.
+   *
+   * `rate` and `mode` are deliberately NOT touched here. They describe the
+   * plant over the last frame and this is not the plant — it is a withdrawal.
+   * The next `update` recomputes both, and the one frame in which the HUD
+   * shows a stale rate beside a halved bar is the frame the overlay is
+   * covering the HUD anyway.
+   */
+  spend(level: number): boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -295,5 +308,19 @@ export function createEnergy(towns: Towns): Energy {
     else state.mode = 'drain';
   }
 
-  return { state: state as EnergyState, update };
+  /**
+   * See `Energy.spend`. The floor is a hard refusal rather than a partial
+   * draw: a session bought with half the power it costs is not a session.
+   */
+  function spend(level: number): boolean {
+    if (!(level > 0) || state.level < level) return false;
+    state.level -= level;
+    // Clamp the arithmetic, not the rule. The test above already guarantees a
+    // non-negative result; this only keeps a float's last bit from printing a
+    // tank of -0.0000001 on the HUD.
+    if (state.level < 0) state.level = 0;
+    return true;
+  }
+
+  return { state: state as EnergyState, update, spend };
 }

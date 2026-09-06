@@ -229,3 +229,149 @@ export interface ShipState {
   readonly latDeg: number;
   readonly lonDeg: number;
 }
+
+/* ------------------------------------------------------------------ */
+/* Fishing — species                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Rarity band, 1 (common) to 5 (legendary).
+ *
+ * A union rather than an enum: `erasableSyntaxOnly` forbids enums, and the
+ * literal type is what lets `ROW_ODDS` be indexed exhaustively.
+ */
+export type Tier = 1 | 2 | 3 | 4 | 5;
+
+/**
+ * How a species is drawn. The one seam between the ruleset and the art.
+ *
+ * `fishrender.ts` is the only module that reads this, so replacing emoji with
+ * generated PNGs later is a change to `species.ts` and nothing else. `image`
+ * is optional precisely so that swap can happen one species at a time.
+ */
+export interface SpeciesArt {
+  readonly emoji: string;
+  /** CSS colour for the glow behind the sprite; carries the tier read. */
+  readonly tint: string;
+  /** Future: a path under /public, drawn instead of the emoji when present. */
+  readonly image?: string;
+}
+
+/** One catchable species. Immutable data, defined once in `species.ts`. */
+export interface Species {
+  /** kebab-case and STABLE: it is the key the Fish Book is saved under. */
+  readonly id: string;
+  readonly name: string;
+  readonly tier: Tier;
+  /** Multiplier on the base fish length. */
+  readonly size: number;
+  /** Multiplier on the row's base speed. */
+  readonly speed: number;
+  /** Gold paid per catch. */
+  readonly gold: number;
+  readonly art: SpeciesArt;
+}
+
+/* ------------------------------------------------------------------ */
+/* Fishing — simulation                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the harpoon is doing.
+ *
+ * `reeling` covers both the quiet haul of a small fish and the struggle of a
+ * big one; `HarpoonState.struggling` is what separates them, because the
+ * difference is whether the player has to do anything and not what the rope
+ * is doing.
+ */
+export type HarpoonPhase = 'swinging' | 'flying' | 'reeling' | 'retracting';
+
+/**
+ * One fish in the water, in CARD UNITS (see `docs/FISHING_PLAN.md`).
+ *
+ * x runs [0, 1] across the card and y runs [0, 1.778] down from its top. The
+ * simulation knows nothing about pixels; the renderer scales.
+ */
+export interface FishState {
+  readonly species: Species;
+  /** 0..4, shallowest first. */
+  readonly row: number;
+  readonly x: number;
+  readonly y: number;
+  /** +1 travelling right, -1 travelling left. */
+  readonly dir: 1 | -1;
+  readonly hooked: boolean;
+}
+
+export interface HarpoonState {
+  readonly phase: HarpoonPhase;
+  /** Radians from straight down; positive swings toward +x. */
+  readonly angle: number;
+  readonly tipX: number;
+  readonly tipY: number;
+  readonly hooked: FishState | null;
+  readonly struggling: boolean;
+  /** [0, 1]. Meaningful only while `struggling`; the line snaps at 0. */
+  readonly tension: number;
+}
+
+/**
+ * Something that happened during one `update`.
+ *
+ * The sim raises these rather than calling back, so the ruleset stays free of
+ * the DOM: `fishing.ts` banks the gold and writes the save, `fishrender.ts`
+ * floats the "+N" — from the same list, without either knowing about the other.
+ */
+export type FishingEvent =
+  | { kind: 'fired'; shotsLeft: number }
+  | { kind: 'hooked'; fish: FishState }
+  | { kind: 'caught'; species: Species; gold: number; x: number; y: number }
+  | { kind: 'escaped'; species: Species }
+  | { kind: 'missed' }
+  | { kind: 'ended'; reason: 'time' | 'shots' | 'abort' };
+
+/** Read-only view of one fishing session, produced by `fishsim.ts`. */
+export interface FishingState {
+  /** Seconds, counting 30 down to 0. */
+  readonly timeLeft: number;
+  /** Harpoons left, counting 10 down to 0. */
+  readonly shotsLeft: number;
+  readonly fish: readonly FishState[];
+  readonly harpoon: HarpoonState;
+  /** This session's catches, in the order they were landed. */
+  readonly caught: readonly Species[];
+  /** This session's gold. The wallet holds the running total. */
+  readonly goldEarned: number;
+  readonly over: boolean;
+  /**
+   * Raised since the last `update`, which clears the list at its top. Read it
+   * in the same frame or lose it.
+   */
+  readonly events: readonly FishingEvent[];
+}
+
+export interface FishingInput {
+  /**
+   * True on the frame the player pressed — click, tap or Space. Fires the
+   * harpoon while swinging, and is one tap of the struggle while reeling.
+   * Key repeat must not set it; see `docs/FISHING_PLAN.md`.
+   */
+  readonly press: boolean;
+}
+
+/* ------------------------------------------------------------------ */
+/* Fishing — persistence                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Everything that survives a reload. One versioned object under one key.
+ *
+ * `fishBook` is keyed by `Species.id` and holds times caught; a species absent
+ * from it has never been caught. Unknown ids are KEPT on load rather than
+ * pruned, so renaming a species does not silently erase a player's history.
+ */
+export interface SaveData {
+  readonly version: 1;
+  readonly gold: number;
+  readonly fishBook: Readonly<Record<string, number>>;
+}

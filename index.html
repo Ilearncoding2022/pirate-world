@@ -61,6 +61,17 @@
           </span>
         </div>
 
+        <!-- The purse. It sits between the weather and the power because it
+             is the one warm figure on a cold panel and the rule beneath the
+             PWR block would otherwise separate it from the readouts it is
+             one of. hud.ts writes it from a wallet subscription, not from the
+             frame loop, so the shipped 0 is what a new save actually holds
+             and the first write is a real catch. -->
+        <div class="readout">
+          <span class="readout__key">GOLD</span>
+          <span class="readout__val gold__val" id="hud-gold">0</span>
+        </div>
+
         <!-- Reserve power. hud.ts swaps one pwr--* modifier on this wrapper
              and every colour below it follows, so the number, the bar and the
              tag can never end up in different states. Segments ship lit and
@@ -104,6 +115,31 @@
         <div class="panel__rule"></div>
         <p class="panel__note">PIRATE WORLD &#8226; NAV CORE v0.1</p>
       </section>
+
+      <!-- ===================== HUD DOCK =====================
+           Owned by agent D. Everything between this comment and the
+           matching END marker belongs to one agent; edit inside it, never
+           replace the file. The gold readout goes in the telemetry panel
+           above, between the WND and PWR rows. -->
+      <!-- HUD DOCK -->
+      <!-- The two things the ship can do that are not steering it. Styled as
+           the helm keys are, and for the same reason: everything on this HUD
+           that can be pressed looks like a key, so anything that looks like a
+           key can be pressed.
+
+           [FISH] ships ARMED, with no title, because the sim starts on a full
+           tank. hud.ts reads that state back off the markup rather than
+           assuming it, so the first frame writes no attribute at all -- the
+           same contract the PWR block's shipped-lit segments keep. -->
+      <nav class="dock" aria-label="Ship activities">
+        <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Go fishing">
+          <span class="dock__key">FISH</span>
+        </button>
+        <button id="btn-fishbook" class="dbtn dock__btn" type="button" aria-label="Open the fish book">
+          <span class="dock__key">FISH BOOK</span>
+        </button>
+      </nav>
+      <!-- END HUD DOCK -->
 
       <!-- ===================== RADAR ===================== -->
       <section class="panel panel--radar" aria-label="Surface radar">
@@ -249,6 +285,81 @@
         </ul>
       </details>
     </div>
+
+    <!-- ===================== FISHING CARD =====================
+         Owned by agent B. The overlay lives OUTSIDE .hud, because .hud is
+         pointer-events:none and the card needs the pointer; it also has to
+         paint over the whole viewport rather than sit inside the HUD's
+         padding. Ships hidden. -->
+    <!-- FISHING CARD -->
+    <div class="fishing" id="fishing" hidden>
+      <!-- 9:16, sized off the viewport height, so the card is the same picture
+           on a phone and on a desktop. `fishrender.ts` draws it in card units
+           and never learns how big it ended up. -->
+      <div class="fishing__card" role="dialog" aria-modal="true" aria-label="Fishing">
+        <!-- The canvas fills the WHOLE card. The chrome floats over it rather
+             than taking a row of its own: give the readouts a row and the
+             canvas stops being 9:16, and every y in the geometry table —
+             waterline 0.28, rows at 0.55 to 1.47 — starts meaning something
+             else. There is nothing under it but empty sky. -->
+        <canvas class="fishing__canvas" id="fishing-canvas"></canvas>
+
+        <header class="fishing__chrome">
+          <span class="fishing__clock" id="fishing-clock">0:30</span>
+          <span class="fishing__shots" id="fishing-shots">10 shots</span>
+          <span class="fishing__gold" id="fishing-gold">0</span>
+        </header>
+
+        <!-- Shown by fishing.ts when the clock or the shots run out, and on
+             Escape. Never a second overlay: the card stays, so FISH AGAIN can
+             start a new session without a fade. -->
+        <section class="fishing__summary" id="fishing-summary" hidden>
+          <h2 class="fishing__summary-title">Catch log</h2>
+          <ul class="fishing__catches" id="fishing-catches"></ul>
+          <p class="fishing__total" id="fishing-total">+0 gold</p>
+          <div class="fishing__actions">
+            <button class="fbtn fbtn--go" id="fishing-again" type="button">
+              Fish again <span class="fbtn__cost">-50% pwr</span>
+            </button>
+            <button class="fbtn" id="fishing-close" type="button">Close</button>
+          </div>
+        </section>
+      </div>
+    </div>
+    <!-- END FISHING CARD -->
+
+    <!-- ===================== FISH BOOK =====================
+         Owned by agent C. Same reasons, same rules. Ships hidden. -->
+    <!-- FISH BOOK -->
+    <!-- The body ships EMPTY. fishbook.ts builds every tier group and every
+         species row from `species.ts`, so the catalogue exists in exactly one
+         place and a new fish needs no edit here. It also means an uncaught
+         species' name is never in the document at all, which is the point:
+         UNKNOWN is a spoiler one inspector click away otherwise. -->
+    <div class="fishbook" id="fishbook" hidden aria-hidden="true">
+      <div class="fishbook__backdrop" id="fishbook-backdrop"></div>
+
+      <section
+        class="fishbook__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fishbook-title"
+      >
+        <header class="fishbook__head">
+          <span class="panel__dot"></span>
+          <h2 class="fishbook__title" id="fishbook-title">FISH BOOK</h2>
+          <button class="fishbook__close" id="fishbook-close" type="button" aria-label="Close">
+            &#10005;
+          </button>
+        </header>
+
+        <div class="fishbook__body" id="fishbook-body"></div>
+
+        <footer class="fishbook__foot" id="fishbook-foot"></footer>
+      </section>
+    </div>
+
+    <!-- END FISH BOOK -->
 
     <script type="module" src="/src/main.ts"></script>
   </body>
