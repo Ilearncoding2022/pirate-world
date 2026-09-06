@@ -4,6 +4,7 @@ import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from './ter
 import { createGlobe } from './globe';
 import { createShip } from './ship';
 import { createWake } from './wake';
+import { createWaterWakePlugin } from './waterwake';
 import { createFollowCamera } from './camera';
 import { createControls } from './controls';
 import { createHud } from './hud';
@@ -36,8 +37,16 @@ const scene = new THREE.Scene();
 
 const env = createEnv();
 const terrain = createTerrain(DEFAULT_SEED);
-const globe = createGlobe(terrain);
+
+// Built before the globe so its WaterPlugin can be registered at water-shader
+// construction time (docs/RENDER_PLAN.md, Phase 1 stream A: the wake as an
+// input to the water shader rather than a decal drawn over it).
+const wake = createWake(quality.wakeMapSize);
+const wakePlugin = createWaterWakePlugin(wake);
+
+const globe = createGlobe(terrain, [wakePlugin]);
 scene.add(globe.group);
+scene.add(wake.object);
 
 const ship = createShip(
   terrain,
@@ -60,9 +69,6 @@ const wind = createWind(terrain, globe.heightMap);
 
 const docks = createDocks(globe.towns);
 scene.add(docks.object);
-
-const wake = createWake();
-scene.add(wake.object);
 
 const view = createFollowCamera(window.innerWidth / window.innerHeight);
 const controls = createControls();
@@ -205,7 +211,7 @@ function frame(): void {
   view.update(dt, ship.state, controls.input);
   globe.update(dt, env, wind.state, ship.state, view.camera);
   docks.update(dt, env, ship.state, energy.state);
-  wake.update(dt, ship.state, env);
+  wake.update(dt, ship.state, env, renderer);
   hud.update(ship.state, energy.state, wind.state);
   radar.update(dt, ship.state, wind.state);
 

@@ -6,6 +6,7 @@ import type { HeightMap } from './heightmap';
 import type { WaterBodies } from './waterbodies';
 import { createLand } from './land';
 import { createWater } from './water';
+import type { WaterPlugin } from './water';
 import { createWaterBodies } from './waterbodies';
 import { cullIslets } from './islets';
 import { createGrid } from './grid';
@@ -40,7 +41,7 @@ export interface Globe {
  * Ordering matters: the day/night rig writes the environment, then every other
  * module reads it, so all shaders agree on sun direction within a frame.
  */
-export function createGlobe(terrain: Terrain): Globe {
+export function createGlobe(terrain: Terrain, waterPlugins: WaterPlugin[] = []): Globe {
   const group = new THREE.Group();
   group.name = 'world';
 
@@ -68,7 +69,9 @@ export function createGlobe(terrain: Terrain): Globe {
   const towns = createTowns(heightMap, waterBodies, terrain.seaLevel);
 
   const dayNight = createDayNight();
-  const water = createWater(terrain, heightMap, waterBodies);
+  // Registers Phase 1 stream A's wake plugin (and any later stream's), so the
+  // wake becomes an input to the water shader instead of a decal over it.
+  const water = createWater(terrain, heightMap, waterBodies, waterPlugins);
   const land = createLand(terrain, heightMap);
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
