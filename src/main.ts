@@ -9,6 +9,8 @@ import { createControls } from './controls';
 import { createHud } from './hud';
 import { createRadar } from './radar';
 import { createEnv } from './env';
+import { createEnergy } from './energy';
+import { createDocks } from './docks';
 import { createPostFx } from './postfx';
 
 const host = document.getElementById('app');
@@ -38,13 +40,20 @@ const ship = createShip(
 );
 scene.add(ship.object);
 
+// Power plant. Built from the world's berths, read by the ship (thrust gate),
+// the HUD, the model's neon and the dock rings.
+const energy = createEnergy(globe.towns);
+
+const docks = createDocks(globe.towns);
+scene.add(docks.object);
+
 const wake = createWake();
 scene.add(wake.object);
 
 const view = createFollowCamera(window.innerWidth / window.innerHeight);
 const controls = createControls();
 const hud = createHud();
-const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel);
+const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
 const postFx = createPostFx(renderer);
 
 // The composer patches a scene's materials once, on its first frame. The glTF
@@ -64,11 +73,16 @@ const clock = new THREE.Clock();
 function frame(): void {
   const dt = Math.min(clock.getDelta(), 0.1);
 
-  ship.update(dt, controls.input);
+  // Power first, on last frame's speed: the ship must not spend energy it
+  // turns out not to have. `globe.update` is what writes `env`, so the sun the
+  // solar panels see is also one frame old -- 16 ms of a 30-minute day.
+  energy.update(dt, ship.state, env);
+  ship.update(dt, controls.input, energy.state);
   view.update(dt, ship.state, controls.input);
   globe.update(dt, env);
+  docks.update(dt, env, ship.state, energy.state);
   wake.update(dt, ship.state, env);
-  hud.update(ship.state);
+  hud.update(ship.state, energy.state);
   radar.update(dt, ship.state);
 
   postFx.render(dt, scene, view.camera);

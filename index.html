@@ -34,6 +34,46 @@
           <span class="readout__val readout__val--accent" id="hud-lon">000.0&deg; E</span>
         </div>
 
+        <!-- Reserve power. hud.ts swaps one pwr--* modifier on this wrapper
+             and every colour below it follows, so the number, the bar and the
+             tag can never end up in different states. Segments ship lit and
+             the tag ships SOLAR to match the full tank the sim starts with;
+             hud.ts reads both back at construction rather than assuming. -->
+        <div class="pwr pwr--solar" id="hud-pwr">
+          <div class="readout">
+            <span class="readout__key">PWR</span>
+            <span class="readout__val pwr__val" id="hud-pwr-value">100%</span>
+          </div>
+
+          <!-- Ten notches, lit from the left; hud.ts touches only the ones
+               that actually change hands. -->
+          <div
+            class="pwr__bar"
+            id="hud-pwr-bar"
+            role="meter"
+            aria-label="Reserve power"
+            aria-valuemin="0"
+            aria-valuemax="100"
+            aria-valuenow="100"
+          >
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+            <span class="pwr__seg is-lit"></span>
+          </div>
+
+          <div class="pwr__status">
+            <span class="pwr__tag" id="hud-pwr-mode">SOLAR</span>
+            <span class="pwr__rate" id="hud-pwr-rate">+0.00 %/s</span>
+          </div>
+        </div>
+
         <div class="panel__rule"></div>
         <p class="panel__note">PIRATE WORLD &#8226; NAV CORE v0.1</p>
       </section>

@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import type { Terrain } from './types';
+import type { Terrain, Towns } from './types';
 import type { WorldEnv } from './env';
 import type { HeightMap } from './heightmap';
 import { landRadius } from './land';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
+import { SHORE_MARGIN, TOWN_SEED, mulberry32, oceanFraction, randomDirection } from './towns';
 
 export interface CityLights {
   object: THREE.Object3D;
@@ -14,29 +15,24 @@ export interface CityLights {
 /* Tuning                                                              */
 /* ------------------------------------------------------------------ */
 
-/** Placement seed. Fixed, so the same world always gets the same towns. */
-const SEED = 0x5eed17;
-
-/** How many settlements to try to place, and how hard to try. */
-const CLUSTER_TARGET = 76;
-const CLUSTER_TRIES = 20000;
-/** Minimum arc, in radians, between two settlement centres. */
-const CLUSTER_MIN_ARC = 0.095;
+/**
+ * Scatter seed, derived from the town seed rather than shared with it.
+ *
+ * The settlement search moved to `towns.ts` and kept 0x5eed17 for itself. This
+ * scatter no longer draws its centres from that stream, so it no longer sees
+ * the same numbers in the same order; passing the seed straight through would
+ * only pretend otherwise. Deriving it says the split out loud. The consequence
+ * is that the world's lamps moved once, on this refactor, and are fixed forever
+ * after: the seed is a constant and nothing below is time or frame dependent.
+ */
+const SEED = (TOWN_SEED ^ 0x9e3779b9) >>> 0;
 
 /** Lone lights (lighthouses, outposts) sprinkled outside the settlements. */
 const OUTPOST_TARGET = 440;
 const OUTPOST_TRIES = 34000;
 
-/** Habitable band, as height above sea level. */
-const SHORE_MARGIN = 0.004;
-/** Settlements found on lowland only; the interior highlands stay empty. */
-const CENTRE_CEILING = 0.26;
-/** Individual lights may creep a little further up the hillsides. */
+/** Individual lights may creep a little further up the hillsides than a centre. */
 const MEMBER_CEILING = 0.42;
-
-/** Arc, in radians, of the ring used to test how coastal a spot is. */
-const COAST_PROBE_ARC = 0.055;
-const COAST_PROBE_SAMPLES = 12;
 
 /**
  * Lift above the land surface, in world units.
@@ -48,22 +44,6 @@ const COAST_PROBE_SAMPLES = 12;
  * floating -- and it has to track the radius, because the triangles do.
  */
 const LIGHT_LIFT = GLOBE_RADIUS * 0.004;
-
-/* ------------------------------------------------------------------ */
-/* Helpers                                                             */
-/* ------------------------------------------------------------------ */
-
-/** Deterministic 32-bit PRNG. Same generator as terrain.ts. */
-function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /* ------------------------------------------------------------------ */
 /* Shaders                                                             */
@@ -186,18 +166,22 @@ function buildMaterial(pixelRatio: number, options: LayerOptions): THREE.ShaderM
 /**
  * Night-side settlements.
  *
- * Placement is a two-stage seeded scatter. First, settlement centres are
- * rejection-sampled over the sphere and scored by how coastal and how low
- * their spot is, so ports along a shoreline are far more likely than towns in
- * the highlands, and no two centres land on top of each other. Then each
- * centre grows an elongated blob of lights along its own axis, which is what
- * makes a harbour read as a strip rather than a dot. A thin scatter of lone
- * outposts fills the space between.
+ * Where the towns are is `towns.ts`'s answer, not this module's: it needs the
+ * same list the berths, the scope and the charging test work from, and an
+ * independent scatter here would light houses that no port serves. What is
+ * left is the second stage, which is all this file ever really was -- each
+ * centre grows an elongated blob of lamps along its own axis, which is what
+ * makes a harbour read as a strip rather than a dot, and a thin scatter of
+ * lone outposts fills the space between.
  *
  * Two draw calls: the lights themselves, and one soft glow per settlement so
  * a city reads as a smudge of light from orbit rather than a cloud of pixels.
  */
-export function createCityLights(terrain: Terrain, heightMap: HeightMap): CityLights {
+export function createCityLights(
+  terrain: Terrain,
+  heightMap: HeightMap,
+  towns: Towns,
+): CityLights {
   const rng = mulberry32(SEED);
   const sea = terrain.seaLevel;
 
@@ -207,68 +191,13 @@ export function createCityLights(terrain: Terrain, heightMap: HeightMap): CityLi
   const _east = new THREE.Vector3();
   const _colour = new THREE.Color();
 
-  /** Uniform point on the unit sphere. */
-  function randomDirection(out: THREE.Vector3): THREE.Vector3 {
-    const y = rng() * 2 - 1;
-    const theta = rng() * Math.PI * 2;
-    const r = Math.sqrt(Math.max(0, 1 - y * y));
-    return out.set(Math.cos(theta) * r, y, Math.sin(theta) * r);
-  }
-
   /** Offset `dir` inside its own tangent plane by (n, e) radians, renormalised. */
   function offsetDirection(dir: THREE.Vector3, n: number, e: number, out: THREE.Vector3): THREE.Vector3 {
     tangentFrame(dir, _north, _east);
     return out.copy(dir).addScaledVector(_north, n).addScaledVector(_east, e).normalize();
   }
 
-  /** Fraction of a ring around `dir` that is open water. 1 = an islet, 0 = inland. */
-  function oceanFraction(dir: THREE.Vector3): number {
-    tangentFrame(dir, _north, _east);
-    let ocean = 0;
-    for (let i = 0; i < COAST_PROBE_SAMPLES; i++) {
-      const a = (i / COAST_PROBE_SAMPLES) * Math.PI * 2;
-      _probe
-        .copy(dir)
-        .addScaledVector(_north, Math.cos(a) * COAST_PROBE_ARC)
-        .addScaledVector(_east, Math.sin(a) * COAST_PROBE_ARC)
-        .normalize();
-      if (heightMap.sample(_probe) <= sea) ocean++;
-    }
-    return ocean / COAST_PROBE_SAMPLES;
-  }
-
-  /* ---- 1. Settlement centres -------------------------------------- */
-
-  const centres: THREE.Vector3[] = [];
-  const centreHeights: number[] = [];
-  const centreCoast: number[] = [];
-
-  for (let attempt = 0; attempt < CLUSTER_TRIES && centres.length < CLUSTER_TARGET; attempt++) {
-    randomDirection(_dir);
-    const h = heightMap.sample(_dir);
-    if (h <= sea + SHORE_MARGIN || h > sea + CENTRE_CEILING) continue;
-
-    const coast = oceanFraction(_dir);
-    const lowland = 1 - Math.min(1, (h - sea) / CENTRE_CEILING);
-    // Ports first, then flat inland towns, and hardly ever anything else.
-    if (rng() > (0.10 + 0.75 * coast) * (0.35 + 0.65 * lowland)) continue;
-
-    let tooClose = false;
-    const minDot = Math.cos(CLUSTER_MIN_ARC);
-    for (let i = 0; i < centres.length; i++) {
-      if (centres[i].dot(_dir) > minDot) {
-        tooClose = true;
-        break;
-      }
-    }
-    if (tooClose) continue;
-
-    centres.push(_dir.clone());
-    centreHeights.push(h);
-    centreCoast.push(coast);
-  }
-
-  /* ---- 2. Lights -------------------------------------------------- */
+  /* ---- 1. Lights -------------------------------------------------- */
 
   const positions: number[] = [];
   const colors: number[] = [];
@@ -305,11 +234,10 @@ export function createCityLights(terrain: Terrain, heightMap: HeightMap): CityLi
     twinkles.push(rng() * Math.PI * 2, 0.6 + rng() * 2.6);
   }
 
-  for (let c = 0; c < centres.length; c++) {
-    const centre = centres[c];
-    const coast = centreCoast[c];
+  for (const town of towns.all) {
+    const centre = town.dir;
     // How techno this town is. Coastal trade posts run more neon.
-    const neon = Math.min(1, rng() * 0.7 + coast * 0.5);
+    const neon = Math.min(1, rng() * 0.7 + town.coast * 0.5);
 
     // An elongated footprint, oriented arbitrarily in the tangent plane, so
     // towns read as strips along a shore instead of round blobs.
@@ -346,7 +274,7 @@ export function createCityLights(terrain: Terrain, heightMap: HeightMap): CityLi
     if (placed < 6) continue;
 
     // One soft dome of light over the settlement.
-    const gr = landRadius(centreHeights[c], sea) + LIGHT_LIFT;
+    const gr = landRadius(town.height, sea) + LIGHT_LIFT;
     glowPositions.push(centre.x * gr, centre.y * gr, centre.z * gr);
     _colour.setHSL(0.085 + neon * 0.06, 0.72, 0.5, THREE.LinearSRGBColorSpace);
     glowColors.push(_colour.r, _colour.g, _colour.b);
@@ -354,22 +282,22 @@ export function createCityLights(terrain: Terrain, heightMap: HeightMap): CityLi
     glowTwinkles.push(rng() * Math.PI * 2, 0.12 + rng() * 0.3);
   }
 
-  /* ---- 3. Lone outposts ------------------------------------------- */
+  /* ---- 2. Lone outposts ------------------------------------------- */
 
   let outposts = 0;
   for (let attempt = 0; attempt < OUTPOST_TRIES && outposts < OUTPOST_TARGET; attempt++) {
-    randomDirection(_dir);
+    randomDirection(rng, _dir);
     const h = heightMap.sample(_dir);
     if (h <= sea + SHORE_MARGIN || h > sea + MEMBER_CEILING) continue;
     // Strongly coastal: these are lighthouses and jetty lamps.
-    if (rng() > 0.05 + 0.9 * oceanFraction(_dir)) continue;
+    if (rng() > 0.05 + 0.9 * oceanFraction(heightMap, sea, _dir)) continue;
 
     const boost = pickColour(0.12, _colour);
     pushLight(_dir, h, _colour, (0.45 + rng() * 0.5) * boost);
     outposts++;
   }
 
-  /* ---- 4. Geometry and objects ------------------------------------ */
+  /* ---- 3. Geometry and objects ------------------------------------ */
 
   const pixelRatio =
     typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1;

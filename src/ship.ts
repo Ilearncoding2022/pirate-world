@@ -14,7 +14,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { BufferGeometry, Material, Object3D } from 'three';
-import type { InputState, ShipState, Terrain } from './types';
+import type { EnergyState, InputState, ShipState, Terrain } from './types';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
 import { createShipFx } from './shipfx';
 import type { ShipFx } from './shipfx';
@@ -57,8 +57,12 @@ const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y;
  * from this rather than typed. Set independently they disagree silently: at
  * ACCEL 12 and DRAG 0.7 the ship topped out at 17.1 however high the clamp was
  * set, and the number in this constant was simply never reached.
+ *
+ * Exported because `energy.ts` divides the burn by it: the draw is quadratic in
+ * (speed / MAX_FORWARD), so a copy of the 20 over there would mean a top-speed
+ * change quietly retuning the whole fuel economy instead of moving with it.
  */
-const MAX_FORWARD = 20;
+export const MAX_FORWARD = 20;
 /** Linear drag coefficient, 1/s. Also sets how long the ship coasts. */
 const DRAG = 0.7;
 /** Thrust while a throttle key is held, world units / s^2. */
@@ -272,7 +276,8 @@ export interface Ship {
    * it to hand the new materials to the post-processing chain.
    */
   ready: Promise<void>;
-  update(dt: number, input: InputState): void;
+  /** `energy` gates thrust: a dry tank still steers, coasts and drifts. */
+  update(dt: number, input: InputState, energy: EnergyState): void;
 }
 
 /** Frees a subtree's GPU resources. Only ever used on the discarded stand-in. */
@@ -427,7 +432,7 @@ export function createShip(
     object.position.copy(state.position).multiplyScalar(GLOBE_RADIUS + HULL_OFFSET + bob);
   }
 
-  function update(dt: number, input: InputState): void {
+  function update(dt: number, input: InputState, energy: EnergyState): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
     elapsed += dt;
@@ -454,9 +459,16 @@ export function createShip(
     refreshForward();
 
     // ---- Throttle --------------------------------------------------------
+    // A dry tank cuts thrust in both directions and nothing else. Steering,
+    // drag, the bob and sway, the land probe and the sea all keep running
+    // below, so the ship coasts to a stop and still answers the helm -- being
+    // out of charge is a predicament, never a frozen frame. The player can
+    // always turn the hull, and the panels bring it back.
     let thrust = 0;
-    if (input.forward) thrust += ACCEL;
-    if (input.backward) thrust -= ACCEL;
+    if (energy.canThrust) {
+      if (input.forward) thrust += ACCEL;
+      if (input.backward) thrust -= ACCEL;
+    }
 
     // Exact solution of  ds/dt = thrust - DRAG * s  over dt, rather than a
     // step of each in turn. Two reasons it has to be integrated in closed
@@ -468,7 +480,15 @@ export function createShip(
     const terminal = thrust / DRAG;
     state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
     state.speed = clamp(state.speed, -MAX_REVERSE, MAX_FORWARD);
-    if (!input.forward && !input.backward && Math.abs(state.speed) < STOP_EPSILON) {
+    // Snap on the absence of THRUST, not on the absence of input. The two are
+    // the same key press until the tank runs dry, and then they are not: a
+    // player holding W on a dead ship gets thrust 0, and the exponential above
+    // decays toward zero without ever arriving. Testing the keys instead would
+    // leave `speed` at 1e-9 for as long as the key was held -- under way by no
+    // measure a player can see, but never `=== 0`, which is exactly the test
+    // `energy.ts` uses to decide the panels are deployed. The ship would sit
+    // there refusing to charge, and nothing on screen would say why.
+    if (thrust === 0 && Math.abs(state.speed) < STOP_EPSILON) {
       state.speed = 0;
     }
 
@@ -503,8 +523,19 @@ export function createShip(
 
     applyTransform();
 
-    // ---- Sail, flag and neon, on the committed speed ----------------------
-    fx?.update(dt, driveFrac, (input.forward ? 1 : 0) - (input.backward ? 1 : 0));
+    // ---- Sail, flag and neon, on the committed speed and the charge --------
+    // The throttle passed on is the raw key press. `canThrust` is handed over
+    // beside it and is the single place the flames answer to power, so zeroing
+    // the throttle here as well would cut the same thing twice and fight the
+    // fade `shipfx.ts` puts on it.
+    fx?.update(
+      dt,
+      driveFrac,
+      (input.forward ? 1 : 0) - (input.backward ? 1 : 0),
+      energy.level,
+      energy.canThrust,
+      energy.dock !== null,
+    );
   }
 
   // Place the ship correctly before the first frame is drawn.

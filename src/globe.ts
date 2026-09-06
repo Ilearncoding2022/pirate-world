@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Terrain } from './types';
+import type { Terrain, Towns } from './types';
 import type { WorldEnv } from './env';
 import { createHeightMap } from './heightmap';
 import type { HeightMap } from './heightmap';
@@ -12,6 +12,7 @@ import { createSky } from './sky';
 import { createDayNight } from './daynight';
 import { createClouds } from './clouds';
 import { createCityLights } from './citylights';
+import { createTowns } from './towns';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import { latLonToDir } from './geo';
 
@@ -21,6 +22,8 @@ export interface Globe {
   heightMap: HeightMap;
   /** Which water the ship can reach. Read by the water shader. */
   waterBodies: WaterBodies;
+  /** Settlements and their berths. Shared with docks.ts, radar.ts and energy.ts. */
+  towns: Towns;
   update(dt: number, env: WorldEnv): void;
 }
 
@@ -43,10 +46,14 @@ export function createGlobe(terrain: Terrain): Globe {
     latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG),
   );
 
+  // Placed before anything that draws them: the lights, the berths, the scope
+  // and the charging test all read this one list.
+  const towns = createTowns(heightMap, waterBodies, terrain.seaLevel);
+
   const dayNight = createDayNight();
   const water = createWater(terrain, heightMap, waterBodies);
   const land = createLand(terrain, heightMap);
-  const cityLights = createCityLights(terrain, heightMap);
+  const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
   const sky = createSky();
 
@@ -62,6 +69,7 @@ export function createGlobe(terrain: Terrain): Globe {
     group,
     heightMap,
     waterBodies,
+    towns,
     update(dt: number, env: WorldEnv): void {
       dayNight.update(dt, env);
       water.update(dt, env);

@@ -63,6 +63,17 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   neon thruster pods, floated at its designed waterline. The mainsail bellies
   and the Jolly Roger streams as you make way, the lamps breathe out of step
   with each other, and the thrusters flare on the throttle.
+- **Power, not fuel tanks.** The ship runs on a reserve that burns with the
+  *square* of your speed, so half throttle costs a quarter as much and cruising
+  slowly is a real strategy: 90 seconds flat out, or fifteen minutes at 5 knots.
+  Stop in daylight and the panels charge you back at a rate that follows the
+  sun's height in the sky — nothing at night, two minutes from empty at noon.
+  Run dry and you keep the helm but lose the engines, drifting until the sun
+  comes up.
+- **Ports.** Forty-eight of the world's settlements have a berth: a lit ring on
+  the water under a beacon mast, green while it charges you, amber if you are
+  going too fast to connect. Ten seconds alongside fills the tank. Berths are
+  plotted on the radar, so the scope is also the fuel map.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   100 units in every direction, drawn on the CPU from the same height field the
   world is built from. The compass sits in the middle of the helm pad.

@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { GLOBE_RADIUS } from './geo';
 import type { HeightMap } from './heightmap';
-import type { ShipState } from './types';
+import type { ShipState, Towns } from './types';
 import type { WaterBodies } from './waterbodies';
 
 /**
@@ -53,6 +53,32 @@ const SWEEP_TAIL = 1.15;
 /** Sectors the trailing wedge is drawn as. */
 const SWEEP_STEPS = 14;
 
+/**
+ * Town icon sizes, in scope radii.
+ *
+ * Written in scope units rather than world units on purpose: a chart symbol
+ * says "a town is here", not how big the town is, so it has to stay the same
+ * size on screen. Scaled through the projection instead it would swell as the
+ * range closed and read as a range ring rather than as a marker.
+ */
+const DOCK_ICON = 0.042;
+const TOWN_DOT = 0.019;
+
+/**
+ * Scope radius past which icons start fading into the bezel, so a town does not
+ * pop in at full strength the instant it crosses the rim.
+ */
+const ICON_FADE = 0.88;
+
+/**
+ * Cosine of the scope's angular radius.
+ *
+ * cos is monotone over [0, PI], so `dir . up >= this` is exactly "within
+ * RADAR_RANGE" for the price of three multiplies -- the cheap gate that keeps
+ * the whole town list off the trig path every frame.
+ */
+const COS_RADAR_RANGE = Math.cos(RADAR_RANGE / GLOBE_RADIUS);
+
 export interface Radar {
   /** Redraws the scope. Safe to call before the first terrain raster. */
   update(dt: number, ship: ShipState): void;
@@ -78,6 +104,18 @@ const GRASS = [58, 124, 66];
 const FOREST = [34, 84, 60];
 const ROCK = [82, 90, 104];
 const PEAK = [158, 160, 172];
+
+/**
+ * Town icons, deliberately outside the terrain palette above.
+ *
+ * The land bands already own every dark, desaturated green on the plot, so a
+ * dock drawn in any of them would be read as ground rather than as an object.
+ * This mint is a hue `surfaceColor` cannot produce at any height, which is what
+ * makes a berth findable in the half-second the player actually looks.
+ */
+const DOCK_FILL = 'rgba(72, 255, 168, 0.92)';
+const DOCK_RING = 'rgba(226, 255, 240, 0.7)';
+const TOWN_FILL = 'rgba(186, 198, 208, 0.5)';
 
 function mix(a: number[], b: number[], t: number, out: number[]): void {
   const k = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -127,6 +165,7 @@ export function createRadar(
   heightMap: HeightMap,
   waterBodies: WaterBodies,
   seaLevel: number,
+  towns: Towns,
 ): Radar {
   // Single source of truth for the range: the panel label is written from the
   // same constant the projection uses.
@@ -188,22 +227,50 @@ export function createRadar(
   const image = plotCtx ? plotCtx.createImageData(RASTER, RASTER) : null;
 
   const dir = new Vector3();
-  const starboard = new Vector3();
   const rgb = [0, 0, 0];
+
+  /*
+   * The ship frame the plot was last rasterised in, held rather than re-read.
+   *
+   * Terrain and town icons both project through this one copy, which is what
+   * pins an icon to the picture under it instead of to the ship's live
+   * attitude. Projecting icons from the live frame looks identical standing
+   * still and comes apart in a turn: the raster only refreshes at RASTER_HZ,
+   * and ship.ts turns at up to 1.2 rad/s, so between two rasters a smoothly
+   * swinging icon would walk an eighth of the scope off its own island and
+   * snap back, ten times a second. Stale together is coherent; stale apart is
+   * a bug the player reads as the radar lying about where a town is.
+   */
+  const pUp = new Vector3();
+  const pFwd = new Vector3();
+  const pStb = new Vector3();
+  let frameValid = false;
+
+  function captureFrame(ship: ShipState): void {
+    // Matches ship.ts: right = forward x up is starboard.
+    pStb.crossVectors(ship.forward, ship.up);
+    if (pStb.lengthSq() < 1e-12) {
+      // forward parallel to up, which ship.ts should never hand us. Refuse the
+      // frame rather than project the whole scope through a zero vector.
+      frameValid = false;
+      return;
+    }
+    pStb.normalize();
+    pUp.copy(ship.up);
+    pFwd.copy(ship.forward);
+    frameValid = true;
+  }
 
   let sinceRaster = Infinity;
   let sweep = 0;
   let cssSize = 0;
 
-  function raster(ship: ShipState): void {
-    if (!plotCtx || !image) return;
-    // Matches ship.ts: right = forward x up is starboard.
-    starboard.crossVectors(ship.forward, ship.up);
-    if (starboard.lengthSq() < 1e-12) return;
-    starboard.normalize();
+  function raster(): void {
+    if (!plotCtx || !image || !frameValid) return;
 
-    const up = ship.up;
-    const fwd = ship.forward;
+    const up = pUp;
+    const fwd = pFwd;
+    const starboard = pStb;
     const data = image.data;
 
     for (let i = 0; i < cells; i++) {
@@ -248,7 +315,8 @@ export function createRadar(
     sinceRaster += dt;
     if (sinceRaster >= 1 / RASTER_HZ) {
       sinceRaster = 0;
-      raster(ship);
+      captureFrame(ship);
+      raster();
     }
 
     sweep = (sweep + (dt * Math.PI * 2) / SWEEP_PERIOD) % (Math.PI * 2);
@@ -314,6 +382,90 @@ export function createRadar(
     ctx.lineTo(0, 1);
     ctx.strokeStyle = 'rgba(63, 224, 255, 0.14)';
     ctx.stroke();
+
+    // ---- Towns, over the plot and under the marks that must never be lost --
+    /*
+     * The per-pixel projection table, run backwards.
+     *
+     * The raster asks "which direction is this pixel?"; a town asks "which
+     * pixel is this direction?". Both are the same relation --
+     *     dir = up * cos(t) + (fwd * cos(b) + stb * sin(b)) * sin(t)
+     * -- so inverting it is three dot products against the very frame the
+     * raster used: dir . up is cos(t), and the two tangent dots are already
+     * sin(t)cos(b) and sin(t)sin(b), so dividing them by sin(t) places the icon
+     * with no atan2 and, more importantly, with no second projection anywhere
+     * in the file. A second projection is the failure worth designing out
+     * rather than testing for: an icon a few pixels off its own coastline reads
+     * as a rendering nicety rather than an error, so it is never reported and
+     * never found.
+     */
+    if (frameValid) {
+      // Clipped to the bezel, so a town straddling the rim is drawn cut instead
+      // of spilling onto the panel around the scope.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.lineWidth = 1 / R;
+
+      const list = towns.all;
+      for (let i = 0; i < list.length; i++) {
+        const town = list[i];
+        const d = town.dir;
+        // Cull before any trig. Walking the whole list is free; calling acos
+        // down it is not, and neither is the garbage a per-town Vector3 would
+        // make sixty times a second.
+        const c = pUp.x * d.x + pUp.y * d.y + pUp.z * d.z;
+        if (c < COS_RADAR_RANGE) continue;
+
+        // Rounding can push a unit-vector dot fractionally over 1, and acos of
+        // that is NaN -- which would silently drop the icon, not crash.
+        const cc = c > 1 ? 1 : c;
+        const sinT = Math.sqrt(1 - cc * cc);
+        // Great-circle distance as a fraction of the range. Azimuthal
+        // equidistant is the whole point of the scope, so this is the same r
+        // the range rings are calibrated in.
+        const r = (Math.acos(cc) * GLOBE_RADIUS) / RADAR_RANGE;
+        // A town under the keel has no bearing at all: put it dead centre
+        // rather than divide by a vanishing sine.
+        const k = sinT < 1e-6 ? 0 : r / sinT;
+        const f = pFwd.x * d.x + pFwd.y * d.y + pFwd.z * d.z;
+        const s = pStb.x * d.x + pStb.y * d.y + pStb.z * d.z;
+        const x = k * s;
+        // Canvas y runs down while the bow points up the screen -- the same
+        // flip the north mark below makes.
+        const y = -k * f;
+
+        ctx.globalAlpha = r > ICON_FADE ? Math.max(0, (1 - r) / (1 - ICON_FADE)) : 1;
+
+        if (town.dock) {
+          // Filled diamond in a hairline ring: the only actionable thing on the
+          // scope, so it gets the only hard-edged shape on it. The plot behind
+          // it is a blurred image with no straight edges anywhere, which is
+          // what lets a berth pick itself out of its own coastline.
+          ctx.beginPath();
+          ctx.moveTo(x, y - DOCK_ICON);
+          ctx.lineTo(x + DOCK_ICON, y);
+          ctx.lineTo(x, y + DOCK_ICON);
+          ctx.lineTo(x - DOCK_ICON, y);
+          ctx.closePath();
+          ctx.fillStyle = DOCK_FILL;
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(x, y, DOCK_ICON * 1.55, 0, Math.PI * 2);
+          ctx.strokeStyle = DOCK_RING;
+          ctx.stroke();
+        } else {
+          // A landlocked town is a landmark, not a destination: legible when
+          // looked for, and out of the way when it is the coast being read.
+          ctx.beginPath();
+          ctx.arc(x, y, TOWN_DOT, 0, Math.PI * 2);
+          ctx.fillStyle = TOWN_FILL;
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+    }
 
     // ---- North mark: the scope is bow-up, so north swings with heading ----
     const northAngle = (-ship.headingDeg * Math.PI) / 180;

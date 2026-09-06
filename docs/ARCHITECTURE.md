@@ -94,7 +94,7 @@ shader.
 | File | Exports | Notes |
 |---|---|---|
 | `geo.ts` | `GLOBE_RADIUS`, `latLonToDir`, `dirToLatLon`, `tangentFrame`, `headingToForward`, `normalizeHeadingDeg` | conventions |
-| `types.ts` | `InputState`, `Terrain`, `ShipState` | interfaces only |
+| `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode` | interfaces only |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
 | `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once |
 | `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts |
@@ -105,16 +105,19 @@ shader.
 | `sky.ts` | `createSky()` | atmosphere shell + starfield |
 | `daynight.ts` | `createDayNight()` | lights, writes `WorldEnv` |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
-| `citylights.ts` | `createCityLights(terrain, heightMap)` | night-side settlements |
+| `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement + berth eligibility; built once |
+| `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
+| `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
+| `energy.ts` | `createEnergy(towns)` | burn / solar / dock charge; owns `EnergyState` |
 | `wake.ts` | `createWake()` | ship wake and spray |
 | `postfx.ts` | `createPostFx(renderer)` | composer / bloom; `adopt(root)` for late materials |
-| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, update(dt, env) }` | orchestrator only |
+| `globe.ts` | `createGlobe(terrain): { group, heightMap, waterBodies, towns, update(dt, env) }` | orchestrator only |
 | `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)` | glTF hull + physics + collision; `ready` settles on load |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)` | animates the model's separate nodes: sail, flag, neon |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud()` | compass needle, speed, heading, lat/long |
-| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
+| `hud.ts` | `createHud()` | compass needle, speed, heading, lat/long, power |
+| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
 | `main.ts` | — | bootstrap and frame loop |
 
 ## Land / water split
@@ -176,15 +179,22 @@ Two more things follow from the stack and are easy to undo by accident:
 
 ## Frame loop
 ```
-ship.update(dt, input)
+energy.update(dt, shipState, env)          // burn / solar / dock, on last frame's speed
+ship.update(dt, input, energyState)        // thrust gated on energy.canThrust
 camera.update(dt, shipState, input)
 globe.update(dt, env)      // daynight first, then water, land, citylights, clouds, sky
+docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env)
-hud.update(shipState)
+hud.update(shipState, energyState)
 radar.update(dt, shipState)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
+
+Power runs **before** the ship, so it charges for a frame of travel the ship has
+already made rather than one it might not be able to afford. `globe.update` is
+what writes `env`, so the sun the solar panels see is one frame old too — 16 ms
+of a 30-minute day.
 
 ## TypeScript constraints (tsconfig)
 - `verbatimModuleSyntax`: use `import type { X }` for type-only imports.
@@ -280,6 +290,118 @@ dir = up * cos(d/R) + (forward * cos(b) + starboard * sin(b)) * sin(d/R)
 Terrain is rasterised at `RASTER_HZ`, the overlay every frame. The scope's
 colour bands are deliberately copied from `land.ts` and `water.ts`, so an
 island is the same shape and shade on the scope as out of the window.
+
+Towns are plotted in the overlay pass, under the own-ship blip and clipped to
+the bezel: a mint diamond in a hairline ring for a berth, a dim grey dot for a
+landlocked town. So the scope doubles as the fuel map.
+
+**Icons project through the frame the raster was taken in, not the live one.**
+That table above is inverted rather than reimplemented — `dir · up` is already
+`cos(d/R)` and the two tangent dots are already the bearing's sine and cosine,
+so an icon needs three dot products and no second projection. The staleness is
+the point: terrain only refreshes at `RASTER_HZ` while the ship turns at up to
+1.2 rad/s, so an icon placed from the live frame would slide an eighth of the
+scope off its own island between rasters and snap back, ten times a second.
+Stale together is coherent; stale apart is a bug that reads as the radar lying.
+Culling is a dot product against a precomputed cosine, so only the handful of
+towns actually in range ever reach `acos`.
+
+## Ship energy
+`energy.ts` owns one `EnergyState`, mutated in place for the life of the run —
+the HUD, the thrust gate, the dock rings and the model's neon all hold that same
+reference, so handing out a copy would leave them reading a tank that had
+stopped moving.
+
+Every constant is authored as an **endurance in seconds** and the level/s rate
+divided out of it, for the same reason `ACCEL` is derived from `MAX_FORWARD`:
+write the rate directly and leave the endurance in the prose beside it, and the
+two drift apart the first time either is retuned. `IDLE_DRAIN` is subtracted out
+of `FULL_BURN` and added back into `SOLAR_PEAK`, because both targets are claims
+about the *net* result rather than the gross.
+
+| | |
+|---|---|
+| Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2` |
+| 20 / 10 / 5 kn to dry | 90 s / 5.4 min / 15.6 min |
+| Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 120 s at noon, 4.2 min at 30°, negative after dark |
+| Berth | 10 s, overrides solar rather than stacking |
+| Empty | thrust refused until `RESTART_LEVEL` (3%) |
+
+`MAX_FORWARD` is exported from `ship.ts` and imported here rather than copied,
+so a change to top speed moves the fuel economy with it instead of silently
+rebalancing the game. The burn is quadratic, which is what makes cruising slowly
+a strategy rather than a slower way to arrive equally empty.
+
+Three subtleties worth keeping:
+
+- **The dead-stop snap tests `thrust === 0`, not the absence of input.** They are
+  the same key press until the tank runs dry. After that, a player holding W on
+  a dead ship gets thrust 0, and the closed-form drag decay approaches zero
+  without ever arriving — so `speed` sits at 1e-9, `speed === 0` stays false, and
+  the solar test above never fires. The ship would refuse to charge for as long
+  as the key was held, with nothing on screen saying why.
+- **`canThrust` is hysteretic**: dry at 0, thrust only at `RESTART_LEVEL`.
+  Relighting at the first positive level would spend it on thrust inside the
+  same frame and drop straight back to empty, stuttering the thrusters and
+  strobing the HUD tag every frame the panels trickled.
+- **`mode: 'empty'` outranks everything**, a berth included, because it is a
+  statement about thrust rather than about charge.
+
+`energy.update` runs before `ship.update` and therefore bills last frame's
+speed. That is deliberate: the alternative is the ship spending power it turns
+out not to have.
+
+## Towns, berths and the dock zones
+`towns.ts` owns settlement placement, which used to live inside `citylights.ts`
+and be thrown away as soon as the lights were scattered. Four modules need those
+positions now, so the search moved out and `citylights.ts` became a consumer like
+the rest — it draws its own PRNG stream from `TOWN_SEED ^ 0x9e3779b9`, so the
+lamps shifted once, deliberately, and are fixed from here. Town positions did not
+move.
+
+Placement is two passes and the split is load bearing: only the first draws from
+the PRNG, so retuning or deleting the berth search can never move a town.
+
+A town earns a `Dock` only if the ship can actually reach it. `waterbodies.ts`
+is the authority — its flood fill from the spawn point *is* the water the player
+can ever sail on — so a town on a landlocked lake gets no berth however coastal
+the height map thinks it is. The berth then has to survive a rim test: the
+outward walk only promises water directly seaward, which the head of a creek
+satisfies while its ring lies on the bank, so three quarters of a ring sampled at
+`DOCK_RADIUS` must be over reachable water. Not all of it — a berth inside a
+harbour *should* have land behind it. Of 76 towns, 73 read as coastal and **48**
+end up with a berth.
+
+Zones are 8 world units against a 19-unit minimum town spacing, so two cannot
+touch; where the geometry conspires anyway — two towns either side of one strait
+— placement rejects the second outright, so `Towns.dockAt`'s no-overlap promise
+holds by construction rather than by arithmetic.
+
+`docks.ts` draws all 48 berths in **two draw calls**: one merged ring mesh and
+one merged beacon mesh, with the berth index arriving as a vertex attribute and
+the ship's whereabouts as a single uniform. A frame is four scalar writes; no
+buffer is touched. Ring vertices are sampled on the sphere, not laid out on the
+tangent plane — at radius 8 a flat disc's rim sinks 0.16 units under a sea that
+sits at exactly `GLOBE_RADIUS`, which is more than `RING_LIFT` clears.
+
+The beacon masts exist because `citylights.ts` is night-only: without them a
+port is invisible in daylight and the whole refuelling loop is unfindable for
+half of every day.
+
+Two traps, both paid for once:
+
+- **`active` is a reserved word in GLSL ES.** Both dock shaders used it as a
+  local and neither compiled. Nothing in the TypeScript build can see this —
+  `tsc` and Vite treat a shader as a string — so it costs a green build and a
+  scene with no dock rings in it. The locals are named `berthed`.
+- These are `ShaderMaterial`s, so they sit outside `postfx.ts`'s self-encode
+  patch **by design** and each does its own linear→sRGB on the last line, as
+  `water.ts` does. Every material is built at construction; one created lazily on
+  first dock would miss the patch *and* have no encode of its own.
+
+The 3 units/s charging limit lives in `energy.ts` and reaches the rings only as
+`EnergyState.mode`, so an amber ring can never disagree with the power plant
+about whether it is paying out.
 
 ## The ship model
 `assets/pirateship_beginner.glb` is built by `tools/build_ship.py` (headless
