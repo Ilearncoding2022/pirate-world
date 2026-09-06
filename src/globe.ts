@@ -6,6 +6,7 @@ import type { HeightMap } from './heightmap';
 import type { WaterBodies } from './waterbodies';
 import { createLand } from './land';
 import { createWater } from './water';
+import type { Water } from './water';
 import { createWaterBodies } from './waterbodies';
 import { cullIslets } from './islets';
 import { createGrid } from './grid';
@@ -17,6 +18,8 @@ import { createTowns } from './towns';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import { latLonToDir } from './geo';
 import { updateFog } from './fog';
+import { createWaterPatch } from './waterpatch';
+import type { Quality } from './quality';
 
 export interface Globe {
   group: THREE.Group;
@@ -26,6 +29,13 @@ export interface Globe {
   waterBodies: WaterBodies;
   /** Settlements and their berths. Shared with docks.ts, radar.ts and energy.ts. */
   towns: Towns;
+  /**
+   * `water.offsets` (Phase 1 stream B): the three wave layers' integrated
+   * drift, read-only, so `ship.ts` can sample the CPU wave field
+   * (`wavefield.ts`) at the exact positions the shader does. Same object
+   * `water.update()` mutates in place every frame -- not a copy.
+   */
+  readonly waveOffsets: Water['offsets'];
   /**
    * `ship` and `camera` exist for the water's plugins (Phase 1 streams A and
    * D): the wake map and the reflection cube both follow the ship, and
@@ -40,7 +50,7 @@ export interface Globe {
  * Ordering matters: the day/night rig writes the environment, then every other
  * module reads it, so all shaders agree on sun direction within a frame.
  */
-export function createGlobe(terrain: Terrain): Globe {
+export function createGlobe(terrain: Terrain, quality: Quality): Globe {
   const group = new THREE.Group();
   group.name = 'world';
 
@@ -69,6 +79,10 @@ export function createGlobe(terrain: Terrain): Globe {
 
   const dayNight = createDayNight();
   const water = createWater(terrain, heightMap, waterBodies);
+  // Ship-following displacement patch (Phase 1 stream B): reads the sphere's
+  // already-assembled fragment shader and shares its uniforms by reference,
+  // so it never needs its own per-frame wave bookkeeping. See waterpatch.ts.
+  const waterPatch = createWaterPatch(water, quality);
   const land = createLand(terrain, heightMap);
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
@@ -76,6 +90,7 @@ export function createGlobe(terrain: Terrain): Globe {
 
   group.add(dayNight.group);
   group.add(water.mesh);
+  group.add(waterPatch.mesh);
   group.add(land.mesh);
   group.add(cityLights.object);
   group.add(clouds.object);
@@ -87,6 +102,7 @@ export function createGlobe(terrain: Terrain): Globe {
     heightMap,
     waterBodies,
     towns,
+    waveOffsets: water.offsets,
     update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void {
       dayNight.update(dt, env);
       // Before water and land, so both shaders sample this frame's fog
@@ -97,6 +113,7 @@ export function createGlobe(terrain: Terrain): Globe {
       // writer is a harder thing to give up than an extra argument. `ship` and
       // `camera` are for its plugins; the sphere itself ignores them.
       water.update(dt, env, wind, ship, camera);
+      waterPatch.update(dt, ship);
       land.update(dt, env);
       cityLights.update(dt, env);
       clouds.update(dt, env);

@@ -29,6 +29,7 @@
  * (for `normal`, `reflection`, `foam`) or precedes (`colour`) the seam, with
  * the GLSL variables in scope at that point.
  */
+import { AXIS_WAVE, AXIS_CHOP, vec3Literal } from './waveconstants';
 
 /** Uniforms and varyings the rest of the shader (and every plugin) can read. */
 export const WATER_UNIFORMS: string[] = [
@@ -81,8 +82,11 @@ export function waterWavefield(freqSwell: string, freqWave: string, freqChop: st
     // scale is continuous over the whole sphere, so unlike a tangent-frame
     // stretch it introduces no pole singularity, and the two axes crossing
     // makes the crests read as two interfering wave trains. Both are unit.
-    'const vec3 AXIS_WAVE = vec3(0.42, 0.78, -0.46);',
-    'const vec3 AXIS_CHOP = vec3(-0.71, 0.35, 0.61);',
+    // Values live in waveconstants.ts, shared with the CPU port in
+    // wavefield.ts (Phase 1 stream B), so the two can never numerically drift
+    // apart -- this is a pure move, the numbers are unchanged.
+    `const vec3 AXIS_WAVE = ${vec3Literal(AXIS_WAVE)};`,
+    `const vec3 AXIS_CHOP = ${vec3Literal(AXIS_CHOP)};`,
     'vec3 stretch(vec3 q, vec3 axis, float k) { return q + axis * (dot(q, axis) * k); }',
     '// Folding noise through abs() creases it into crest lines, but that crease',
     '// is a gradient discontinuity: once a pixel spans several wavelengths it',
