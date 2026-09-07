@@ -429,7 +429,7 @@ aiBoats.update(dt, shipState, energyState, hazards.state, suppressed())  // afte
 ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
-globe.update(dt, env, wind.state, shipState, camera)  // daynight, fog, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky
+globe.update(dt, env, wind.state, shipState, camera)  // daynight (places sun AND moon, writes env), fog, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final

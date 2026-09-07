@@ -81,6 +81,26 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   night from where it actually is, so sailing east into the sunrise shortens
   your day and sailing west holds the sunset, the same way crossing time zones
   does. Light warms toward the horizon.
+  **The game opens at six in the morning**, with the sun low and dead ahead of
+  the bow, because at the noon it used to start on the sun was overhead and
+  behind you — the one hour at which none of the sky can be seen.
+- **A sun and a moon you can actually see.** Both are up there now, and the
+  sun's disc is the same size the sea has always reflected it at, so the road
+  of glints on the water leads to the thing casting it. The moon keeps its own
+  orbit rather than sitting opposite the sun: it circles slightly slower, so
+  the sun laps it once every eight days, it rises later each night, and some
+  nights it is up in daylight and others it is gone by dark. Its phase is the
+  real angle between the two, so a full moon is one that rises as the sun sets
+  — and moonlight follows the phase, which means a new moon, or a moon below
+  the horizon, is a genuinely darker night than the one before it. The world
+  opens on a moon 80% lit and 38 degrees up, setting astern as the sun rises
+  ahead.
+- **A sky, from the deck.** Blue overhead and pale at the horizon by day, warm
+  along the whole limb at dawn and dusk, and a thin navy veil at night that the
+  stars and the moon still show through. Zoom out and it thins away, because at
+  that end of the wheel you are looking at a planet in space and there should
+  not be a sky in front of it. The sea fades into whatever colour the sky above
+  it currently is, so the horizon has no seam at sunrise.
 - **Settlements** light up on the night side, clustered along coasts and
   lowlands, and fade out through dawn.
 - **Weather.** A cloud deck that forms and dissipates over time, covering about
