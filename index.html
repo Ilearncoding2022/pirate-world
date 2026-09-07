@@ -9,6 +9,45 @@
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
+    <!-- ===================== LOADING =====================
+         Ships VISIBLE, and it is the only thing in this file that does.
+
+         That is the whole point of it: `main.ts` is a deferred module script,
+         so the browser has painted this from HTML and CSS alone before a line
+         of the bundle has run. Built in JS instead, it would appear only once
+         the thing it is covering for had already started.
+
+         `loading.ts` takes it over, drives the bar, and removes it from the
+         document when the world is ready. If the bundle never loads at all
+         this stays up forever, which is the correct outcome: there is no game
+         behind it to reveal. -->
+    <!-- LOADING -->
+    <div class="loading" id="loading">
+      <div class="loading__art" aria-hidden="true"></div>
+
+      <div class="loading__body">
+        <h1 class="loading__title">PIRATE WORLD</h1>
+
+        <div
+          class="loading__bar"
+          id="loading-bar"
+          role="progressbar"
+          aria-label="Loading"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div class="loading__fill" id="loading-fill"></div>
+        </div>
+
+        <div class="loading__status">
+          <span class="loading__label" id="loading-label">MAKING READY</span>
+          <span class="loading__pct" id="loading-pct">0%</span>
+        </div>
+      </div>
+    </div>
+    <!-- END LOADING -->
+
     <!-- Renderer canvas host. main.ts mounts the WebGL canvas here. -->
     <div id="app"></div>
 

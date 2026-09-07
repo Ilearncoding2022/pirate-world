@@ -441,9 +441,17 @@ function loadHull(
   standIn: Group,
   maxAnisotropy: number,
   onFx: (fx: ShipFx) => void,
+  onProgress?: (fraction: number) => void,
 ): Promise<void> {
   return new GLTFLoader()
-    .loadAsync(shipModelUrl)
+    .loadAsync(shipModelUrl, (event) => {
+      // The hull is 5 MB and is the longest single wait in the whole boot, so
+      // it is the one stage that can report real bytes rather than a guess.
+      // `total` is 0 when the server sends no Content-Length, and a fraction
+      // of zero is worse than no fraction at all -- the caller keeps its last
+      // reading instead.
+      if (onProgress && event.total > 0) onProgress(event.loaded / event.total);
+    })
     .then((gltf) => {
       const model = gltf.scene;
       model.name = 'ship-hull';
@@ -465,11 +473,16 @@ function loadHull(
  *   in rather than read here because this module never sees the renderer. It is
  *   what keeps the model's tiled deck and hull maps from mushing out at the
  *   grazing angles the chase camera looks along.
+ * @param onHullProgress fraction of the glTF downloaded, [0, 1]. Optional, and
+ *   the ship neither waits for a reader nor behaves differently with one --
+ *   it exists so the loading screen can report the boot's longest stage
+ *   honestly instead of animating a guess over it.
  */
 export function createShip(
   terrain: Terrain,
   start?: { latDeg: number; lonDeg: number; headingDeg?: number },
   maxAnisotropy = 1,
+  onHullProgress?: (fraction: number) => void,
 ): Ship {
   const startLat = start?.latDeg ?? 0;
   const startLon = start?.lonDeg ?? 0;
@@ -485,9 +498,15 @@ export function createShip(
   // Null until the glTF lands, and stays null if the load fails -- the stand-in
   // has none of the parts it drives.
   let fx: ShipFx | null = null;
-  const ready = loadHull(object, standIn, maxAnisotropy, (loaded) => {
-    fx = loaded;
-  });
+  const ready = loadHull(
+    object,
+    standIn,
+    maxAnisotropy,
+    (loaded) => {
+      fx = loaded;
+    },
+    onHullProgress,
+  );
 
   const state: MutableShipState = {
     position: latLonToDir(startLat, startLon).normalize(),

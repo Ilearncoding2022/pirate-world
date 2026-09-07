@@ -20,6 +20,7 @@ import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
 import { createFishCover } from './fishcover';
 import { createShop } from './shop';
+import { createLoading } from './loading';
 import { createQuality } from './quality';
 import { createReflection } from './reflection';
 import { createWaterReflectPlugin } from './waterreflect';
@@ -36,14 +37,37 @@ import type { ShipState } from './types';
  */
 const probeQuery = new URLSearchParams(window.location.search).get('probe');
 if (probeQuery === 'wave') {
+  // The splash ships visible in the markup, so the probe -- which draws its
+  // own canvas and has no world to build -- has to take it down itself.
+  document.getElementById('loading')?.remove();
   void import('./dev/probe').then((probe) => probe.runProbe());
 } else {
-  startGame();
+  void startGame();
 }
 
-function startGame(): void {
+/*
+ * The bootstrap, in stages, behind the loading screen.
+ *
+ * It is `async` for one reason and it is not concurrency: building the world
+ * is heavy SYNCHRONOUS work, and synchronous work does not let the browser
+ * paint. Written straight through, the progress bar would jump from 0 to 100
+ * on the frame everything finished and never once be seen. Every
+ * `loading.step` below therefore waits for a paint and is called BEFORE the
+ * stage it names -- the bar is a promise of what is about to happen, not a
+ * report of what just did.
+ *
+ * The fractions are rough weights of wall-clock cost, measured by watching the
+ * thing boot rather than derived: the globe and the 5 MB hull are most of it
+ * and everything else is trimming. Only the hull reports real progress; see
+ * `createShip`'s `onHullProgress`.
+ */
+async function startGame(): Promise<void> {
+  const loading = createLoading();
+
   const host = document.getElementById('app');
   if (!host) throw new Error('#app host element not found in index.html');
+
+  await loading.step(0.05, 'WAKING THE NAV CORE');
 
   // Resolved once, before anything below reads a row of its table -- see
   // quality.ts. `?quality=` beats a stored choice beats the 'high' default.
@@ -56,6 +80,8 @@ function startGame(): void {
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
+
+  await loading.step(0.12, 'SEEDING THE OCEAN');
 
   const env = createEnv();
   const terrain = createTerrain(DEFAULT_SEED);
@@ -76,10 +102,28 @@ function startGame(): void {
   const waterPlugins = [createWaterWakePlugin(wake)];
   if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
 
+  // The long synchronous stage: the height map is rasterised, the islets are
+  // culled, the land mask is installed and the towns are placed, all on the
+  // main thread. Nothing paints from here until it returns, which is exactly
+  // why the bar was moved and painted first.
+  await loading.step(0.20, 'RAISING THE LAND');
+
   const globe = createGlobe(terrain, quality, waterPlugins);
   scene.add(globe.group);
   scene.add(wake.object);
 
+  await loading.step(0.5, 'LAUNCHING THE HULL');
+
+  /*
+   * The hull's own band of the bar, 0.56 to 0.88.
+   *
+   * The fetch starts inside `createShip` and runs while the stages below
+   * build the rest of the game, so these readings arrive interleaved with
+   * them. `loading.set` rather than `step` for that reason: this is not a
+   * stage boundary and must not stop to wait for a paint.
+   */
+  const HULL_FROM = 0.56;
+  const HULL_TO = 0.88;
   const ship = createShip(
     terrain,
     {
@@ -88,6 +132,7 @@ function startGame(): void {
       headingDeg: 90,
     },
     renderer.capabilities.getMaxAnisotropy(),
+    (fraction) => loading.set(HULL_FROM + (HULL_TO - HULL_FROM) * fraction),
   );
   scene.add(ship.object);
 
@@ -115,6 +160,16 @@ function startGame(): void {
   const view = createFollowCamera(window.innerWidth / window.innerHeight);
   const controls = createControls();
 
+  // The hull is still coming down the wire. Waited on here rather than left to
+  // land mid-game so the first frame the player sees has a ship in it: the
+  // stand-in was only ever cover for a load that nothing was hiding.
+  //
+  // It resolves either way -- `loadHull` catches its own failure and keeps the
+  // stand-in -- so a missing model delays the boot by a request and no more.
+  await loading.step(HULL_FROM, 'HOISTING THE RIGGING');
+  await ship.ready;
+
+  await loading.step(0.90, 'LIGHTING THE INSTRUMENTS');
 
   const hud = createHud(records.wallet);
   const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
@@ -233,10 +288,11 @@ function startGame(): void {
     return restingShip;
   }
 
-  // The composer patches a scene's materials once, on its first frame. The glTF
-  // hull arrives after that, so it has to be handed over explicitly or it renders
-  // unencoded and a stop too dark.
-  void ship.ready.then(() => postFx.adopt(ship.object));
+  // The composer patches a scene's materials once, on its first frame. The
+  // hull is already aboard by now -- it was awaited above -- so this is a
+  // plain call rather than the `ship.ready.then` it used to be. Without it the
+  // model renders unencoded and a stop too dark.
+  postFx.adopt(ship.object);
 
   function onResize(): void {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioCap));
@@ -255,6 +311,29 @@ function startGame(): void {
     postFx.setTimingEnabled(devTimingVisible);
     hud.setDevTimingVisible(devTimingVisible);
   });
+
+  /*
+   * One frame's worth of work, thrown away, while the splash is still up.
+   *
+   * Materials in this engine compile on first draw, so without this the very
+   * first frame the player sees is the frame every shader in the world is
+   * handed to the driver -- a hitch of hundreds of milliseconds, arriving
+   * exactly when they have just been told the game is ready. Paying for it
+   * here is the whole reason a loading screen earns its place rather than
+   * merely filling a wait.
+   *
+   * It is the frame loop's own sequence minus the ship's physics, so nothing
+   * compiles here that would not have compiled there. The 16 ms it advances
+   * the world by is a sixtieth of a second of drift and nothing else.
+   */
+  const WARM_DT = 1 / 60;
+  view.update(WARM_DT, ship.state, controls.input);
+  globe.update(WARM_DT, env, wind.state, ship.state, view.camera);
+  postFx.render(WARM_DT, scene, view.camera);
+  controls.endFrame();
+
+  await loading.step(1, 'READY');
+  await loading.done();
 
   const clock = new THREE.Clock();
 

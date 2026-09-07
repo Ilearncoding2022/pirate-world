@@ -11,6 +11,11 @@ npm run dev
 
 Then open the URL Vite prints (http://localhost:5173 by default).
 
+The first thing you see is a loading screen with a real progress bar behind
+it: the world is raised, the hull is fetched — that stage reports actual
+bytes — and one frame is rendered and thrown away to compile the shaders, so
+the first frame you are handed does not stutter.
+
 ## Controls
 
 | Input | Action |

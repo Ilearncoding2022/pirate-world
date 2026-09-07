@@ -61,6 +61,140 @@ body {
   touch-action: none;
 }
 
+/* =====================================================================
+   LOADING — the splash the world is built behind.
+
+   Everything here is authored so the screen is complete from HTML and CSS
+   alone: no JS runs before it paints, and `loading.ts` only ever moves the
+   bar and takes the whole thing away.
+   ===================================================================== */
+
+.loading {
+  position: fixed;
+  inset: 0;
+  /* Above every overlay in the project. Nothing may paint over the splash,
+     including the HUD, which is built while this is still up. */
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  font-family: var(--font-mono);
+  color: var(--ink);
+  opacity: 1;
+  transition: opacity 380ms ease;
+}
+
+/* Added by loading.ts when the world is ready. The duration above and
+   FADE_MS in that file are one number in two places -- hide the element
+   early and its own fade is cut off halfway. */
+.loading--gone {
+  opacity: 0;
+  /* The world is live underneath the moment the fade starts; a splash that
+     still ate clicks through it would swallow the first thing the player
+     did. */
+  pointer-events: none;
+}
+
+/*
+ * The art, and a scrim heavy enough at the foot to carry the bar.
+ *
+ * `background-color` under the image is the painting's own deep navy, so the
+ * very first paint -- before a byte of the image has arrived -- is already the
+ * right colour rather than a white flash.
+ */
+.loading__art {
+  position: absolute;
+  inset: 0;
+  background-color: #050d1c;
+  background-image:
+    linear-gradient(
+      rgba(2, 6, 14, 0.25) 0%,
+      rgba(2, 6, 14, 0.42) 52%,
+      rgba(2, 6, 14, 0.92) 100%
+    ),
+    url("../assets/Illustrations/Loading Screen 1.webp");
+  background-size: cover;
+  background-position: center;
+}
+
+.loading__body {
+  position: relative;
+  width: min(560px, 82vw);
+  margin-bottom: clamp(36px, 9vh, 92px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.loading__title {
+  margin: 0;
+  font-size: clamp(15px, 2.2vw, 22px);
+  font-weight: 500;
+  letter-spacing: 0.42em;
+  /* The tracking is applied to the right of every letter, the last one
+     included, which walks a centred word off centre by half its own spacing.
+     Half of 0.42em back is exactly that. */
+  text-indent: 0.42em;
+  color: var(--cyan);
+  text-shadow: 0 0 22px rgba(63, 224, 255, 0.55);
+}
+
+/* The rail. Square rather than rounded, and hairlined like every other meter
+   on this HUD, so the splash reads as the same instrument panel the player is
+   about to be handed. */
+.loading__bar {
+  position: relative;
+  width: 100%;
+  height: 5px;
+  background: rgba(63, 224, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(63, 224, 255, 0.22);
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+/*
+ * The fill. The width is the animation: `loading.ts` writes a percentage and
+ * this eases it, so a stage that jumps twenty points slides instead of
+ * snapping -- and, more usefully, the bar keeps moving through the frames the
+ * main thread is too busy building a world to give it.
+ */
+.loading__fill {
+  width: 0%;
+  height: 100%;
+  background: linear-gradient(90deg, #2aa8c8, var(--cyan));
+  box-shadow: 0 0 12px rgba(63, 224, 255, 0.65);
+  transition: width 260ms ease-out;
+}
+
+.loading__status {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+}
+
+.loading__label {
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  color: var(--ink-mute);
+}
+
+.loading__pct {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--cyan);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading,
+  .loading__fill {
+    transition: none;
+  }
+}
+
 /* ---------------------------------------------------------------------
    Canvas host
    ------------------------------------------------------------------- */
@@ -2001,7 +2135,7 @@ kbd {
       rgba(2, 8, 18, 0.05) 72%
     ),
     linear-gradient(rgba(2, 8, 18, 0.22), rgba(2, 8, 18, 0.22)),
-    url("../assets/Illustrations/Activity - Fish - Cover.png");
+    url("../assets/Illustrations/Activity - Fish - Cover.webp");
   background-size: cover;
   background-position: center;
 }
@@ -2109,7 +2243,7 @@ kbd {
         rgba(2, 8, 18, 0.55) 46%,
         rgba(2, 8, 18, 0.93) 78%
       ),
-      url("../assets/Illustrations/Activity - Fish - Cover.png");
+      url("../assets/Illustrations/Activity - Fish - Cover.webp");
   }
   .fishcover__title {
     font-size: 17px;

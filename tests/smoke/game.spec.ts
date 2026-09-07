@@ -145,6 +145,16 @@ async function boot(page: Page, url: string): Promise<void> {
   const hull = page.waitForResponse((r) => r.url().endsWith('.glb'), { timeout: HULL_TIMEOUT_MS });
   await page.goto(url);
   await hull;
+  // The splash comes down only once the world is built, the hull is aboard
+  // and one frame has been rendered to compile the shaders -- all of which
+  // happens AFTER the .glb response above. Waiting for it matters to this
+  // suite specifically: `waitForLiveFrame` samples a page screenshot, and the
+  // loading art is a colourful painting that would sail through its
+  // luminance and colour-count checks while the game underneath was still
+  // black. `loading.ts` removes the element rather than hiding it.
+  await page.waitForFunction(() => document.getElementById('loading') === null, undefined, {
+    timeout: FRAME_TIMEOUT_MS,
+  });
 }
 
 test.describe('game smoke', () => {

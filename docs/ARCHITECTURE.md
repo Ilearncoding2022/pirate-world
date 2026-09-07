@@ -282,7 +282,7 @@ shader.
 | `waterreflect.ts` | `createWaterReflectPlugin(cubeTexture)` | the `WaterPlugin` that mixes the decoded cube into `skyCol` and paints a fake hull-neon streak, since the hull itself cannot appear in its own reflection camera |
 | `postfx.ts` | `createPostFx(renderer, quality)`, `GpuFrameStats` | composer / bloom; `adopt(root)` for late materials; chains its sRGB self-encode `onBeforeCompile` after a material's own hook (see **Post-processing**); owns the optional GPU/CPU/draw-call timer toggled with Backquote |
 | `globe.ts` | `createGlobe(terrain, quality, waterPlugins?): { group, heightMap, waterBodies, towns, waveOffsets, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map; builds the displacement patch after the water plugins are woven into the shader |
-| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** |
+| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?, onHullProgress?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
@@ -302,7 +302,8 @@ shader.
 | `shop.ts` | `createShop(deps)`, `BATTERY_PRICE`, `HARPOONS_PRICE` | the chandlery panel; the only place gold leaves the purse |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
-| `main.ts` | — | bootstrap and frame loop |
+| `loading.ts` | `createLoading()` | drives the splash `index.html` ships visible; the only UI a module does not build |
+| `main.ts` | — | staged bootstrap and frame loop |
 
 ## Land / water split
 The world is **25% land, 75% water**, and that is one constant: `HEIGHT_BIAS`
