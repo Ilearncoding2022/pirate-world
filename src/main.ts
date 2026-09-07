@@ -32,6 +32,7 @@ import { createAiHulls } from './aihulls';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
 import { createBattleUi } from './battleui';
+import { createBattleCover } from './battlecover';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
 import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, ShipState } from './types';
 import { GLOBE_RADIUS } from './geo';
@@ -301,6 +302,17 @@ async function startGame(): Promise<void> {
   const aiHulls = createAiHulls(scene, () => ship.cloneHull(), postFx);
   const battleScene = createBattleScene(quality, postFx);
   const battleUi = createBattleUi({ onContinue });
+  /*
+   * The beat between the ram and the arena.
+   *
+   * Built after `battleUi` and used before it: a contact opens THIS, and the
+   * fight proper is opened by its `onReady` three seconds later. That ordering
+   * is what keeps a Space pressed during the count from being spent on the
+   * first frame of the fight -- `battleui.ts` latches its fire edge in `tap()`
+   * and only drains it once the arena is up, so a fight that were open behind
+   * this card would bank the press and shoot with it.
+   */
+  const battleCover = createBattleCover({ onReady: onCoverReady });
 
   /*
    * The fight in progress. Replaced wholesale at every contact rather than
@@ -370,19 +382,55 @@ async function startGame(): Promise<void> {
   /**
    * A hull has touched the player's. Fired once, from `aiboats.ts`.
    *
-   * The order is the fade's order, the same one `onSunk` keeps: everything
-   * that can be seen happening happens now, and everything that rearranges the
-   * world waits for the screen to be opaque. `battleUi.open` is what flips the
-   * frame loop onto its battle branch, and it is called synchronously here, so
-   * no frame ever sees a fight starting over a ship still making way.
+   * The ram no longer opens the fight. It halts the ship and raises the cover
+   * card, and the fight is opened three seconds later by `onCoverReady` when
+   * the count runs out -- see `battlecover.ts` for why the beat is there.
+   *
+   * What is still true of this function is the thing that made it correct
+   * before: the world stops synchronously, on the frame of the contact. It
+   * stops by a different mechanism now. `battleUi.isOpen` used to be what
+   * froze it; `battleCover.isOpen` is what freezes it here, and the frozen
+   * branch of the frame loop tests for it beside the other four overlays. So
+   * no frame ever sees a raider alongside a ship still making way, and no
+   * second contact can land inside the count, because `aiBoats.update` is not
+   * called at all while the world is frozen.
    */
   function onContact(boat: AiBoat): void {
     ship.halt();
     contactBoat = boat;
+    battleCover.open(boat.kind);
+  }
+
+  /**
+   * The count has run out. The fight the ram declared actually begins.
+   *
+   * This is the old `onContact` from `battleSim` down, unchanged, and the
+   * order is still the fade's order: everything that can be seen happening
+   * happens now, everything that rearranges the world waits for the screen to
+   * be opaque. `battleUi.open` flips the frame loop from the frozen branch
+   * onto the battle branch, synchronously, which is what stops the cover from
+   * being ticked a second time by a frame that lands between here and the
+   * fade.
+   */
+  function onCoverReady(): void {
+    const boat = contactBoat;
+    // Defensive, and cheap. Nothing can clear the boat between the ram and the
+    // count -- the world is frozen for the whole of it -- but this function is
+    // the one path into a fight and a fight with no foe would be a fight
+    // against a null hull.
+    if (boat === null) {
+      battleCover.close();
+      return;
+    }
     battleSim = createBattleSim();
     outcomeSettled = false;
     battleUi.open(boat.kind);
     blackout.run(() => {
+      // The card comes down HERE, on a screen that is already opaque, for the
+      // reason the instruments below it do: taking it away the instant the
+      // count hit zero would show the player half a second of the world they
+      // are about to leave, which reads as the fight having been called off.
+      battleCover.close();
       contactHull = aiHulls.hullOf(boat);
       playerHullHome = ship.object.parent;
       contactHullHome = contactHull ? contactHull.parent : null;
@@ -534,7 +582,12 @@ async function startGame(): Promise<void> {
     // keys are still on screen and still pressable underneath it; and the
     // battle branch is tested FIRST, so a cover screen opened over a fight
     // would never be ticked and never be closed. The same guard is on [SHOP].
-    if (battleUi.isOpen) return;
+    // The cover card as well as the fight itself. The count is three seconds
+    // during which the world is frozen and `battleUi.isOpen` is still false,
+    // so a guard on the fight alone would let [FISH] open a card over a ram
+    // that has already landed -- and the battle branch, once it took over,
+    // would never tick that card and never close it.
+    if (battleUi.isOpen || battleCover.isOpen) return;
     // Not while a maelstrom has the hull. An overlay freezes the world, and
     // the hull in a spiral is not the player's to freeze: opening one mid-
     // capture would halt a ship that is being carried, and the wreck would
@@ -550,7 +603,7 @@ async function startGame(): Promise<void> {
   // construction.
   document.getElementById('btn-shop')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
-    if (battleUi.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
     if (hazards.state.phase !== 'free') return;
     if (energy.state.mode !== 'docked') return;
     // The hull is already stopped -- a berth is a two-second dwell -- but the
@@ -835,7 +888,13 @@ async function startGame(): Promise<void> {
     // the hull is exactly where it was when the card closes. The buttons that
     // open these overlays refuse to while `phase !== 'free'`, so no card can
     // be over a hull that is being carried.
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) {
+    if (
+      fishing.isOpen ||
+      fishBook.isOpen ||
+      shop.isOpen ||
+      fishCover.isOpen ||
+      battleCover.isOpen
+    ) {
       // The plant keeps running -- a session costs half the tank and the sun is
       // still up, so recharging through one is the point. It bills a resting
       // hull; see `restingSnapshot`. It also keeps the berth alive under the
@@ -847,6 +906,20 @@ async function startGame(): Promise<void> {
       // has to be re-read against it: a player who opens this at a berth on
       // 40% watches the button come alive without touching anything.
       if (fishCover.isOpen) fishCover.update();
+      /*
+       * The count into a fight -- the one thing in the frozen branch that
+       * ADVANCES rather than merely repaints.
+       *
+       * Deliberately handed no `dt`. Everything else in this branch runs on
+       * the frame loop's clock or on none at all, and this runs on the wall
+       * clock instead, because three seconds on a card is a promise to the
+       * player rather than a span of simulation: `dt` is capped at 100 ms, and
+       * on a machine drawing this frozen frame at 4 fps that cap would stretch
+       * the beat to seven and a half seconds. See MAX_TICK in
+       * `battlecover.ts`, which is where the tab-throttling case the cap used
+       * to cover is handled instead.
+       */
+      if (battleCover.isOpen) battleCover.update();
       hud.update(ship.state, energy.state, wind.state);
       // Redrawn but not advanced: `env` is frozen with the rest of the world,
       // so this repaints the same reading. It has to run at all because the

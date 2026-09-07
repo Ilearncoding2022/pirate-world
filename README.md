@@ -140,9 +140,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   colour while they are inside its range, and both are lit up in it: a Fresnel
   glow around the whole silhouette, so at sixty units you can see which one is
   coming before you can see what it is.
-  Touch either hull, either way round, and there is a cannon fight. The screen
-  fades, the world stops where it stands, and the two boats come up circling on
-  a ring of open ocean that closes in as it goes. You cannot steer. `W` and `S`
+  Touch either hull, either way round, and there is a cannon fight. The world
+  stops where it stands and a card comes up naming who rammed you, in their
+  colour, with the rules of the fight in one sentence and three seconds on the
+  clock to read them — a fight you can lose a tank and a tenth of your purse to
+  is not a thing to be dropped into cold. Then the screen fades and the two
+  boats come up circling on a ring of open ocean that closes in as it goes. You cannot steer. `W` and `S`
   speed you up and slow you down on the circle, and that is the whole helm,
   because the guns fire **straight out of the inboard beam**: the ring is what
   makes the firing windows, and pulling ahead or dropping back is how you open

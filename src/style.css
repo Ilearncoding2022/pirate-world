@@ -2283,6 +2283,263 @@ kbd {
 /* END FISHING COVER */
 
 /* =====================================================================
+   BATTLE COVER — the card a fight is declared on.
+
+   Built on the fishing cover's shell deliberately: same backdrop, same 16:9
+   panel, same 0.65 scale, same art-behind-a-left-hand-column. A player who
+   has opened one activity screen has learned how to read this one, and the
+   two are the same kind of object — a plate of art over a stopped world with
+   one thing to tell you.
+
+   What differs is that this one has no way out and a clock instead of
+   buttons. See the BATTLE COVER block in index.html.
+
+   z-index 50: above the fight's own overlay at 40, because this covers the
+   strip and the FIRE key rather than sitting beside them, and below the
+   blackout at 90, because the fade that follows the count has to take this
+   card down with everything else.
+   ===================================================================== */
+/* BATTLE COVER */
+
+.battlecover {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  /* Defaulted so nothing is unpainted for the frame between `open()` and the
+     modifier landing, exactly as `.battle` defaults it. */
+  --foe: var(--orange);
+}
+
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat. Same guard every other overlay carries. */
+.battlecover[hidden] {
+  display: none;
+}
+
+.battlecover--red {
+  --foe: var(--red);
+}
+
+.battlecover--orange {
+  --foe: var(--orange);
+}
+
+/*
+ * Heavier than the fishing cover's backdrop, and for a reason that screen does
+ * not have: the fight's own overlay is live underneath this one. The strip and
+ * the FIRE key are already in the document by the time the fade starts, and a
+ * thin scrim would let them glow through the plate as a row of marks the
+ * player cannot yet use.
+ */
+.battlecover__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 5, 11, 0.92);
+  backdrop-filter: blur(4px);
+}
+
+.battlecover__panel {
+  position: relative;
+  width: min(92vw, 880px);
+  max-height: min(86vh, 560px);
+  aspect-ratio: 16 / 9;
+  /* The fishing cover's 35%-off, for the fishing cover's reason. */
+  transform: scale(0.65);
+  /* The foe's hue on the frame, which is the cheapest way to say which of the
+     two rammed you before a word has been read. */
+  border: 1px solid var(--foe);
+  border-radius: 4px;
+  box-shadow: var(--panel-glow);
+  overflow: hidden;
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+}
+
+/*
+ * The plate, and the scrim that makes it legible.
+ *
+ * The same two-gradient construction the fishing cover uses and for the same
+ * reasons — a wash from the left where the words go, a light overall darkening
+ * so the painting's own fire does not out-glow the count. `background-color`
+ * under it is the plate's deep navy, for the beat on the very first fight
+ * where the image has not been fetched yet.
+ */
+.battlecover__art {
+  position: absolute;
+  inset: 0;
+  background-color: #071426;
+  /*
+   * A heavier wash than the fishing cover's, and pushed further right.
+   *
+   * That screen's plate is darkest exactly where its words go. This one is
+   * not: the painting puts a lit beam and its muzzle flashes across the
+   * middle, which is the third of the card the rules sentence has to be read
+   * over. At the fishing cover's stops the wash is down to about 0.4 by the
+   * end of the text column and the small mute type sits on open highlights.
+   * Held near-opaque to 48% and let go quickly after, so the sentence is
+   * backed and the raider on the right is still a picture.
+   */
+  background-image:
+    linear-gradient(
+      100deg,
+      rgba(2, 8, 18, 0.96) 0%,
+      rgba(2, 8, 18, 0.9) 30%,
+      rgba(2, 8, 18, 0.72) 48%,
+      rgba(2, 8, 18, 0.2) 68%,
+      rgba(2, 8, 18, 0.04) 82%
+    ),
+    linear-gradient(rgba(2, 8, 18, 0.22), rgba(2, 8, 18, 0.22)),
+    url("../assets/Illustrations/Activity - Ship-Ship Battle - Cover.webp");
+  background-size: cover;
+  background-position: center;
+}
+
+/* The fishing cover's column, minus its buttons: title and one sentence,
+   stood on the floor of the panel where the painting is darkest. */
+.battlecover__body {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  width: min(100%, 400px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 20px 22px;
+}
+
+/* Who it is, above the verdict-voice title and in their own colour -- the
+   same hue the scope has been drawing them in all game. */
+.battlecover__foe {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.34em;
+  color: var(--foe);
+  text-shadow: 0 0 14px color-mix(in srgb, var(--foe) 55%, transparent);
+}
+
+.battlecover__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+  text-shadow: 0 0 18px rgba(63, 224, 255, 0.5);
+}
+
+.battlecover__blurb {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--ink-mute);
+}
+
+/*
+ * The clock, bottom-right, out of the text column.
+ *
+ * Placed over the open water in the plate rather than centred over the whole
+ * card: a digit in the middle of the picture would be the first thing read and
+ * the sentence the second, which is backwards -- the count is the deadline for
+ * the sentence, not the point of the screen.
+ */
+.battlecover__clock {
+  position: absolute;
+  right: 22px;
+  bottom: 18px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 62px;
+  border: 1px solid color-mix(in srgb, var(--foe) 40%, transparent);
+  border-radius: 50%;
+  background: rgba(2, 8, 18, 0.55);
+}
+
+.battlecover__count {
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--foe);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--foe) 60%, transparent);
+}
+
+/*
+ * One pulse per digit, restarted from `battlecover.ts` on each tick.
+ *
+ * Opacity and scale together: the ring is small and a fade alone at this size
+ * reads as a flicker rather than as a beat being counted.
+ */
+.battlecover__count--tick {
+  animation: battlecover-tick 420ms ease-out 1;
+}
+
+@keyframes battlecover-tick {
+  0% {
+    opacity: 0.35;
+    transform: scale(1.35);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 560px) {
+  /* The plate stops being the point at this size, exactly as the fishing
+     cover's does: the panel goes tall, the column takes the full width, and
+     the painting sits behind all of it under its own vertical wash. */
+  .battlecover__panel {
+    aspect-ratio: 3 / 4;
+    max-height: 86vh;
+  }
+  .battlecover__body {
+    width: 100%;
+  }
+  .battlecover__art {
+    background-image:
+      linear-gradient(
+        rgba(2, 8, 18, 0.15) 0%,
+        rgba(2, 8, 18, 0.55) 46%,
+        rgba(2, 8, 18, 0.93) 78%
+      ),
+      url("../assets/Illustrations/Activity - Ship-Ship Battle - Cover.webp");
+  }
+  .battlecover__title {
+    font-size: 17px;
+  }
+  /* Smaller, and off the floor of the panel, because the text column now
+     reaches the bottom of the card the clock used to have to itself. */
+  .battlecover__clock {
+    width: 48px;
+    height: 48px;
+    right: 16px;
+    top: 16px;
+    bottom: auto;
+  }
+  .battlecover__count {
+    font-size: 23px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The pulse goes; the digit does not. The count is information -- it is the
+     only thing on screen saying how long the player has to read the sentence
+     -- and what the preference is about here is the 1.35 scale, which is the
+     one part of it that actually moves. */
+  .battlecover__count--tick {
+    animation: none;
+  }
+}
+
+/* END BATTLE COVER */
+
+/* =====================================================================
    SHOP — the chandlery, open only alongside a berth.
 
    Built on the Fish Book's shell on purpose: same backdrop, same panel, same

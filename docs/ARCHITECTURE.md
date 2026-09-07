@@ -282,6 +282,7 @@ shader.
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `ROUNDS`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the rounds, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
 | `bounty.ts` | `WIN_TIERS`, `rollWinGold(rng)`, `lossGold(purse)`, `rollDrawGold(rng, purse)`, `LOSS_SHARE`/`LOSS_MIN`/`LOSS_MAX`, `DRAW_SWING` | data and pure functions for the three gold outcomes; every roll takes the caller's `rng` |
 | `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the arena: a SECOND `Scene` with its own flat sea, lights, fixed camera, cannonballs and splashes. It is not the globe water and must never import `water.ts`; see **AI boats and the battle** |
+| `battlecover.ts` | `createBattleCover(deps)`, `BattleCover`, `COUNTDOWN` | the card a fight is DECLARED on: the plate, the rules in one sentence off `ROUNDS`/`HITS_TO_LOSE`, and the three-second count into the arena. A card over a FROZEN world, unlike `battleui.ts` — see **The beat before a fight**. Counts on the wall clock, not on `dt` |
 | `battleui.ts` | `createBattleUi(deps)`, `BattleUi`, `BattleResult` | the fight's overlay: the rounds-and-hits strip, the FIRE key, the Space capture and the result card; `isOpen` is a LIVE GETTER, on the pause contract's terms |
 | `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
 | `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
@@ -461,9 +462,15 @@ It is tested first because it is the more specific state, and because it is
 the one branch that renders a **different scene**: it therefore cannot share
 the frozen branch's `postFx.render(0, scene, camera)`, and it renders LIVE
 rather than at dt 0, because the arena is the game while it is up. A fight and
-a card can never be up together anyway: a contact halts the ship and flips
-`battleUi.isOpen` synchronously, and no contact can happen under an overlay
-because the sim does not run there. See **AI boats and the battle**.
+a card can never be up together anyway: a contact halts the ship and freezes
+the world synchronously, and no contact can happen under an overlay because
+the sim does not run there. See **AI boats and the battle**.
+
+What a contact freezes the world WITH is `battleCover.isOpen`, not
+`battleUi.isOpen`. A ram raises the cover card and the fight itself is opened
+three seconds later, so for those three seconds the loop is on the FROZEN
+branch and the battle branch has not been reached yet. See **The beat before a
+fight**.
 
 While a fishing overlay is up the loop takes a different branch and stops after
 five calls:
@@ -471,6 +478,8 @@ five calls:
 ```
 energy.update(dt, restingShip, env)   // restingShip = { ...ship.state, speed: 0 }
 fishing.update(dt)                    // only while the card itself is open
+fishCover.update()                    // re-reads the plant, so START FISHING can come alive
+battleCover.update()                  // NO dt: the count into a fight is wall-clock
 hud.update(shipState, energyState, windState)
 postFx.render(0, scene, camera)       // zero dt: freeze the frame, survive a resize
 controls.endFrame()                   // zoomDelta must not accumulate under the card
@@ -1369,6 +1378,60 @@ is the sim and `aihulls.ts` is what puts meshes where it says; `battle.ts` is
 the ruleset and `battlescene.ts` is what draws it. Both sims are DOM-free and
 scene-free, which is what makes them the modules the unit tests exercise.
 
+### The beat before a fight
+A ram does not open the arena. It halts the ship, raises `battlecover.ts` and
+freezes the world; three seconds later the card's own count calls `onReady`,
+and THAT opens the fight and runs the fade. `main.ts` splits accordingly:
+`onContact` is the ram, `onCoverReady` is everything the old `onContact` did
+from `createBattleSim` down.
+
+The screen exists because the arena teaches none of its own rules. Ten rounds,
+three hits, a gun that fires out of the beam and a helm that is only a
+throttle are all learnable in one sentence and not one of them is guessable
+from the scene, so a player used to arrive already being shot at by a ruleset
+nobody had told them. The sentence is built from `ROUNDS` and `HITS_TO_LOSE`
+rather than typed into `index.html`, on the house rule every other overlay
+figure follows.
+
+**This is a card over a frozen world, and the fight is not.** `battleui.ts`
+says "nothing here hides the scene", and that is a rule about the FIGHT: a
+result card over a live arena, because a fight that froze would read as the
+game stopping. The cover is not the fight. It is on the near side of the fade,
+over a world the ram has already halted, and it freezes exactly as
+`fishcover.ts` does. The two rules do not conflict because they are about two
+different screens.
+
+**`battleUi.open` is deliberately late.** It could have been left in
+`onContact` — the world would freeze on `battleUi.isOpen` as before and the
+cover would just be a picture on top. It must not be, because `battleui.ts`
+latches its fire edge in `tap()` and only drains it in `input()`, which runs
+only once `inArena`. A fight open behind the cover would bank a Space pressed
+during the count and spend it on the first frame of the arena, firing a round
+the player never aimed. Opening the fight after the count means nothing is
+listening for Space while the card is up.
+
+Both `[FISH]` and `[SHOP]` therefore test `battleUi.isOpen || battleCover.isOpen`.
+A guard on the fight alone would leave a three-second window where a cover
+screen could be opened over a ram that has already landed — and once the battle
+branch took over, that screen would never be ticked and never be closed.
+
+**The count is on the wall clock, and that is not a style choice.** Everything
+else in the frozen branch either runs on the frame loop's `dt` or does not
+advance at all; this runs on `performance.now()`, because `dt` is capped at
+100 ms and a cap is exactly wrong for a number the player reads as seconds. On
+a machine drawing the frozen world at 4 fps — which is what the software
+renderer in the smoke tier does — the cap advances the count 0.4 s per real
+second and the three-second beat becomes seven and a half. The slower the
+machine, the longer the game holds you in front of a card you have finished
+reading. `MAX_TICK` (0.5 s) is what keeps the case the cap used to cover: raw
+elapsed time would let a tab backgrounded across the count come back with the
+whole beat spent, dropping the player into a fight they never saw declared.
+
+The card is taken down inside the fade's `onBlack`, not when the count hits
+zero, for the reason the world's instruments are: a card removed on a screen
+that is still transparent shows half a second of the world the player is about
+to leave, which reads as the fight having been called off.
+
 ### The world's instruments come down with the fade
 A battle is the one overlay in this project that is **not** a card over a
 frozen world. The arena is a live scene, and the HUD would otherwise sit on
@@ -1565,7 +1628,10 @@ anything across a reload.
 `main.ts` holds no `paused` field. Every frame it asks the two overlays:
 
 ```ts
-if (fishing.isOpen || fishBook.isOpen) { /* frozen frame */ return; }
+if (
+  fishing.isOpen || fishBook.isOpen || shop.isOpen ||
+  fishCover.isOpen || battleCover.isOpen
+) { /* frozen frame */ return; }
 ```
 
 **Derived, not latched.** The fish book closes on its own Escape key and its

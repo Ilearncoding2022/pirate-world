@@ -235,17 +235,56 @@ test.describe('game smoke', () => {
     expect(world.meanLuminance, 'battle=1: world before the contact').toBeGreaterThan(6);
 
     /*
+     * The cover card first. A ram raises `#battlecover` and holds the world
+     * for its three-second count, and only then does the fight open -- so this
+     * is now the first thing a contact puts on screen and the arena is three
+     * seconds behind it. Waited on separately rather than folded into the wait
+     * below, because the two prove different things: this one is the beat the
+     * player reads the rules in, and a regression that skipped it would
+     * otherwise be invisible here.
+     *
+     * 25 s for a contact the query makes at three. The gap is the software
+     * renderer: `?battle=1` closes its boat on the hull in SIM time, which
+     * advances at the frame loop's capped dt, and this tier draws the world at
+     * about 4 fps -- so three seconds of closing takes the better part of ten
+     * on the wall clock. The count on the card itself does NOT stretch that
+     * way; see MAX_TICK in `battlecover.ts` for why it must not.
+     */
+    await page
+      .locator('#battlecover')
+      .waitFor({ state: 'visible', timeout: 25000 })
+      .catch(() => undefined);
+
+    // A picture of the beat, on the same terms as every other shot in this
+    // file: an artefact for the owner to look at, never an assertion. The card
+    // is the one thing here whose whole job is to be read, and no assertion
+    // about a DOM node's visibility can tell anyone whether it can be.
+    await screenshot(page, 'battle-cover');
+
+    /*
      * The overlay going up IS the arena coming up, so it is the condition to
      * wait on rather than a duration to guess at. It is allowed to time out
      * without failing: the raiders' sim can be stubbed out, and this test's
      * job is to prove nothing in the world it boots into logs a shader error,
-     * not to assert that a fight started. When the sim is live it resolves in
-     * about the three seconds the query waits.
+     * not to assert that a fight started.
+     *
+     * The budget is the count plus the fade plus the slack the query already
+     * needed. It is generous on purpose: this tier software-renders, and a
+     * timeout here does not fail the test, it silently stops testing the
+     * arena -- which is the failure that costs the most and shows the least.
      */
     await page
       .locator('#battle')
-      .waitFor({ state: 'visible', timeout: 6000 })
+      .waitFor({ state: 'visible', timeout: 12000 })
       .catch(() => undefined);
+
+    /*
+     * And the card is gone by the time the arena is up. It is taken down
+     * inside the fade's `onBlack`, so a cover still visible here would mean
+     * the player is looking at a plate of art with a fight running underneath
+     * it -- the one failure mode this screen can have that does not throw.
+     */
+    await expect(page.locator('#battlecover')).toBeHidden();
 
     const arena = await waitForLiveFrame(page);
     expect(arena.meanLuminance, 'battle=1: centre-60% mean luminance').toBeGreaterThan(6);

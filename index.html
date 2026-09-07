@@ -457,6 +457,55 @@
     </div>
     <!-- END FISHING COVER -->
 
+    <!-- ===================== BATTLE COVER =====================
+         The beat between the ram and the arena.
+
+         Unlike the BATTLE block below it, this IS a card over a frozen world:
+         it goes up on contact, the world stops behind it exactly as it stops
+         behind the fishing cover, and three seconds later the fade takes the
+         player into the fight. See battlecover.ts for why the fight itself
+         must not freeze and why this must.
+
+         There is no close button and no Escape. A fight cannot be declined --
+         the same rule battleui.ts keeps for the fight proper -- so a screen
+         with a way out would be advertising a choice the game does not offer.
+
+         The sentence and the digit both ship EMPTY and are written by
+         battlecover.ts: the rules come off ROUNDS and HITS_TO_LOSE, and a
+         count typed here would be a second opinion about how long the beat
+         lasts. -->
+    <!-- BATTLE COVER -->
+    <div class="battlecover" id="battlecover" hidden aria-hidden="true">
+      <div class="battlecover__backdrop"></div>
+
+      <section
+        class="battlecover__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="battlecover-title"
+      >
+        <!-- A background rather than an <img>, for the fishing cover's reason:
+             the panel's own aspect ratio decides the crop, so the picture can
+             never push the count off the bottom of a short window. -->
+        <div class="battlecover__art" aria-hidden="true"></div>
+
+        <div class="battlecover__body">
+          <p class="battlecover__foe" id="battlecover-foe"></p>
+          <h2 class="battlecover__title" id="battlecover-title">ACTION STATIONS</h2>
+          <p class="battlecover__blurb" id="battlecover-blurb"></p>
+        </div>
+
+        <!-- Bottom-right, out of the text column and over the open water in
+             the plate, where the painting is quietest. aria-live so a screen
+             reader announces the count rather than leaving a player who cannot
+             see it waiting on nothing. -->
+        <div class="battlecover__clock" aria-live="polite">
+          <span class="battlecover__count" id="battlecover-count">3</span>
+        </div>
+      </section>
+    </div>
+    <!-- END BATTLE COVER -->
+
     <!-- ===================== SHOP =====================
          The chandlery. Outside .hud for the same reason the other two
          overlays are: .hud is pointer-events:none and this needs the pointer.
