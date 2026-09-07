@@ -213,9 +213,14 @@
             <span class="radar__fix-key">LAT</span>
             <span class="radar__fix-val" id="hud-lat">00.0&deg; N</span>
           </div>
+          <!-- Label over value, the same stack LAT and LON use either side of
+               it. It read value-then-label for as long as it sat above a
+               compass rose that gave the number its context; with the rose
+               gone it is one of three coordinate blocks and should be built
+               like the other two. -->
           <div class="radar__hdg">
+            <span class="radar__fix-key">HDG</span>
             <span class="hdg__value" id="hud-heading">000&deg;</span>
-            <span class="hdg__label">HDG</span>
           </div>
           <div class="radar__fix">
             <span class="radar__fix-key">LON</span>
@@ -247,81 +252,21 @@
           <span class="dbtn__glyph">&#9664;</span>
           <span class="dbtn__label">Port</span>
         </button>
-        <!-- The hole in the middle of the pad is the compass bezel. -->
-        <div class="dpad__hub">
-          <div class="compass" aria-hidden="true">
-            <!-- Fixed rose: rings, graduations, cardinal letters -->
-            <svg
-              class="compass__rose"
-              viewBox="0 0 100 100"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-              focusable="false"
-            >
-              <defs>
-                <radialGradient id="roseGlass" cx="50%" cy="34%" r="76%">
-                  <stop offset="0%" stop-color="#0e2536" stop-opacity="0.95" />
-                  <stop offset="62%" stop-color="#050b14" stop-opacity="0.95" />
-                  <stop offset="100%" stop-color="#02040a" stop-opacity="0.98" />
-                </radialGradient>
-              </defs>
+        <!-- The hole in the middle of the pad.
 
-              <circle cx="50" cy="50" r="48.5" fill="url(#roseGlass)" />
-              <circle class="rose__ring rose__ring--outer" cx="50" cy="50" r="48" />
-              <circle class="rose__ring" cx="50" cy="50" r="41" />
-              <circle class="rose__ring rose__ring--faint" cx="50" cy="50" r="30" />
+             It held a compass rose and needle for several revisions and now
+             holds nothing. At hub size the rose was about 50px across: its
+             graduations were sub-pixel, three of its four cardinal letters
+             were already hidden as unreadable, and the needle it carried
+             reported the same heading the radar panel prints as a number and
+             draws as a rotating plot. An instrument that has to be shrunk
+             past legibility to fit is not a small instrument, it is a
+             decoration in the way of the helm keys.
 
-              <!-- graduations every 15 degrees -->
-              <g class="rose__ticks">
-                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(0 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(15 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(30 50 50)" />
-                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(45 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(60 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(75 50 50)" />
-                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(90 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(105 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(120 50 50)" />
-                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(135 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(150 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(165 50 50)" />
-                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(180 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(195 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(210 50 50)" />
-                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(225 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(240 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(255 50 50)" />
-                <line class="tick tick--major" x1="50" y1="42" x2="50" y2="49.5" transform="rotate(270 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(285 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(300 50 50)" />
-                <line class="tick tick--mid" x1="50" y1="43.5" x2="50" y2="49.5" transform="rotate(315 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(330 50 50)" />
-                <line class="tick" x1="50" y1="44.5" x2="50" y2="49.5" transform="rotate(345 50 50)" />
-              </g>
-
-              <!-- cardinal labels -->
-              <g class="rose__labels" text-anchor="middle" dominant-baseline="central">
-                <text class="rose__label rose__label--n" x="50" y="36.5">N</text>
-                <text class="rose__label" x="63.5" y="50">E</text>
-                <text class="rose__label" x="50" y="63.5">S</text>
-                <text class="rose__label" x="36.5" y="50">W</text>
-              </g>
-            </svg>
-
-            <!-- Rotating needle. hud.ts sets style.transform = rotate(<heading>deg) -->
-            <div class="compass__needle" id="hud-compass-needle">
-              <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-                <polygon class="needle__north" points="50,13 55.5,50 50,56 44.5,50" />
-                <polygon class="needle__south" points="50,87 44.5,50 50,44 55.5,50" />
-                <circle class="needle__hub" cx="50" cy="50" r="4.2" />
-                <circle class="needle__hub-core" cx="50" cy="50" r="1.5" />
-              </svg>
-            </div>
-
-            <!-- Fixed lubber line on the bezel -->
-            <div class="compass__lubber"></div>
-          </div>
-        </div>
+             The cell stays, empty. It is what gives the D-pad its cross
+             shape, and the clear air in the middle is now the only thing
+             between four keys the player is pressing in a hurry. -->
+        <div class="dpad__hub" aria-hidden="true"></div>
         <button id="btn-right" class="dbtn dbtn--right" type="button" aria-label="Turn to starboard">
           <span class="dbtn__glyph">&#9654;</span>
           <span class="dbtn__label">Starboard</span>

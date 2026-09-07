@@ -140,13 +140,18 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   world is built from. Under it, a dial shows where the ship stands in its own
   solar day: noon at the top, the lit arc the hours the sun is above the
   horizon. It is not a clock the ship carries. Run east and the marker visibly
-  drives round it; run west and it stalls. Latitude, longitude and heading sit above the glass; the
+  drives round it; run west and it stalls. N, E, S and W ride the scope's rim
+  and turn with the bow, so reading `E` off the right-hand rim tells you east
+  is to starboard; north keeps a blue arrow and a letter twice the size of its
+  neighbours. Latitude, longitude and heading sit above the glass in three
+  matching blocks; the
   wind rides the rim as a warm arrow, signed on its tail with the same gust
   glyph the speed readout uses, so the two marks are legibly one subject.
   Speeds are whole knots — the tenth only ever flickered, and every readout on
-  the panel is spelled out: SPEED, WIND, POWER. The compass sits in
-  the middle of the helm pad, and the purse rides the telemetry panel in brass,
-  the one warm figure on a cold instrument.
+  the panel is spelled out: SPEED, WIND, POWER. The rose that used to sit in
+  the middle of the helm pad is gone — at hub size its graduations fell below a
+  pixel — and the scope's rim carries the direction instead. The purse rides
+  the telemetry panel in brass, the one warm figure on a cold instrument.
 
 ## Structure
 

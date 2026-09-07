@@ -118,6 +118,29 @@ body {
    Generic panel chrome
    ------------------------------------------------------------------- */
 
+/*
+ * How much of their authored size the two instrument panels are drawn at.
+ *
+ * 0.7 -- 30% off. Both are scaled rather than re-typed at smaller numbers,
+ * and that is the whole reason this is one property instead of forty. A
+ * telemetry panel is roughly a dozen font sizes, a ten-notch bar, a five-notch
+ * bar and two canvases; a radar panel is a scope, a dial and three coordinate
+ * blocks. Retyping all of it at 70% would be forty chances to round one figure
+ * the wrong way, and every one of them would have to be found again the next
+ * time the panels are resized.
+ *
+ * Scaling instead keeps every proportion the panels were designed with exactly
+ * as it was, and makes the next resize a single number. The cost is that the
+ * two canvases -- the radar scope and the time dial -- keep sizing their
+ * backing stores off `clientWidth`, which a transform does not change, so they
+ * are now drawn at about 1.4x the pixels they strictly need. That is
+ * supersampling rather than waste: they come out crisper, and neither is a
+ * measurable cost beside the globe.
+ */
+:root {
+  --panel-scale: 0.7;
+}
+
 .panel {
   position: absolute;
   background: var(--panel-bg);
@@ -208,9 +231,22 @@ body {
    Telemetry panel (top-left)
    ------------------------------------------------------------------- */
 
+/*
+ * Anchored at its own top-left corner, so the panel shrinks toward the corner
+ * of the screen it sits in rather than away from it and the `--hud-pad` gap
+ * survives the scaling.
+ *
+ * `hud.ts` publishes this panel's height as `--telemetry-h` for the dock
+ * underneath to hang off, and it measures with `getBoundingClientRect()` --
+ * which reports the VISUAL box, transform included. The dock therefore follows
+ * the panel down on its own; a ResizeObserver's own `borderBoxSize`, which
+ * ignores transforms, would not have.
+ */
 .panel--telemetry {
   top: var(--hud-pad);
   left: var(--hud-pad);
+  transform: scale(var(--panel-scale));
+  transform-origin: top left;
   /* Wide enough for the longest power tag, "IDLE - SOLAR CHARGING", beside
      its rate on one line. The panel is shrink-to-fit, so this is the floor
      that keeps the status line from wrapping under the bar. */
@@ -534,11 +570,30 @@ body {
   text-shadow: 0 0 11px var(--rsv-glow);
 }
 
-/* Five notches and a shorter rail than the power bar's seven: same idea,
-   visibly not the same instrument. */
+/*
+ * Five notches, HALF the length of the power bar above, and that is the whole
+ * point of the width below.
+ *
+ * The cell holds half a tank. Five notches stretched across the full width
+ * would draw a full cell as a full bar, so a glance would read 100% where the
+ * truth is 50% -- the one misreading this instrument exists to prevent. At
+ * half the length a notch here is the same size as a notch up there, both
+ * worth 10% of a tank, and a full cell reaches the middle of the panel because
+ * that is exactly how far its charge goes.
+ *
+ * The `- 1px` is that equality made exact rather than approximate. A power
+ * notch is `(W - 9 x 2px) / 10` wide; five notches and four gaps come to the
+ * same figure at a width of `W/2 - 1px`. Without it the two bars' notches
+ * differ by a fifth of a pixel, which is invisible -- but a bar whose whole
+ * job is to be read against its neighbour should be right, not nearly right.
+ *
+ * Left-aligned, because "half as long" only reads as half if both bars start
+ * at the same edge.
+ */
 .rsv__bar {
   display: flex;
   gap: 2px;
+  width: calc(50% - 1px);
   height: 5px;
   margin: 4px 0 1px;
 }
@@ -561,9 +616,13 @@ body {
    Radar (top-right) — surface plot, painted by radar.ts
    ------------------------------------------------------------------- */
 
+/* Top-RIGHT origin, for the same reason the telemetry panel takes top-left:
+   each shrinks toward the corner it is pinned to. */
 .panel--radar {
   top: var(--hud-pad);
   right: var(--hud-pad);
+  transform: scale(var(--panel-scale));
+  transform-origin: top right;
   padding: 11px 12px 12px;
   display: flex;
   flex-direction: column;
@@ -645,6 +704,9 @@ body {
  * PANEL and not merely placed between its neighbours -- LAT and LON are
  * different widths, and under space-between that difference would show up as
  * an off-centre heading directly under a centred title.
+ *
+ * All three cells are now built the same way -- key over value, centred -- so
+ * `.radar__fix` and `.radar__hdg` differ only in the size of their figure.
  */
 .radar__head {
   align-self: stretch;
@@ -688,152 +750,44 @@ body {
 
 .radar__hdg {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.2;
 }
 
 
 /* ---------------------------------------------------------------------
-   Compass instrument — lives in the hole in the middle of the D-pad
+   Heading — the middle block of the radar head
+
+   What is left of the compass. The rose and its needle lived in the hole in
+   the middle of the D-pad and have been taken out: at hub size the rose was
+   about 50px across, its graduations fell below a pixel, three of its four
+   cardinal letters were already hidden as unreadable, and the needle reported
+   the heading this number reports and the scope already draws. The scope's
+   own rim now carries N/E/S/W, which is the same reading at a size that can
+   be read.
    ------------------------------------------------------------------- */
 
-.compass {
-  position: relative;
-  /* Exactly its grid cell, so the widened gap stays visible as clear air all
-     the way around the bezel. */
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  box-shadow:
-    0 0 0 1px rgba(63, 224, 255, 0.35),
-    0 0 14px rgba(63, 224, 255, 0.22),
-    inset 0 0 16px rgba(0, 0, 0, 0.8);
-}
-
-.compass__rose,
-.compass__needle {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.compass__rose {
-  display: block;
-  border-radius: 50%;
-}
-
-.rose__ring {
-  fill: none;
-  stroke: rgba(63, 224, 255, 0.3);
-  stroke-width: 0.6;
-}
-
-.rose__ring--outer {
-  stroke: rgba(63, 224, 255, 0.6);
-  stroke-width: 1;
-}
-
-/* A 1.4/2.6 dash pattern on a 50px circle is a grey smear; drop it. */
-.rose__ring--faint {
-  display: none;
-}
-
-.tick {
-  stroke: rgba(63, 224, 255, 0.42);
-  stroke-width: 0.7;
-}
-
-.tick--mid {
-  stroke: rgba(63, 224, 255, 0.65);
-  stroke-width: 0.9;
-}
-
-.tick--major {
-  stroke: var(--cyan);
-  stroke-width: 1.5;
-}
-
 /*
- * At hub size the rose is about 50px across, so a 9-unit glyph lands near 4.5
- * device-independent pixels: unreadable, and enough of them to muddy the
- * ticks. Only north is kept, at a size that survives the reduction. Absolute
- * heading is read as a number on the radar panel.
+ * Magenta, with LAT and LON either side of it.
+ *
+ * It read cyan for as long as it was a heading standing over a compass rose,
+ * where the rose was the instrument and the number was its caption. It is now
+ * the middle of three coordinate blocks, and the three are one reading of
+ * where the ship is: the fix in two axes and the direction it is pointed.
+ * Magenta is the colour that fix has always been printed in -- and on the
+ * scope below it is own ship -- so the three blocks now agree with each other
+ * and with the blip they describe.
+ *
+ * Larger than its neighbours, because a heading is checked far more often than
+ * a latitude and the head row has the room.
  */
-.rose__label {
-  display: none;
-}
-
-.rose__label--n {
-  display: block;
-  fill: var(--magenta);
-  font-family: var(--font-mono);
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-}
-
-/* the needle: rotated by hud.ts via style.transform */
-.compass__needle {
-  transform: rotate(0deg);
-  transform-origin: 50% 50%;
-  will-change: transform;
-  filter: drop-shadow(0 0 6px rgba(63, 224, 255, 0.6));
-}
-
-.compass__needle > svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.needle__north {
-  fill: var(--cyan);
-}
-
-.needle__south {
-  fill: var(--magenta-dim);
-}
-
-.needle__hub {
-  fill: #061119;
-  stroke: var(--cyan);
-  stroke-width: 0.8;
-}
-
-.needle__hub-core {
-  fill: var(--magenta);
-}
-
-/* fixed index mark at 12 o'clock */
-.compass__lubber {
-  position: absolute;
-  top: -2px;
-  left: 50%;
-  width: 0;
-  height: 0;
-  transform: translateX(-50%);
-  border-left: 3.5px solid transparent;
-  border-right: 3.5px solid transparent;
-  border-top: 5.5px solid var(--magenta);
-  filter: drop-shadow(0 0 4px var(--magenta));
-}
-
 .hdg__value {
-  /* 16px: a fifth off the 20 it read at when it sat under the scope with the
-     range beside it. It is a heading above a compass rose, not the panel's
-     headline. */
   font-size: 16px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.08em;
-  color: var(--cyan);
-  text-shadow: 0 0 14px rgba(63, 224, 255, 0.6);
-}
-
-.hdg__label {
-  font-size: 9px;
-  letter-spacing: 0.24em;
-  color: var(--ink-mute);
+  color: var(--magenta);
+  text-shadow: 0 0 14px rgba(255, 79, 216, 0.5);
 }
 
 /* ---------------------------------------------------------------------
@@ -847,8 +801,10 @@ body {
   transform: translateX(-50%);
   display: grid;
   /* Key size is the original scaled by 0.75, so the whole control shrinks as
-     one piece. The gap is that 0.75 scale plus half again, which is what opens
-     up the middle cell far enough to seat the compass in it.
+     one piece. The gap is that 0.75 scale plus half again; it was widened to
+     open the middle cell up far enough to seat a compass in it, and it stays
+     widened now that the cell is empty, because the clear air between four
+     keys pressed in a hurry is worth as much as the instrument was.
 
      One source of truth: the label size below is derived from --key-size, so
      the longest word cannot outgrow its key at any viewport width. */
@@ -996,11 +952,18 @@ body {
   grid-row: 3;
 }
 
+/*
+ * The middle cell of the D-pad, now empty.
+ *
+ * It is kept rather than deleted because it is what holds the cross open: the
+ * grid is three columns by three rows and the four keys sit on the arms, so
+ * removing this would let the middle collapse and the keys close on each
+ * other. It stays transparent to the pointer, as it always was -- the hole in
+ * a helm pad must not be a fifth thing to press.
+ */
 .dpad__hub {
   grid-column: 2;
   grid-row: 2;
-  display: grid;
-  place-items: center;
   pointer-events: none;
 }
 
@@ -1008,10 +971,27 @@ body {
    Legend (bottom-left) — collapsible, no JS required
    ------------------------------------------------------------------- */
 
+/*
+ * Half size, text and all.
+ *
+ * Scaled rather than re-typed at smaller numbers, for the same reason the two
+ * instrument panels are: this box is four font sizes, a chevron, a grid gap
+ * and seven key caps with their own min-width and height, and halving all of
+ * it by hand is a dozen chances to round one figure wrong. It is also the one
+ * thing on the HUD a player reads once and then never again, which is exactly
+ * what should give up its space first.
+ *
+ * Anchored at its own bottom-left, so it shrinks toward the corner it is
+ * pinned to and the `--hud-pad` gap survives. The transform scales the hit
+ * area with the paint, so the `<details>` still opens and closes on the box
+ * the player can actually see.
+ */
 .legend {
   position: absolute;
   bottom: var(--hud-pad);
   left: var(--hud-pad);
+  transform: scale(0.5);
+  transform-origin: bottom left;
   pointer-events: auto;
   max-width: 240px;
   background: rgba(6, 14, 24, 0.5);
@@ -1103,7 +1083,7 @@ kbd {
   .panel--telemetry {
     min-width: 0;
   }
-  /* The compass now tracks its D-pad cell, so only the radar needs a cap. */
+  /* Only the radar needs a cap; nothing else on the HUD is a fixed disc. */
   .radar {
     width: 104px;
   }
@@ -1124,10 +1104,6 @@ kbd {
   }
   .hdg__value {
     font-size: 12.8px;
-  }
-  .hdg__label {
-    font-size: 8px;
-    letter-spacing: 0.18em;
   }
   /* The panel is content-width here, so the status line is what could widen
      it; trim the pair rather than let the tag and the rate crowd each other. */
@@ -1230,8 +1206,17 @@ kbd {
  */
 .dock {
   position: absolute;
-  top: calc(var(--hud-pad) + var(--telemetry-h, 232px) + 10px);
+  top: calc(var(--hud-pad) + var(--telemetry-h, 162px) + 10px);
   left: var(--hud-pad);
+  /* 15% off, keys and gaps together, anchored at the corner the panel above
+     it is anchored to. Scaled rather than re-typed for the same reason the
+     panels and the legend are: the three keys are a height, a padding, a font
+     size and a letter-spacing, each with a second value in the small-viewport
+     block, and trimming eight numbers by hand is eight chances to round one
+     the wrong way. The transform takes the hit area with it, so the keys are
+     still pressed on the box the player can see. */
+  transform: scale(0.85);
+  transform-origin: top left;
   display: flex;
   /* Rows now, because [SHOP] belongs under [FISH] rather than beside it: it
      is not a third thing the ship can do, it is what a berth adds. Stacking

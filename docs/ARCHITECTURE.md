@@ -286,7 +286,7 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | compass needle, speed, wind, gold, power, the backup cell, and the dock's three buttons; heading and lat/long live on the radar panel |
+| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's three buttons; heading and lat/long live on the radar panel |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
@@ -760,8 +760,8 @@ it as the truth. **The vectors are the truth; the angles are read off them.**
   number deciding which way the hull is shoved never passes through a chart.
 - Both re-orthogonalise against `position` after transporting. Rounding walks a
   tangent vector off the plane, and over a long passage it is visible.
-- `heading` and `bearing` survive as derived readings for the compass, the HUD
-  and the scope. They still spin at the pole. That is what a compass does there,
+- `heading` and `bearing` survive as derived readings for the HUD and the
+  scope. They still spin at the pole. That is what a compass does there,
   and it is now cosmetic.
 
 Measured over 90 s of simulation, bow rotation relative to the path with no helm
@@ -819,7 +819,33 @@ mask on the CPU — no second WebGL view, no draw calls, and no way for the scop
 to disagree with the world. The projection is azimuthal equidistant about the
 ship, so distance from the centre is true great-circle distance out to
 `RADAR_RANGE`, and the scope is bow-up: own ship sits at the centre pointing at
-12 o'clock and north swings round the rim.
+12 o'clock and the whole compass swings round the rim.
+
+**N, E, S and W ride just inside the rim, and they rotate with the bow.** That
+is the point of them on a bow-up display: a player reading `E` off the
+right-hand rim is being told east is to starboard, which is the question the
+instrument is actually being asked. A fixed ring of letters would be a
+north-up instrument's ring on a bow-up one, and would disagree with the terrain
+under it the moment the ship turned. **North's letter is drawn at twice the
+size of the other three** and keeps its arrow, pointing at it from inside, and
+both are **blue** — cyan is the instrument itself and magenta is own ship, so
+north needed a hue of its own.
+
+The letters are the one mark on the scope drawn in device pixels rather than in
+scope radii, because a glyph has a legible size of its own that the rest of the
+instrument's unit system cannot express. Same escape the wind's gust glyph
+makes, by the same route, and each is stroked with a dark halo first so it
+survives crossing a lit coastline.
+
+That pixel floor is also why neither north's letter nor its arrow sits at a
+fixed radius. On a 104px scope at 1x the floor holds each glyph at nearly a
+fifth of the scope's radius, so a double-size N placed where the other three go
+would have its top sliced off by the canvas edge — the canvas is exactly the
+disc, and there is no bezel to spill onto. `letterRadius` therefore treats the
+ring as a ceiling and pulls a glyph in only as far as it must, and the arrow is
+placed off the N's own inner edge rather than off a constant. On a large scope
+or any 2x display the floor stops binding and all four letters sit on the same
+ring.
 
 The per-pixel trig is precomputed once into three tables, because only the
 ship's `up`, `forward` and `starboard` change:
@@ -1088,7 +1114,7 @@ ring at 0 or treat a hit on the innermost ring as distance zero.
 the bow-up scope, or `CALM`) and breaks the `SPEED` row down into ground speed
 plus the wind's signed contribution, which is what makes the grip rule legible.
 The radar draws a rim arrow on the wind's *true* bearing in the **overlay**
-pass on the live frame, like the north mark — it is not attached to terrain, so
+pass on the live frame, like the cardinal ring — it is not attached to terrain, so
 the stale-raster-frame rule does not apply to it. `shipfx.ts` streams the flag
 along the **apparent** wind (true wind minus the hull's own motion, so a ship
 under way in a calm streams astern — it used to lean toward the bow, because the

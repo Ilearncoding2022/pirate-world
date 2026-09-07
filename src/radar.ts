@@ -105,12 +105,135 @@ const WIND_HALF_WIDTH = 0.05;
  * Wind arrow colour, deliberately the only warm thing on the scope.
  *
  * Every other hue here is already spoken for and already means something:
- * cyan is the instrument itself (rings, sweep, bezel), magenta is own ship and
- * north, mint is a berth. Weather is the one mark the player neither steers
- * nor steers by, so reading the scope should never have to begin with working
- * out which mark this is.
+ * cyan is the instrument itself (rings, sweep, bezel), magenta is own ship,
+ * blue is north and its four letters, mint is a berth. Weather is the one mark
+ * the player neither steers nor steers by, so reading the scope should never
+ * have to begin with working out which mark this is.
  */
 const WIND_FILL = 'rgba(255, 186, 84, 0.9)';
+
+/* ------------------------------------------------------------------ */
+/* The cardinal ring                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Colour of north, on the arrow and on its letter alike.
+ *
+ * Blue, and deliberately not the cyan the instrument itself is drawn in: at
+ * 0.85 alpha over a lit tube a second cyan mark would be read as part of the
+ * bezel. It is not magenta either, which is own ship's -- the blip at the
+ * centre and the fix printed above the scope are the same fact about where the
+ * player is, and north is a fact about the world.
+ *
+ * The arrow and the N are one mark in two parts and must never be told apart:
+ * the arrow says which way, the letter says which way is what.
+ */
+const NORTH_FILL = 'rgba(77, 124, 255, 0.95)';
+
+/** The other three, in the instrument's own cyan and quieter than north. */
+const CARDINAL_FILL = 'rgba(63, 224, 255, 0.7)';
+
+/**
+ * The four letters, in the order their bearings are generated below.
+ *
+ * They rotate with the plot, because the scope is bow-up: a player reading E
+ * off the right-hand rim is being told that east is to starboard, which is the
+ * question actually being asked of a bow-up display. A fixed ring of letters
+ * would be a north-up instrument's ring on a bow-up instrument, and would
+ * disagree with the terrain under it the moment the ship turned.
+ */
+const CARDINALS = ['N', 'E', 'S', 'W'];
+
+/**
+ * Where the letters sit, as a fraction of the scope's radius.
+ *
+ * 0.885 puts them inside the rim with their own height clear of it. They
+ * cannot go outside: the canvas is exactly the disc, so anything past 1 is
+ * cropped by the element rather than drawn on the bezel. `letterRadius` below
+ * treats this as a ceiling rather than a fixed figure, for exactly that
+ * reason.
+ */
+const CARDINAL_RADIUS = 0.885;
+
+/**
+ * How much bigger north's letter is than the other three.
+ *
+ * Double. North is the only one of the four a player actually navigates by --
+ * the other three are there so that the one they are looking for can be found
+ * without counting round the rim -- and at a glance the ring should answer
+ * "which way is north" before it answers anything else.
+ */
+const NORTH_LETTER_SCALE = 2;
+
+/**
+ * Half a letter's own height plus its halo, as a fraction of its font size.
+ *
+ * Used to keep each glyph inside the rim and to find where north's letter ends
+ * so the arrow can stop short of it. 0.5 is a cap height of about 0.7 em
+ * halved, the halo's half-width, and a pixel or two of air -- deliberately
+ * generous, because the cost of being wrong in one direction is a letter with
+ * its top sliced off by the canvas edge and in the other is a letter sitting a
+ * pixel further in than it had to.
+ */
+const CARDINAL_INSET = 0.5;
+
+/**
+ * The north arrow: how far it stops short of the N, how long it is and how
+ * wide at the base, all in scope radii.
+ *
+ * Wider and longer than it was. It is the mark that answers the scope's most
+ * asked question, and beside a letter now twice the size of its neighbours a
+ * thin dart read as an afterthought.
+ *
+ * Its position is DERIVED from the letter rather than fixed, because the
+ * letter's own position is derived from the scope's size: the pixel floor on
+ * the glyphs means north's letter reaches much further in on a small scope
+ * than on a large one, and an arrow pinned to a constant radius would tuck
+ * neatly under the N at one size and disappear behind it at another.
+ */
+const NORTH_ARROW_GAP = 0.035;
+const NORTH_ARROW_LENGTH = 0.19;
+const NORTH_ARROW_HALF_WIDTH = 0.085;
+
+/**
+ * Letter size in scope radii, and its floor in device pixels.
+ *
+ * Two numbers for the same reason the wind glyph has two: the scope runs from
+ * 118px to 158px across, where 0.115 radii is 6.8 to 9.1px, and a 7px letter
+ * over a terrain plot is a smudge. The floor wins at every size the panel
+ * actually uses; the radii figure is what keeps the ring sane if the scope is
+ * ever made much bigger. Both are device pixels, so a 2x display draws the
+ * same physical size at twice the samples.
+ */
+const CARDINAL_SIZE = 0.115;
+const CARDINAL_MIN_PX = 17;
+
+/**
+ * The radius a glyph of `px` device pixels may be centred on without any part
+ * of it crossing the rim.
+ *
+ * The floor in CARDINAL_MIN_PX is what makes this necessary rather than
+ * decorative: on a 118px scope at 1x it holds the letters at nearly a fifth of
+ * the scope's radius each, and north's -- twice that again -- would have its
+ * top sliced off by the canvas edge if it sat where the other three do. On a
+ * large scope, or any 2x display, the floor stops binding and this returns
+ * CARDINAL_RADIUS unchanged for all four.
+ */
+function letterRadius(px: number, R: number): number {
+  return Math.min(CARDINAL_RADIUS, 1 - (px * CARDINAL_INSET) / R);
+}
+
+/**
+ * The stack the letters are drawn in.
+ *
+ * Named here rather than typed at the call site because it has to match what
+ * `style.css` sets on the HUD -- `--font-mono` -- and a canvas cannot read a
+ * custom property. Two copies of a font stack is one more than ideal; the
+ * alternative is reading the computed style every frame for a string that
+ * never changes.
+ */
+const CARDINAL_FONT =
+  'ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace';
 
 /**
  * The gust glyph that sits on the arrow's tail, as SVG path data.
@@ -645,20 +768,70 @@ export function createRadar(
       }
     }
 
-    // ---- North mark: the scope is bow-up, so north swings with heading ----
-    // Drawn after the wind so that a wind blowing due north leaves the compass
-    // on top: the player can lose the weather behind a mark for a moment, but
-    // never the direction they navigate by.
+    // ---- The cardinal ring: N/E/S/W, and the arrow on north ---------------
+    //
+    // The scope is bow-up, so all five marks swing with the heading and every
+    // one of them goes through `scopeAngle`. Drawn after the wind, so that a
+    // wind blowing due north leaves the compass on top: the player can lose
+    // the weather behind a mark for a moment, but never the direction they
+    // navigate by.
     const northAngle = scopeAngle(0, ship.heading);
     const nx = Math.sin(northAngle);
     const ny = -Math.cos(northAngle);
+
+    // Both letter sizes, and where north's ends, are wanted before either the
+    // arrow or the ring is drawn: the arrow is placed off the N's inner edge,
+    // and the N's own radius depends on how big it came out.
+    const letterPx = Math.max(CARDINAL_MIN_PX, R * CARDINAL_SIZE);
+    const northPx = letterPx * NORTH_LETTER_SCALE;
+    const northRing = letterRadius(northPx, R);
+    const northInner = northRing - (northPx * CARDINAL_INSET) / R;
+
+    // The arrow, tucked under its own letter rather than reaching the rim as
+    // it used to. It points at the N and the two are one mark, but they are
+    // not one shape: the tip stops short of the letter so the pair reads as an
+    // arrow beside an N rather than as a single blue smudge.
+    const tip = northInner - NORTH_ARROW_GAP;
+    const base = tip - NORTH_ARROW_LENGTH;
+    const halfW = NORTH_ARROW_HALF_WIDTH;
     ctx.beginPath();
-    ctx.moveTo(nx * 0.995, ny * 0.995);
-    ctx.lineTo(nx * 0.80 - ny * 0.055, ny * 0.80 + nx * 0.055);
-    ctx.lineTo(nx * 0.80 + ny * 0.055, ny * 0.80 - nx * 0.055);
+    ctx.moveTo(nx * tip, ny * tip);
+    ctx.lineTo(nx * base - ny * halfW, ny * base + nx * halfW);
+    ctx.lineTo(nx * base + ny * halfW, ny * base - nx * halfW);
     ctx.closePath();
-    ctx.fillStyle = 'rgba(255, 79, 216, 0.85)';
+    ctx.fillStyle = NORTH_FILL;
     ctx.fill();
+
+    // The letters are drawn in DEVICE pixels rather than in scope radii. A
+    // glyph is the one mark on this instrument with a size of its own -- it
+    // has to stay legible while everything around it scales -- and the floor
+    // in CARDINAL_MIN_PX cannot be expressed in a unit system where 1 is the
+    // whole scope. The same escape the wind glyph makes, by the same route.
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.translate(R, R);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineJoin = 'round';
+    // A dark halo under each letter, because the ring crosses whatever the
+    // terrain plot put there -- a coastline, a peak, open water -- and a bare
+    // glyph over a lit shoreline is unreadable at exactly the moment it
+    // matters. Stroked before the fill so the halo sits behind its own letter.
+    ctx.strokeStyle = 'rgba(2, 10, 18, 0.85)';
+    for (let i = 0; i < CARDINALS.length; i++) {
+      const north = i === 0;
+      const px = north ? northPx : letterPx;
+      const ring = north ? northRing : letterRadius(px, R);
+      const a = scopeAngle((i * Math.PI) / 2, ship.heading);
+      const x = Math.sin(a) * ring * R;
+      const y = -Math.cos(a) * ring * R;
+      ctx.font = `700 ${px}px ${CARDINAL_FONT}`;
+      ctx.lineWidth = Math.max(2, px * 0.16);
+      ctx.strokeText(CARDINALS[i], x, y);
+      ctx.fillStyle = north ? NORTH_FILL : CARDINAL_FILL;
+      ctx.fillText(CARDINALS[i], x, y);
+    }
+    ctx.restore();
 
     // ---- Own ship, always dead centre and always pointing up --------------
     ctx.beginPath();

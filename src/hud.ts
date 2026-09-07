@@ -272,10 +272,12 @@ const PWR_SEGMENTS = 10;
 /**
  * Notches in the backup cell's bar. Five, not ten, on purpose.
  *
- * The cell holds half a tank, so five notches beside the tank's ten makes one
- * notch mean the same 10% on both bars — and the shorter rail is the first
- * thing that says this is not more of the reserve above it. `index.html` must
- * ship exactly this many segments.
+ * The cell holds half a tank, so five notches makes one notch mean the same
+ * 10% of a tank on both bars. `style.css` then draws this bar at half the
+ * power bar's length, which is what lets the two be read against each other at
+ * a glance: a full cell reaches the middle of the panel, because that is
+ * exactly how far its charge goes. `index.html` must ship exactly this many
+ * segments.
  */
 const RSV_SEGMENTS = 5;
 
@@ -428,7 +430,6 @@ export function createHud(wallet: Wallet): {
 
   // Looked up once; every writer tolerates a missing element.
   const writeHeading = textWriter(document.getElementById('hud-heading'));
-  const writeNeedle = transformWriter(document.getElementById('hud-compass-needle'));
   const writeSpeed = textWriter(document.getElementById('hud-speed'));
   const writeSpeedWind = textWriter(document.getElementById('hud-speed-wind'));
   // One modifier on the SPEED wrapper hides both the icon and the number,
@@ -484,11 +485,10 @@ export function createHud(wallet: Wallet): {
 
   return {
     update(ship: ShipState, energy: EnergyState, wind: WindState): void {
-      const headingDeg = ship.headingDeg;
-
-      writeHeading(`${formatHeading(headingDeg)}°`);
-      // The rose is fixed; the needle points where the ship is heading.
-      writeNeedle(`rotate(${headingDeg.toFixed(1)}deg)`);
+      // The heading as a number. It used to drive a compass needle in the
+      // D-pad's hub as well; that rose is gone, and the scope's own rim is
+      // what carries the direction now.
+      writeHeading(`${formatHeading(ship.headingDeg)}°`);
 
       // SPEED is GROUND speed -- what the player watches go past -- with the
       // engine's share subtracted out beside it. Printing engine speed here
