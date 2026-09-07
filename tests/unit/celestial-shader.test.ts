@@ -42,6 +42,38 @@ describe('celestial shaders', () => {
     expect(normalize(material.vertexShader)).toBe(normalize(fixture.moonVertexShader));
     expect(normalize(material.fragmentShader)).toBe(normalize(fixture.moonFragmentShader));
   });
+
+  it('the moon glow reuses the sun billboard rather than a copy of it', () => {
+    // Not a second golden. The point of the shared shader is that there is
+    // exactly ONE billboard in the file, and asserting the two strings are
+    // the same object's is what would actually catch someone forking it.
+    const group = createCelestial().group;
+    const sun = materialNamed(group, 'sun-disc');
+    const glow = materialNamed(group, 'moon-glow');
+    expect(glow.vertexShader).toBe(sun.vertexShader);
+    expect(glow.fragmentShader).toBe(sun.fragmentShader);
+  });
+
+  it('draws the moon halo with no core, so a crescent stays a crescent', () => {
+    // uCoreGain is the whole of what separates the two bodies' haloes: the
+    // sun gets its hard disc, the moon must not, or the glow would fill in
+    // the dark half of a phase the sphere behind it is drawing correctly.
+    const group = createCelestial().group;
+    expect(materialNamed(group, 'moon-glow').uniforms.uCoreGain.value).toBe(0);
+    expect(materialNamed(group, 'sun-disc').uniforms.uCoreGain.value).toBeGreaterThan(0);
+  });
+
+  it('keeps the moon halo at a tenth of the sun, and under the bloom line', () => {
+    const group = createCelestial().group;
+    const sun = materialNamed(group, 'sun-disc').uniforms;
+    const glow = materialNamed(group, 'moon-glow').uniforms;
+    // Peak brightness is core + corona at r = 0, where both terms are 1.
+    const sunPeak = sun.uCoreGain.value + sun.uCoronaGain.value;
+    const moonPeak = glow.uCoreGain.value + glow.uCoronaGain.value;
+    expect(moonPeak).toBeCloseTo(sunPeak * 0.1, 10);
+    // postfx.ts BLOOM_THRESHOLD. The sun is the only body allowed to glare.
+    expect(moonPeak).toBeLessThan(0.9);
+  });
 });
 
 describe('celestial placement', () => {
@@ -57,8 +89,14 @@ describe('celestial placement', () => {
     };
     expect(order('moon-disc')).toBeGreaterThan(-20);
     expect(order('sun-disc')).toBeGreaterThan(-20);
-    // And the clouds, at 2 + i, stay in front of both.
+    expect(order('moon-glow')).toBeGreaterThan(-20);
+    // And the clouds, at 2 + i, stay in front of all three.
     expect(order('moon-disc')).toBeLessThan(2);
     expect(order('sun-disc')).toBeLessThan(2);
+    expect(order('moon-glow')).toBeLessThan(2);
+    // The halo goes UNDER its own body, or it paints over the terminator.
+    expect(order('moon-glow')).toBeLessThan(order('moon-disc'));
+    // And over the sky dome at -10, or the dome's night veil sits on top.
+    expect(order('moon-glow')).toBeGreaterThan(-10);
   });
 });

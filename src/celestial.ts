@@ -37,6 +37,13 @@ const SUN_DISC_RADIANS = 0.03;
 /** How far the corona reaches past the core, as a multiple of the core radius. */
 const SUN_CORONA_SCALE = 3.0;
 /**
+ * Brightness of the sun's corona at the centre of the disc, where its falloff
+ * peaks. Named rather than inlined in the shader because the moon's glow is
+ * defined as a fraction of the sun's TOTAL, and that total is this plus
+ * `SUN_CORE_GAIN` -- see MOON_GLOW_GAIN.
+ */
+const SUN_CORONA_GAIN = 0.45;
+/**
  * Brightness of the sun's core.
  *
  * Over `postfx.ts`'s bloom threshold of 0.9 by construction, so the glare
@@ -61,10 +68,46 @@ const MOON_DISC_RADIANS = 0.026;
  * thing in this world allowed over that line; MOON_MAX_LUMA in the shader is
  * the hard guard, this is the value that keeps it from being reached.
  */
-const MOON_ALBEDO = new THREE.Color('#b4b8c4');
+const MOON_ALBEDO = new THREE.Color('#c6c2b2');
+
+/**
+ * Tint of the moon's glow: a silvery yellow-white.
+ *
+ * The same hue family as MOON_ALBEDO above, deliberately. A halo in a
+ * different colour from the body inside it does not read as that body's glow,
+ * it reads as a second object behind it -- so the disc was warmed off its old
+ * blue-grey at the same time this arrived, and the two move together.
+ */
+const MOON_GLOW_COLOR = new THREE.Color('#f6f2e2');
+
+/** The moon's glow, as a fraction of the sun's. A tenth, as asked for. */
+const MOON_GLOW_FRACTION = 0.1;
+
+/**
+ * Peak brightness of the moon's glow, at the centre of the halo.
+ *
+ * DERIVED from the sun rather than written down, because the whole
+ * specification is "a tenth of the sun": retuning either of the sun's two
+ * gains has to carry the moon with it, and a number typed here would quietly
+ * stop being a tenth the first time one of them moved.
+ *
+ * The sun's peak is its core and its corona summed at r = 0, where both terms
+ * are 1. A tenth of that is 0.215, which is comfortably under `postfx.ts`'s
+ * BLOOM_THRESHOLD of 0.9 -- so the glow is a glow and not a second sun, the
+ * same line MOON_MAX_LUMA holds for the disc.
+ */
+const MOON_GLOW_GAIN = (SUN_CORE_GAIN + SUN_CORONA_GAIN) * MOON_GLOW_FRACTION;
+
+/**
+ * How far the moon's halo reaches, as a multiple of the moon's disc radius.
+ *
+ * The sun's own SUN_CORONA_SCALE, so the two bodies wear haloes of the same
+ * relative size and only their brightness tells them apart.
+ */
+const MOON_GLOW_SCALE = SUN_CORONA_SCALE;
 
 /* ------------------------------------------------------------------ */
-/* The sun                                                             */
+/* The billboard both haloes are drawn with                            */
 /* ------------------------------------------------------------------ */
 
 /*
@@ -77,7 +120,7 @@ const MOON_ALBEDO = new THREE.Color('#b4b8c4');
  * disc stays resolution independent and its shader can be pinned by a golden
  * string test the way every other hand-written shader here is.
  */
-const SUN_VERTEX = [
+const GLOW_VERTEX = [
   'uniform float uSize;',
   'varying vec2 vQuad;',
   'void main() {',
@@ -90,53 +133,119 @@ const SUN_VERTEX = [
   '}',
 ].join('\n');
 
-const SUN_FRAGMENT = [
+/*
+ * One fragment shader for both haloes, and `uCoreGain` is what separates them.
+ *
+ * The sun sets it and gets a hard disc inside a wide falloff. The moon sets it
+ * to ZERO, which drops the core term entirely and leaves only the falloff --
+ * exactly what the moon wants, because the moon already draws its own body as
+ * a lit sphere, and a second bright disc behind that sphere would fill in the
+ * dark half and destroy the phase. A crescent has to stay a crescent with the
+ * glow on.
+ *
+ * Sharing the string rather than writing the moon a second one is deliberate:
+ * `celestial-shader.test.ts` pins this by golden, and two near-identical
+ * shaders would be two goldens free to drift apart.
+ */
+const GLOW_FRAGMENT = [
   'uniform vec3 uColor;',
   'uniform float uCoreEdge;',
   'uniform float uCoreGain;',
+  'uniform float uCoronaGain;',
   'varying vec2 vQuad;',
   'void main() {',
   '  float r = length(vQuad);',
   '  // Hard-edged disc, softened by about a sixth of its radius so it does',
-  '  // not crawl with aliasing as the camera turns.',
+  '  // not crawl with aliasing as the camera turns. Zero uCoreGain removes it.',
   '  float core = 1.0 - smoothstep(uCoreEdge * 0.84, uCoreEdge, r);',
   '  // Corona: a wide falloff that is gone before the corner of the quad, so',
   '  // the quad itself never shows.',
   '  float corona = pow(clamp(1.0 - r, 0.0, 1.0), 2.5);',
-  '  float amount = core * uCoreGain + corona * 0.45;',
+  '  float amount = core * uCoreGain + corona * uCoronaGain;',
   '  // Additive, so alpha is only a mask; the colour carries the brightness.',
   '  gl_FragColor = vec4(uColor * amount, clamp(amount, 0.0, 1.0));',
   '}',
 ].join('\n');
 
-function buildSun(): THREE.Mesh {
-  const coreRadius = Math.tan(SUN_DISC_RADIANS) * CELESTIAL_DISTANCE;
-
+/**
+ * A billboarded halo: `size` world units to the corner of the quad, with the
+ * hard core filling `coreEdge` of that radius.
+ *
+ * Shared by both bodies, so a change to how a halo is drawn cannot reach one
+ * and miss the other.
+ */
+function buildGlow(
+  name: string,
+  size: number,
+  coreEdge: number,
+  color: THREE.Color,
+  coreGain: number,
+  coronaGain: number,
+  renderOrder: number,
+): THREE.Mesh {
   const material = new THREE.ShaderMaterial({
     uniforms: {
-      uColor: { value: new THREE.Color('#fff4e4') },
-      uSize: { value: coreRadius * SUN_CORONA_SCALE },
-      uCoreEdge: { value: 1 / SUN_CORONA_SCALE },
-      uCoreGain: { value: SUN_CORE_GAIN },
+      uColor: { value: color },
+      uSize: { value: size },
+      uCoreEdge: { value: coreEdge },
+      uCoreGain: { value: coreGain },
+      uCoronaGain: { value: coronaGain },
     },
-    vertexShader: SUN_VERTEX,
-    fragmentShader: SUN_FRAGMENT,
+    vertexShader: GLOW_VERTEX,
+    fragmentShader: GLOW_FRAGMENT,
     transparent: true,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
-    // Left ON: the planet has to be able to eclipse the sun, which is the
+    // Left ON: the planet has to be able to eclipse either body, which is the
     // whole reason a sunset looks like one from the deck.
     depthTest: true,
   });
 
   // Corners at +-1, so the vertex shader's offset is in units of uSize.
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
-  mesh.name = 'sun-disc';
+  mesh.name = name;
   // Billboarded in the shader, so its object-space bounds say nothing about
   // where it lands on screen and Three's frustum test would cull it wrongly.
   mesh.frustumCulled = false;
-  mesh.renderOrder = -4;
+  mesh.renderOrder = renderOrder;
   return mesh;
+}
+
+function buildSun(): THREE.Mesh {
+  const coreRadius = Math.tan(SUN_DISC_RADIANS) * CELESTIAL_DISTANCE;
+  return buildGlow(
+    'sun-disc',
+    coreRadius * SUN_CORONA_SCALE,
+    1 / SUN_CORONA_SCALE,
+    new THREE.Color('#fff4e4'),
+    SUN_CORE_GAIN,
+    SUN_CORONA_GAIN,
+    -4,
+  );
+}
+
+/**
+ * The moon's halo: the same billboard with its core switched off.
+ *
+ * Sits at renderOrder -6, UNDER the moon's own sphere at -5, so the lit face
+ * paints over the middle of its own glow rather than under it. Both are
+ * centred on the same point, so Three's back-to-front sort cannot separate
+ * them and the order table in `sky.ts` is the only thing that decides.
+ *
+ * `uCoronaGain` is rewritten every frame from the phase -- see `update` -- so
+ * the value passed here is only what it starts at.
+ */
+function buildMoonGlow(): THREE.Mesh {
+  const discRadius = Math.tan(MOON_DISC_RADIANS) * CELESTIAL_DISTANCE;
+  return buildGlow(
+    'moon-glow',
+    discRadius * MOON_GLOW_SCALE,
+    1 / MOON_GLOW_SCALE,
+    MOON_GLOW_COLOR.clone(),
+    0,
+    MOON_GLOW_GAIN,
+    -6,
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -254,12 +363,17 @@ export function createCelestial(): Celestial {
   group.name = 'celestial';
 
   const sun = buildSun();
+  const moonGlow = buildMoonGlow();
   const moon = buildMoon();
   group.add(sun);
+  // Added before the sphere for readability only; renderOrder, not insertion
+  // order, is what actually decides which paints first. See buildMoonGlow.
+  group.add(moonGlow);
   group.add(moon);
 
   const sunUniforms = (sun.material as THREE.ShaderMaterial).uniforms;
   const moonUniforms = (moon.material as THREE.ShaderMaterial).uniforms;
+  const moonGlowUniforms = (moonGlow.material as THREE.ShaderMaterial).uniforms;
 
   return {
     group,
@@ -272,6 +386,23 @@ export function createCelestial(): Celestial {
       moon.position.copy(env.moonDirection).multiplyScalar(CELESTIAL_DISTANCE);
       moonUniforms.uSunDirection.value.copy(env.sunDirection);
       moonUniforms.uDayFactor.value = env.dayFactor;
+
+      /*
+       * The halo rides the body exactly, and its strength is the phase.
+       *
+       * Scaled by `moonIllumination` rather than held at MOON_GLOW_GAIN,
+       * because a glow is light coming off the lit face and a new moon has no
+       * lit face to give any. Left flat, the one night the moon is a dark
+       * disc would be the night it wore its brightest ring -- and it is the
+       * same number the sphere's own terminator is drawn from, so the halo
+       * cannot brighten while the crescent it surrounds thins.
+       *
+       * Not faded by `dayFactor`. At a tenth of the sun the halo is already
+       * far under a daylit sky and does not need a second control, and the
+       * pale daytime moon keeps the same faint ring it has at night.
+       */
+      moonGlow.position.copy(moon.position);
+      moonGlowUniforms.uCoronaGain.value = MOON_GLOW_GAIN * env.moonIllumination;
     },
   };
 }

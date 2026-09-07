@@ -338,8 +338,8 @@ function buildStars(): THREE.Points {
    * are the backdrop, so they go first and everything else is explicit about
    * sitting on top of them:
    *
-   *   starfield -20 | sky dome -10 | moon -5 | sun disc -4 |
-   *   atmosphere 0 | clouds 2 + i
+   *   starfield -20 | sky dome -10 | moon glow -6 | moon -5 |
+   *   sun disc -4 | atmosphere 0 | clouds 2 + i
    */
   points.renderOrder = -20;
   return points;
