@@ -1,6 +1,39 @@
 # Water, wake and terrain rendering — implementation plan
 
-Status: **approved, not started.**
+Status: **implemented**, and landed on `main`.
+
+This document is kept as the record of what was approved. Like
+`docs/WIND_PLAN.md`, it is deliberately NOT updated to follow later tuning —
+`docs/ARCHITECTURE.md` is the current truth. Five things it says turned out to
+be wrong, and they are worth knowing before trusting the rest:
+
+- **The fog density is wrong.** The plan specifies `0.8 / GLOBE_RADIUS`. At the
+  distances the orbital camera actually works at, that saturates and flattens
+  the ocean's whole depth palette into a pale sheet. The shipped value is
+  `2.0 / GLOBE_RADIUS` with a hard ceiling on the blend and a falloff with
+  camera altitude, because none of it works at all three framings otherwise.
+- **The GGX specular must be normalised, not capped.** The plan does not say
+  either way, and capping was tried first. Raw `D` peaks near 25 at the
+  near-field roughness, so clamping it flattens the top of the lobe rather than
+  narrowing it, and the near water turns into a white sheet. Dividing by the
+  peak is the fix, and the `PI` cancels.
+- **`WATER_DISPLACED` is vestigial.** The define is set on the patch material
+  and the seam exists in the vertex shader, but nothing branches on it. The
+  patch's normal runs through the same finite difference the sphere uses, which
+  is why this is harmless rather than a bug. Finish it or delete it.
+- **The "one line" file budgets were unrealistic.** Wiring a patch, a wake map
+  and a reflection cube into `globe.ts` and `main.ts` takes more than a line
+  each, and two streams each wanted their own parameter on `createGlobe`. They
+  go through a single water-plugin list instead.
+- **Cube mip sampling is not available.** These are legacy-GLSL shaders, which
+  compile as ES 1.00 even on WebGL2, so there is no texture-LOD extension. The
+  reflection cube is small enough to read as pre-blurred and is sampled flat.
+
+Two visual regressions reached the integration branch and were caught by
+comparing screenshots, not by any assertion: the fog above, and the specular
+above. Both passed a green build, every unit test and an empty console-error
+list. `docs/TESTING.md` records what that means for how much a green run is
+worth.
 
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially
