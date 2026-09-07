@@ -1499,8 +1499,13 @@ frozen world. The arena is a live scene, and the HUD would otherwise sit on
 top of it still reading the world: a scope plotting a coastline a hundred
 units from an arena that has no coast, a SPEED off a halted hull, a WIND
 nobody is sailing in. So `main.ts` puts `in-battle` on the document body and
-`style.css`'s BATTLE block hides the telemetry panel, the scope, the activity
-keys and the controls legend behind it.
+`style.css`'s BATTLE block hides the telemetry panel, the scope and the
+activity keys behind it.
+
+The controls guide used to be a fourth entry in that list. It is a pane of the
+Escape menu now and never on the HUD, so there is nothing to hide — and the
+menu itself cannot be over a fight either, because `canOpen` is false for the
+whole of one. See **One owner for the Escape key**.
 
 Two details are load bearing. The class is toggled from **inside the
 blackout's `onBlack`**, both ways, at the same point `inArena` flips: the swap
