@@ -27,7 +27,13 @@ import { createWaterReflectPlugin } from './waterreflect';
 import { createHazards } from './hazards';
 import { createWaterHazardPlugin } from './waterhazard';
 import { createBlackout } from './blackout';
-import type { HazardKind, ShipState } from './types';
+import { createAiBoats } from './aiboats';
+import { createAiHulls } from './aihulls';
+import { createBattleScene } from './battlescene';
+import { createBattleSim } from './battle';
+import { createBattleUi } from './battleui';
+import { lossGold, rollDrawGold, rollWinGold } from './bounty';
+import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, ShipState } from './types';
 import { GLOBE_RADIUS } from './geo';
 
 /*
@@ -193,6 +199,26 @@ async function startGame(): Promise<void> {
   // shader draws of a hazard comes through this one call.
   waterHazard.bind(hazards.state);
 
+  /*
+   * The raiders. Built from the same four things `hazards.ts` is, and for the
+   * same reasons: the height field they spawn over, the reachable-water mask
+   * that keeps one out of a lake, and the berths they are not allowed to rise
+   * inside.
+   *
+   * `onContact` is declared below and hoisted into here, exactly as `onSunk`
+   * is above it. It is the other callback in this file that rearranges the
+   * world rather than reporting on it, and it reaches every one of the battle
+   * modules built further down; nothing calls it until the frame loop runs, by
+   * which time all of them exist.
+   */
+  const aiBoats = createAiBoats({
+    terrain,
+    heightMap: globe.heightMap,
+    waterBodies: globe.waterBodies,
+    towns: globe.towns,
+    onContact,
+  });
+
   // The sheet a wreck happens behind. It owns nothing but its own element and
   // the promise that `onBlack` runs when the screen is actually opaque.
   const blackout = createBlackout();
@@ -250,6 +276,179 @@ async function startGame(): Promise<void> {
   const timeDial =
     timeDialCanvas instanceof HTMLCanvasElement ? createTimeDial(timeDialCanvas) : null;
   const postFx = createPostFx(renderer, quality);
+
+  /* ------------------------------------------------------------------ */
+  /* The battle                                                          */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * The four pieces of a cannon fight: the hulls on the water, the arena they
+   * are fought in, the ruleset, and the overlay it is fought through.
+   *
+   * `aiHulls` comes after `ship.ready` because it clones the loaded glTF; the
+   * clone shares geometry with the player's hull and owns its own materials,
+   * so the recolour and the rim patch can never reach the original. See **AI
+   * boats and the battle** in docs/ARCHITECTURE.md.
+   *
+   * Both are handed `postFx` for its `adopt` and nothing else. Every stock
+   * material either of them builds is built after the composer's first scene
+   * walk, so without it the arena's cannonballs and a raider's recoloured neon
+   * render unencoded and a stop too dark; this is the same call `main.ts`
+   * already makes for the player's own hull. The two modules install their
+   * shader patches BEFORE adopting, which is the ordering **Post-processing**
+   * in docs/ARCHITECTURE.md exists to protect.
+   */
+  const aiHulls = createAiHulls(scene, () => ship.cloneHull(), postFx);
+  const battleScene = createBattleScene(quality, postFx);
+  const battleUi = createBattleUi({ onContinue });
+
+  /*
+   * The fight in progress. Replaced wholesale at every contact rather than
+   * reset, which is why `battle.ts` has no reset to call: one sim is built per
+   * battle and thrown away with it, exactly as `fishing.ts` builds one sim per
+   * session.
+   *
+   * It is created here rather than left null so the frame loop's battle branch
+   * never has to test it. The branch is guarded by `battleUi.isOpen`, which is
+   * false until a real fight starts, so this first one is only ever read by
+   * the type checker.
+   */
+  let battleSim = createBattleSim();
+
+  /** The boat a fight is being fought with, and its hull, for the fade home. */
+  let contactBoat: AiBoat | null = null;
+  let contactHull: THREE.Object3D | null = null;
+  /*
+   * Where the two hulls came from, captured on the way in and used on the way
+   * out.
+   *
+   * The parent is READ rather than assumed. The player's hull is in `scene`,
+   * and the clone is in a group `aihulls.ts` owns rather than in the scene at
+   * all, so "put it back" cannot be written as `scene.add` twice. Asking the
+   * object where it came from is the version that is right for both, and stays
+   * right if either owner ever moves.
+   */
+  let playerHullHome: THREE.Object3D | null = null;
+  let contactHullHome: THREE.Object3D | null = null;
+
+  /**
+   * True from the instant the arena's own scene is the one being rendered.
+   *
+   * False for the whole of the first fade and true for the whole of the
+   * second, so the swap always happens under an opaque screen: on the way in
+   * the world renders frozen under the sheet until `onBlack` flips this, and
+   * on the way out the arena keeps rendering until `onBlack` flips it back.
+   */
+  let inArena = false;
+
+  /**
+   * Whether this fight's outcome has been rolled and paid.
+   *
+   * The roll happens the frame `outcome` first becomes non-null, NOT on
+   * CONTINUE, because the card has to print the gold and the power the player
+   * actually got. It is a latch rather than a test on `outcome` because
+   * `battle.ts` keeps the boats circling after the fight is decided, so the
+   * frame that ends it is followed by however many the player leaves the card
+   * up for.
+   */
+  let outcomeSettled = false;
+
+  /**
+   * The sun's elevation at the ship, right now, as every shader in the world
+   * measures it.
+   *
+   * Handed to the arena once, at the moment of contact, so a fight at dusk is
+   * a dusk fight and one at midnight is two neon hulls on black water. It is
+   * read at contact rather than each frame because `globe.update` does not run
+   * during a battle: `env` is frozen with the rest of the world, exactly as it
+   * is under the fishing card.
+   */
+  function solarElevation(): number {
+    return ship.state.up.dot(env.sunDirection);
+  }
+
+  /**
+   * A hull has touched the player's. Fired once, from `aiboats.ts`.
+   *
+   * The order is the fade's order, the same one `onSunk` keeps: everything
+   * that can be seen happening happens now, and everything that rearranges the
+   * world waits for the screen to be opaque. `battleUi.open` is what flips the
+   * frame loop onto its battle branch, and it is called synchronously here, so
+   * no frame ever sees a fight starting over a ship still making way.
+   */
+  function onContact(boat: AiBoat): void {
+    ship.halt();
+    contactBoat = boat;
+    battleSim = createBattleSim();
+    outcomeSettled = false;
+    battleUi.open(boat.kind);
+    blackout.run(() => {
+      contactHull = aiHulls.hullOf(boat);
+      playerHullHome = ship.object.parent;
+      contactHullHome = contactHull ? contactHull.parent : null;
+      battleScene.enter(ship.object, contactHull, solarElevation());
+      inArena = true;
+    });
+  }
+
+  /**
+   * Pays the fight out, once, the frame it is decided.
+   *
+   * Every figure is moved HERE and the card is handed what was actually taken,
+   * never what the table said: `wallet.lose` is best-effort by design, so a
+   * defeat against an empty purse takes nothing and the card says so rather
+   * than advertising a 500-gold loss the player never paid.
+   *
+   * `Math.random` rather than a seeded stream, on the same terms as the
+   * respawn heading in `onSunk`: the world's weather and its raiders replay,
+   * and what a fight happened to be worth does not.
+   */
+  function settleOutcome(outcome: BattleOutcome): void {
+    let gold = 0;
+    if (outcome === 'win') {
+      gold = rollWinGold(Math.random);
+      records.wallet.add(gold);
+    } else if (outcome === 'loss') {
+      energy.defeat();
+      gold = -records.wallet.lose(lossGold(records.wallet.gold));
+    } else {
+      energy.stalemate();
+      const swing = rollDrawGold(Math.random, records.wallet.gold);
+      if (swing >= 0) {
+        records.wallet.add(swing);
+        gold = swing;
+      } else {
+        gold = -records.wallet.lose(-swing);
+      }
+    }
+    // Last, so the card reads a wallet and a plant that have already moved.
+    battleUi.result({ outcome, gold, reserve: energy.state.reserve });
+  }
+
+  /**
+   * CONTINUE. The outcome is already paid; this only takes the player home.
+   *
+   * Both hulls go back to the parents they were taken from, the boat that
+   * started the fight is removed (which is what starts the grace period, so
+   * the other colour cannot ram a ship that has only just got the helm back),
+   * and the overlay closes. All of it inside `onBlack`: the world and the
+   * arena are two different scenes and the cut between them must never be
+   * seen.
+   */
+  function onContinue(): void {
+    blackout.run(() => {
+      if (playerHullHome) playerHullHome.add(ship.object);
+      if (contactHull && contactHullHome) contactHullHome.add(contactHull);
+      battleScene.exit();
+      if (contactBoat) aiBoats.remove(contactBoat);
+      contactBoat = null;
+      contactHull = null;
+      playerHullHome = null;
+      contactHullHome = null;
+      battleUi.close();
+      inArena = false;
+    });
+  }
 
   // The two overlays. Neither is a scene: they own their own DOM over the frozen
   // frame, and the only thing this file does for them is stop the world.
@@ -319,6 +518,15 @@ async function startGame(): Promise<void> {
   // account -- a disabled attribute is an affordance, never a lock.
   document.getElementById('btn-fish')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    // Nor during a cannon fight. docs/BATTLE_PLAN.md argues this guard is not
+    // needed, on the grounds that a fight opens synchronously from `onContact`
+    // and no contact can happen under an overlay -- both true, and both about
+    // the other direction. The battle overlay is a HUD over a live scene
+    // rather than a card over a frozen one, so the telemetry panel and its two
+    // keys are still on screen and still pressable underneath it; and the
+    // battle branch is tested FIRST, so a cover screen opened over a fight
+    // would never be ticked and never be closed. The same guard is on [SHOP].
+    if (battleUi.isOpen) return;
     // Not while a maelstrom has the hull. An overlay freezes the world, and
     // the hull in a spiral is not the player's to freeze: opening one mid-
     // capture would halt a ship that is being carried, and the wreck would
@@ -334,6 +542,7 @@ async function startGame(): Promise<void> {
   // construction.
   document.getElementById('btn-shop')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (battleUi.isOpen) return;
     if (hazards.state.phase !== 'free') return;
     if (energy.state.mode !== 'docked') return;
     // The hull is already stopped -- a berth is a two-second dwell -- but the
@@ -377,6 +586,10 @@ async function startGame(): Promise<void> {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, quality.pixelRatioCap));
     postFx.resize(window.innerWidth, window.innerHeight);
     view.resize(window.innerWidth / window.innerHeight);
+    // The arena's camera is deliberately NOT resized here. It is alive only
+    // under the battle branch, and `battlescene.ts` takes its own aspect off
+    // the window inside its `update` for that reason: one owner, and no way
+    // for this handler and that one to disagree about the framing.
   }
   window.addEventListener('resize', onResize);
 
@@ -447,29 +660,163 @@ async function startGame(): Promise<void> {
   const _forceCentre = new THREE.Vector3();
   const _forceNorth = new THREE.Vector3();
 
-  function releaseForcedHazard(kind: HazardKind): void {
+  /**
+   * Walks `distance` along the bow and points the result back at the ship.
+   *
+   * Shared by the forced hazard and both forced boats, because all three want
+   * the same two things: a point a fixed distance dead ahead, and the tangent
+   * at that point which faces the hull. Writing it twice would be two great-
+   * circle steps free to disagree, which is the second-projection failure
+   * `radar.ts` spends a paragraph designing out.
+   *
+   * Returns false when the frame is degenerate, in which case nothing is
+   * forced this frame and the dev query simply does not fire.
+   */
+  function aimAtShip(distance: number): boolean {
     const pos = ship.state.position;
     const fwd = ship.state.forward;
     // A great-circle step along the bow, the same walk `ship.ts` makes: rotate
     // the position toward `forward` about their cross product.
     _forceAxis.crossVectors(pos, fwd);
-    if (_forceAxis.lengthSq() < 1e-12) return;
+    if (_forceAxis.lengthSq() < 1e-12) return false;
     _forceAxis.normalize();
-    _forceCentre.copy(pos).applyAxisAngle(_forceAxis, FORCE_DISTANCE / GLOBE_RADIUS).normalize();
+    _forceCentre.copy(pos).applyAxisAngle(_forceAxis, distance / GLOBE_RADIUS).normalize();
     // `north` is the direction of travel, so pointing it back at the ship is
     // what makes a forced crest actually arrive: the tangent at the centre
     // that faces the hull, which is the ship's position with the centre's own
     // radial component taken out of it.
     _forceNorth.copy(pos).addScaledVector(_forceCentre, -pos.dot(_forceCentre));
-    if (_forceNorth.lengthSq() < 1e-12) return;
+    if (_forceNorth.lengthSq() < 1e-12) return false;
     _forceNorth.normalize();
+    return true;
+  }
+
+  function releaseForcedHazard(kind: HazardKind): void {
+    if (!aimAtShip(FORCE_DISTANCE)) return;
     hazards.force(kind, _forceCentre, _forceNorth);
   }
 
+  /*
+   * `?boat=red|orange` and `?battle=1`, the two raider dev queries.
+   *
+   * Read through URLSearchParams and never through `import.meta.env.MODE`, on
+   * exactly the same terms as `?quality=` and `?hazard=` above: `vite preview`
+   * serves a genuine production build and both of these are meant to be used
+   * against one. An ordinary player's session sets no query, so nothing below
+   * ever fires for them.
+   *
+   * They exist because the spawn is a 8%-and-12%-per-ten-seconds draw. Waiting
+   * for one is a vigil rather than a test, and the budget in docs/TESTING.md
+   * does not have a vigil in it.
+   */
+  const battleParams = new URLSearchParams(window.location.search);
+  const boatQuery = battleParams.get('boat');
+  let forcedBoat: AiBoatKind | null =
+    boatQuery === 'red' || boatQuery === 'orange' ? boatQuery : null;
+  /** `?battle=1`: an orange boat put ON the hull, so the fight starts at once. */
+  let forcedBattle = battleParams.get('battle') === '1';
+  /** Seconds of sailing before either fires. The same beat the forced hazard waits. */
+  let boatCountdown = 3;
+
+  /**
+   * How far ahead `?boat=` puts its raider, world units.
+   *
+   * 45 is inside the scope's 50 and outside the red boat's own 40-to-60 spawn
+   * band's lower half, so the mark is on the plot from the first frame and the
+   * chase is still a chase. A boat spawned at its natural 60 would be
+   * invisible until it had already closed most of the way, which is the
+   * owner's intent in a real session and useless in a tuning one.
+   */
+  const BOAT_FORCE_DISTANCE = 45;
+
+  /**
+   * And how far ahead `?battle=1` puts its, world units.
+   *
+   * One unit: well inside `aiboats.ts`'s CONTACT_RADIUS, so the very next
+   * `aiBoats.update` registers the touch and the arena comes up without a
+   * chase in front of it. The fight is what this query is for.
+   */
+  const BATTLE_FORCE_DISTANCE = 1;
+
   const clock = new THREE.Clock();
+
+  /**
+   * Everything that stops a raider spawning, closing, or touching the hull.
+   *
+   * One verdict, computed here rather than inside `aiboats.ts`, because all
+   * three of its terms are owned by other modules: `energy.ts` owns the
+   * project's single definition of docked, `blackout.ts` owns whether a fade
+   * is running, and `hazards.ts` owns whether a maelstrom has the hull. A sim
+   * that re-derived any of them would be a second definition free to disagree.
+   *
+   * Overlays are not in it and do not need to be: the loop does not call
+   * `aiBoats.update` under one at all.
+   */
+  function suppressed(): boolean {
+    return energy.state.mode === 'docked' || blackout.active || hazards.state.phase !== 'free';
+  }
 
   function frame(): void {
     const dt = Math.min(clock.getDelta(), 0.1);
+
+    /*
+     * The battle branch, tested BEFORE the overlay branch.
+     *
+     * A fight and a card can never be up together -- a contact halts the ship
+     * and flips `battleUi.isOpen` synchronously, and no contact can happen
+     * under an overlay because the sim does not run there -- so the order is
+     * not a precedence rule. It is a statement about which of the two is the
+     * more specific state, and it puts the branch that renders a DIFFERENT
+     * SCENE first, where it cannot be reached by a reader who has already
+     * satisfied themselves that the frozen branch renders the world.
+     *
+     * Derived from `isOpen` each frame rather than latched, exactly as the
+     * overlays' freeze is: see **The pause contract** in docs/ARCHITECTURE.md.
+     * `battleUi.isOpen` is a live getter for that reason.
+     */
+    if (battleUi.isOpen) {
+      // The plant keeps running on a resting hull, for the fishing card's
+      // reasons: the sun is still up, the ship may be at a berth, and a fight
+      // is long enough that a tank frozen through one would be a lie about
+      // where the power went.
+      energy.update(dt, restingSnapshot(), env);
+      // Only once the arena is actually on screen. Through the first fade the
+      // world is still what is being drawn, and a fight that had started
+      // behind it would be a second of shooting the player never saw.
+      if (inArena) battleSim.update(dt, battleUi.input(controls.input));
+      // The frame the fight is decided, and only that frame. The card prints
+      // what was actually paid, so the money has to move before it is raised;
+      // see `settleOutcome`.
+      if (!outcomeSettled && battleSim.state.outcome !== null) {
+        outcomeSettled = true;
+        settleOutcome(battleSim.state.outcome);
+      }
+      // Both keep running after the outcome: `battle.ts` goes on circling the
+      // boats and flying the balls, so the result card sits over a live scene
+      // rather than over a freeze-frame.
+      battleScene.update(dt, battleSim.state);
+      battleUi.update(battleSim.state);
+      hud.update(ship.state, energy.state, wind.state);
+      // Redrawn but not advanced, for the frozen branch's reason: `env` is not
+      // rewritten during a fight, so this repaints the same reading, and a
+      // canvas resized behind the overlay that is never drawn into is blank.
+      timeDial?.update(ship.state, env);
+      // The one thing this branch cannot share with the frozen one. That
+      // branch renders the world at dt 0 to hold a still frame; this renders a
+      // different scene through a different camera, and it renders it LIVE --
+      // the arena is the game while it is up.
+      postFx.render(
+        dt,
+        inArena ? battleScene.scene : scene,
+        inArena ? battleScene.camera : view.camera,
+      );
+      // Not optional, and for the frozen branch's reason: `zoomDelta`
+      // accumulates from the wheel whether anything reads it or not.
+      controls.endFrame();
+
+      requestAnimationFrame(frame);
+      return;
+    }
 
     // The world is frozen while either overlay is up. Derived from the overlays
     // themselves rather than latched at the call sites, because the fish book
@@ -527,6 +874,24 @@ async function startGame(): Promise<void> {
         forcedHazard = null;
       }
     }
+    // `?boat=` and `?battle=`, once, on the same beat. Both are false on every
+    // ordinary session. They run before `aiBoats.update` so the boat they
+    // force is transported and tested for contact on the very frame it lands,
+    // which is what makes `?battle=1` open the arena rather than merely put a
+    // hull on the water.
+    if (forcedBoat !== null || forcedBattle) {
+      boatCountdown -= dt;
+      if (boatCountdown <= 0) {
+        if (forcedBoat !== null && aimAtShip(BOAT_FORCE_DISTANCE)) {
+          aiBoats.force(forcedBoat, _forceCentre, _forceNorth);
+        }
+        if (forcedBattle && aimAtShip(BATTLE_FORCE_DISTANCE)) {
+          aiBoats.force('orange', _forceCentre, _forceNorth);
+        }
+        forcedBoat = null;
+        forcedBattle = false;
+      }
+    }
     // Hazards sit between the wind and the ship, for both of the wind's own
     // reasons: after the wind because a berth is shelter from rough water too
     // and `energy.ts` owns the one definition of docked, and before the ship
@@ -535,8 +900,19 @@ async function startGame(): Promise<void> {
     // below, after the hull has ridden it, so the sea on the GPU and the sea
     // the hull just climbed are one frame's numbers.
     hazards.update(dt, ship.state, energy.state, wind.state);
+    // Raiders sit between the hazards and the ship, and both sides of that are
+    // load bearing. After the hazards because a boat is suppressed while a
+    // maelstrom has the hull and it needs this frame's phase to know it.
+    // Before the ship because a contact has to halt the hull the same frame it
+    // happens: `onContact` calls `ship.halt()` and flips the overlay, and the
+    // `ship.update` below then runs on a hull that is already stopped.
+    aiBoats.update(dt, ship.state, energy.state, hazards.state, suppressed());
     ship.update(dt, controls.input, energy.state, wind.state, globe.waveOffsets, hazards.state);
     view.update(dt, ship.state, controls.input);
+    // After the ship and before `globe.update`: this only places and lights
+    // meshes from the state the sim wrote above, and nothing reads them until
+    // the render at the foot of the frame.
+    aiHulls.update(dt, aiBoats.state);
     globe.update(dt, env, wind.state, ship.state, view.camera);
     // Before postFx.render: it renders straight into its own cube target and
     // must restore the renderer's target before the visible frame draws, or
@@ -545,7 +921,7 @@ async function startGame(): Promise<void> {
     docks.update(dt, env, ship.state, energy.state);
     wake.update(dt, ship.state, env, renderer);
     hud.update(ship.state, energy.state, wind.state);
-    radar.update(dt, ship.state, wind.state, hazards.state);
+    radar.update(dt, ship.state, wind.state, hazards.state, aiBoats.state);
     // After globe.update, which is what writes `env.sunDirection`. Reading it
     // before would put the dial a frame behind the sky it is describing.
     timeDial?.update(ship.state, env);

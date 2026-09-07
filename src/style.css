@@ -18,6 +18,14 @@
   --ink: #cfeffb;
   --ink-mute: #6f93a6;
 
+  /* The two raiders, on the scope and on the battle strip. UI colours only:
+     the hulls' own neon is a separate pair of linear swatches in `aihulls.ts`,
+     for the reason §2.4 of ART-DIRECTION.md gives about magenta. Red is the
+     hunter and orange the one just passing through, which is the whole reading
+     the player takes off a mark at the edge of the scope. */
+  --red: #ff4a3c;
+  --orange: #ff9a3c;
+
   /* Money. Warm brass against the cold HUD, so a gold figure never reads as
      another instrument. It is the one warm colour on the panel, which is the
      whole point: see ART-DIRECTION.md on wood-and-brass against neon. */
@@ -2515,7 +2523,363 @@ kbd {
   position: fixed;
   inset: 0;
   z-index: 40;
+  /* The overlay is a HUD over a live scene, not a card in front of a frozen
+     one: it must not eat a click anywhere it has not drawn something. The two
+     buttons opt back in, exactly as `.dbtn` does inside `.hud`. */
   pointer-events: none;
+  font-family: var(--font-mono);
+  /* The foe's hue, defaulted so nothing is unpainted for the frame between
+     `open()` and the class landing. The two modifiers below are the only
+     writers of it, and every FOE-side rule reads it rather than a colour of
+     its own. */
+  --foe: var(--orange);
+}
+
+.battle[hidden] {
+  display: none;
+}
+
+.battle--red {
+  --foe: var(--red);
+}
+
+.battle--orange {
+  --foe: var(--orange);
+}
+
+/* ---- the strip ------------------------------------------------------- */
+
+/*
+ * Both lockers across the top, own ship left and the raider right.
+ *
+ * Two blocks pushed to the edges rather than a centred pair, because the
+ * question the strip answers is "who runs out first" and two columns that move
+ * with their content would make that comparison a reading exercise. The middle
+ * is deliberately empty: the arena's own action is under it.
+ */
+.battle__strip {
+  position: absolute;
+  top: var(--hud-pad);
+  left: var(--hud-pad);
+  right: var(--hud-pad);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* Floored at 12px, the same rule the fishing card's chrome keeps: a browser
+     minimum-font-size preference clamps anything under its floor anyway, so
+     asking for less only flattens the hierarchy on the machines that set one.
+     See **HUD text sizing** in docs/ARCHITECTURE.md. */
+  font-size: clamp(12px, 1.1vw, 14px);
+  letter-spacing: 0.14em;
+  font-variant-numeric: tabular-nums;
+}
+
+.bside {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  background: var(--panel-bg);
+  box-shadow: var(--panel-glow);
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+}
+
+.bside--you {
+  color: var(--cyan);
+}
+
+/* The raider's whole block takes its hue from the root's `--foe`, so red and
+   orange are one rule and cannot drift apart. */
+.bside--foe {
+  color: var(--foe);
+  border-color: color-mix(in srgb, var(--foe) 32%, transparent);
+}
+
+.bside__name {
+  font-weight: 700;
+  text-shadow: 0 0 12px currentcolor;
+}
+
+/* The two labels are said quietly: the figures beside them are the reading. */
+.bside__key {
+  color: var(--ink-mute);
+  letter-spacing: 0.18em;
+}
+
+.bside__rounds {
+  min-width: 2ch;
+  text-align: right;
+}
+
+.bside__pips {
+  display: flex;
+  gap: 4px;
+}
+
+/*
+ * One pip per hit a hull can take, filled as they land.
+ *
+ * A ring rather than a bar, because three of anything reads as a count and a
+ * bar reads as a continuum: the player has to know they are one hit from
+ * losing, not roughly two thirds of the way there.
+ */
+.bside__pip {
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentcolor;
+  border-radius: 50%;
+  opacity: 0.45;
+}
+
+.bside__pip--hit {
+  background: currentcolor;
+  opacity: 1;
+  box-shadow: 0 0 10px currentcolor;
+}
+
+/* ---- the hit flash --------------------------------------------------- */
+
+/*
+ * The frame's own edges, lit for a moment when own hull takes a ball.
+ *
+ * An inset shadow rather than a tinted overlay, so the middle of the picture
+ * (which is where both boats are) stays untouched and the cue arrives in
+ * peripheral vision. It is in the raider's colour rather than a generic red,
+ * because the thing that just hit the player is the thing the whole overlay is
+ * already colour-coded to.
+ *
+ * Opacity 0 with no animation running, so this element is inert until
+ * `battleui.ts` puts the class on it and completely gone again afterwards.
+ */
+.battle__hit {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  box-shadow: inset 0 0 clamp(40px, 9vw, 120px) color-mix(in srgb, var(--foe) 78%, transparent);
+}
+
+.battle__hit--on {
+  /* Named per state rather than toggled on a shared name: `battleui.ts`
+     restarts it by removing the class and forcing a reflow, and a name that
+     was already in force would not restart. */
+  animation: battle-hit 420ms ease-out 1;
+}
+
+@keyframes battle-hit {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* The same cue at half strength, for the reduced-motion block at the foot of
+   this section. Same duration and same shape: only the peak moves. */
+@keyframes battle-hit-soft {
+  0% {
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.5;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ---- the prompt ------------------------------------------------------ */
+
+/*
+ * The one line of instructions, under the strip, gone after the first shot.
+ *
+ * Centred and muted: it is the only text on this overlay the player is meant
+ * to stop reading, so it never earns the cyan the instruments are in.
+ */
+.battle__prompt {
+  position: absolute;
+  top: calc(var(--hud-pad) + 46px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  text-align: center;
+  font-size: clamp(12px, 1vw, 13px);
+  letter-spacing: 0.16em;
+  color: var(--ink-mute);
+}
+
+.battle__prompt[hidden] {
+  display: none;
+}
+
+/* ---- the FIRE key ---------------------------------------------------- */
+
+/*
+ * Bottom centre, where the D-pad is in the world, and the same height as one
+ * of its keys: the thumb that was steering is the thumb that fires, and it
+ * should not have to go looking.
+ *
+ * Wider than it is tall because it carries a word rather than a glyph, and
+ * because there is nothing beside it to collide with.
+ */
+.battle__fire {
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+
+  position: absolute;
+  bottom: calc(var(--hud-pad) + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: clamp(140px, 15vw, 186px);
+  height: clamp(42px, 4.5vw, 55.5px);
+
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: clamp(12px, 1.15vw, 15px);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em; /* letter-spacing pads the right edge; put it back */
+  text-transform: uppercase;
+  color: var(--foe);
+
+  background: linear-gradient(180deg, rgba(40, 18, 14, 0.72), rgba(10, 6, 12, 0.72));
+  border: 1px solid color-mix(in srgb, var(--foe) 40%, transparent);
+  border-radius: 9px;
+  box-shadow:
+    0 0 14px color-mix(in srgb, var(--foe) 22%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foe) 24%, transparent),
+    inset 0 -8px 16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px) saturate(1.2);
+  -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  transition:
+    transform 90ms ease,
+    box-shadow 130ms ease,
+    border-color 130ms ease;
+}
+
+.battle__fire:hover {
+  border-color: var(--foe);
+  box-shadow:
+    0 0 24px color-mix(in srgb, var(--foe) 42%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--foe) 34%, transparent),
+    inset 0 -8px 16px rgba(0, 0, 0, 0.45);
+}
+
+.battle__fire:active {
+  transform: translateX(-50%) translateY(2px) scale(0.975);
+}
+
+.battle__fire:focus {
+  outline: none;
+}
+
+.battle__fire:focus-visible {
+  border-color: var(--cyan);
+  box-shadow: 0 0 0 2px rgba(63, 224, 255, 0.45);
+}
+
+/* Taken away with the fight, when the result card replaces it. */
+.battle__fire[hidden] {
+  display: none;
+}
+
+/* ---- the result card ------------------------------------------------- */
+
+/*
+ * Over the live arena, not instead of it.
+ *
+ * Narrow, centred and translucent, so both hulls are still circling behind
+ * three lines of text. A card that covered the scene would make the end of a
+ * fight read as the game stopping, which is the one thing the arena's own
+ * camera was chosen to avoid.
+ */
+.battle__card {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(340px, 78vw);
+  padding: 18px 20px 16px;
+  text-align: center;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: rgba(4, 10, 18, 0.9);
+  box-shadow: var(--panel-glow);
+}
+
+.battle__card[hidden] {
+  display: none;
+}
+
+/* The verdict, in the HUD's display voice: wide tracking, no weight, one
+   word. The hue is the foe's, because who won is the same question as which
+   of the two colours the player is being told about. */
+.battle__title {
+  margin: 0 0 12px;
+  font-size: clamp(15px, 1.7vw, 20px);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  color: var(--ink);
+  text-shadow: 0 0 16px rgba(63, 224, 255, 0.25);
+}
+
+/* Money in brass, the one warm figure on a cold panel, exactly as the HUD's
+   GOLD row and the fishing card's total are. */
+.battle__gold {
+  margin: 0;
+  font-size: clamp(13px, 1.3vw, 16px);
+  letter-spacing: 0.14em;
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(255, 196, 77, 0.4);
+}
+
+/* Gold going the other way is still money and stays brass; only the glow is
+   dropped, so a loss reads as the same quantity rather than as a different
+   instrument. */
+.battle__gold--down {
+  color: var(--gold-dim);
+  text-shadow: none;
+}
+
+.battle__power {
+  margin: 6px 0 0;
+  font-size: clamp(12px, 1.05vw, 13px);
+  letter-spacing: 0.12em;
+  color: var(--ink-mute);
+}
+
+.battle__power[hidden] {
+  display: none;
+}
+
+.battle__continue {
+  margin-top: 16px;
+  width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .battle__fire {
+    transition: none;
+  }
+  /* `.battle__hit` is deliberately NOT switched off here. It is information
+     rather than decoration -- a player who has turned motion down still has to
+     be told they were hit -- and it animates opacity alone: nothing in it
+     moves, scales or parallaxes, which is what the preference is actually
+     about. Its peak is softened instead. */
+  .battle__hit--on {
+    animation-name: battle-hit-soft;
+  }
 }
 
 /* END BATTLE */

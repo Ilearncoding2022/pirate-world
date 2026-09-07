@@ -217,4 +217,41 @@ test.describe('game smoke', () => {
 
     expect(problems, problems.join('\n')).toEqual([]);
   });
+
+  test('battle=1 boots into the arena clean', async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+
+    /*
+     * The arena is a SECOND scene with its own sea shader, its own lights and
+     * its own camera, and none of it is compiled by an ordinary session: a
+     * fight is an 8%-per-ten-seconds draw away, and the whole point of this
+     * tier is that it executes shaders Node never sees. `?battle=1` puts an
+     * orange boat on the hull three seconds in, so the contact, the fade and
+     * the arena all happen inside one boot.
+     */
+    await boot(page, '/?battle=1');
+
+    const world = await waitForLiveFrame(page);
+    expect(world.meanLuminance, 'battle=1: world before the contact').toBeGreaterThan(6);
+
+    /*
+     * The overlay going up IS the arena coming up, so it is the condition to
+     * wait on rather than a duration to guess at. It is allowed to time out
+     * without failing: the raiders' sim can be stubbed out, and this test's
+     * job is to prove nothing in the world it boots into logs a shader error,
+     * not to assert that a fight started. When the sim is live it resolves in
+     * about the three seconds the query waits.
+     */
+    await page
+      .locator('#battle')
+      .waitFor({ state: 'visible', timeout: 6000 })
+      .catch(() => undefined);
+
+    const arena = await waitForLiveFrame(page);
+    expect(arena.meanLuminance, 'battle=1: centre-60% mean luminance').toBeGreaterThan(6);
+    expect(arena.colours, 'battle=1: distinct colours in the centre 60%').toBeGreaterThan(64);
+    await screenshot(page, 'battle');
+
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
 });

@@ -154,6 +154,63 @@ const MAELSTROM_ARC = 0.6;
 const MAELSTROM_SPIN = 1.6;
 
 /* ------------------------------------------------------------------ */
+/* Raiders                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The two AI boats, in the two UI colours `style.css` carries as `--red` and
+ * `--orange`.
+ *
+ * Written out here rather than read off a CSS custom property, on the same
+ * terms as every other colour in this file: the scope is drawn into a 2D
+ * canvas context that has no cascade to read, and a `getComputedStyle` per
+ * mark per frame would be the most expensive thing on the instrument. Keep
+ * these and the two custom properties in step; ART-DIRECTION.md §2.3 lists
+ * both.
+ *
+ * Both are UI colours and stay off in-world objects, exactly as §2.4 says of
+ * magenta. The hulls' own neon is a separate pair of LINEAR swatches in
+ * `aihulls.ts` and the two pairs are not interchangeable.
+ *
+ * Red is the hunter, orange is the one running a straight line past you. That
+ * is the whole reading a mark at the edge of the scope has to deliver, and it
+ * is why the two are a hue apart rather than two shades of a warning colour.
+ */
+const RED_BOAT_FILL = 'rgb(255, 74, 60)';
+const ORANGE_BOAT_FILL = 'rgb(255, 154, 60)';
+
+/**
+ * The outline under a raider's arrowhead.
+ *
+ * Own ship's blip carries a white hairline for the same reason: these are the
+ * marks that must be found over a lit coastline in the half second the player
+ * looks down, and a filled shape with no edge disappears into a beach.
+ */
+const BOAT_EDGE = 'rgba(255, 255, 255, 0.5)';
+
+/**
+ * The hull arrowhead, in scope radii, pointing at 12 o'clock.
+ *
+ * ONE shape, issued for own ship at the centre and for every raider out on the
+ * plot, because they are the same kind of thing and the scope has to say so:
+ * a raider drawn a shade smaller would read as further off than the projection
+ * had already placed it, and the player would be judging a closing distance
+ * against a mark that was quietly lying about it. Written as a path emitter
+ * rather than as four numbers copied twice for exactly that reason.
+ *
+ * It is issued under whatever transform is in force, so a raider is drawn by
+ * turning the canvas rather than by a second set of coordinates.
+ */
+function blipPath(ctx: CanvasRenderingContext2D): void {
+  ctx.beginPath();
+  ctx.moveTo(0, -0.115);
+  ctx.lineTo(0.072, 0.072);
+  ctx.lineTo(0, 0.03);
+  ctx.lineTo(-0.072, 0.072);
+  ctx.closePath();
+}
+
+/* ------------------------------------------------------------------ */
 /* The cardinal ring                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -616,7 +673,13 @@ export function createRadar(
     return cssSize;
   }
 
-  function update(dt: number, ship: ShipState, wind: WindState, hazards: HazardState): void {
+  function update(
+    dt: number,
+    ship: ShipState,
+    wind: WindState,
+    hazards: HazardState,
+    boats?: AiBoatState,
+  ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
 
@@ -784,13 +847,27 @@ export function createRadar(
      * `hazards.live` is at most three entries, so this loop is free; the
      * common case is that it is empty and nothing below runs at all.
      */
-    if (hazards.live.length > 0) {
-      hStb.crossVectors(ship.forward, ship.up);
-      if (hStb.lengthSq() > 1e-12) {
-        hStb.normalize();
-        hUp.copy(ship.up);
-        hFwd.copy(ship.forward);
+    /*
+     * The live frame, captured once for every mark that is placed from this
+     * instant rather than from the raster's.
+     *
+     * It was inside the hazard block while hazards were its only reader. The
+     * raiders read it too now, and both must be projected through ONE frame:
+     * two blocks each building their own from the same ship state would agree
+     * today and would be free to disagree the first time either was touched,
+     * which is the second-projection failure the town icons' comment above
+     * spells out at length.
+     */
+    hStb.crossVectors(ship.forward, ship.up);
+    const liveFrame = hStb.lengthSq() > 1e-12;
+    if (liveFrame) {
+      hStb.normalize();
+      hUp.copy(ship.up);
+      hFwd.copy(ship.forward);
+    }
 
+    if (hazards.live.length > 0) {
+      if (liveFrame) {
         // Clipped to the bezel like the towns are: a crest crossing the rim is
         // drawn cut rather than spilling onto the panel around the scope.
         ctx.save();
@@ -865,6 +942,87 @@ export function createRadar(
         // the same contract the town block above relies on.
         ctx.restore();
       }
+    }
+
+    // ---- Raiders, from the LIVE frame -------------------------------------
+    /*
+     * The AI boats, drawn over the plot and over the crests, under the compass.
+     *
+     * Live, for the hazards' own reason and more so: a raider is a moving hull
+     * attached to nothing on the picture, and the one it is closing on is at
+     * the centre of the scope. A mark that lagged the bow through a turn would
+     * be lagging exactly when the player is turning to shake it.
+     *
+     * `boats` is optional so a hand-built call in a test, and the world before
+     * `aiboats.ts` has been wired, both draw a scope with no raiders on it
+     * rather than throwing. `live` is at most two entries, so this loop costs
+     * nothing and is empty on almost every frame of a run.
+     */
+    if (liveFrame && boats && boats.live.length > 0) {
+      // Clipped to the bezel, like the towns and the crests: a boat straddling
+      // the rim is drawn cut rather than spilling onto the panel around the
+      // scope.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.lineWidth = 0.9 / R;
+      ctx.strokeStyle = BOAT_EDGE;
+
+      for (let i = 0; i < boats.live.length; i++) {
+        const boat = boats.live[i];
+        if (!projectLive(boat.position)) continue;
+        const bx = hazPoint.x;
+        const by = hazPoint.y;
+
+        // The same envelope the hull's own neon and rim are lit by, so a boat
+        // arrives on the scope as it arrives on the water and leaves the same
+        // way. A hull fading out over its last second is not a contact any
+        // more, and the mark says so before it goes.
+        ctx.globalAlpha = boat.envelope < 0 ? 0 : boat.envelope > 1 ? 1 : boat.envelope;
+
+        /*
+         * Which way its bow points, measured between two world vectors rather
+         * than subtracted between two compass bearings.
+         *
+         * That is the project's own rule -- see **Frames, and where they stop
+         * working** in docs/ARCHITECTURE.md: the vectors are the truth and the
+         * angles are read off them. `boat.forward` is a tangent at the boat
+         * and this frame is a tangent at the ship, so resolving one against
+         * the other carries the small error of the arc between them; over the
+         * scope's half-radian that is a couple of degrees on a mark the size
+         * of the blip, and it costs two dot products instead of a second
+         * projection.
+         */
+        const f = hFwd.x * boat.forward.x + hFwd.y * boat.forward.y + hFwd.z * boat.forward.z;
+        const s = hStb.x * boat.forward.x + hStb.y * boat.forward.y + hStb.z * boat.forward.z;
+        const a = Math.atan2(s, f);
+
+        /*
+         * The blip's own outline, turned and moved.
+         *
+         * The path is built under the boat's transform and then filled with
+         * the transform put back, which is deliberate and is how Canvas2D
+         * works: path points are resolved against the matrix in force when
+         * each command is issued, while `lineWidth` is resolved at the stroke.
+         * Restoring first is therefore what keeps the hairline exactly the
+         * 0.9 device pixels own ship's carries, instead of the scope's radius
+         * multiplied by it.
+         */
+        const sinA = Math.sin(a);
+        const cosA = Math.cos(a);
+        ctx.save();
+        ctx.transform(cosA, sinA, -sinA, cosA, bx, by);
+        blipPath(ctx);
+        ctx.restore();
+        ctx.fillStyle = boat.kind === 'red' ? RED_BOAT_FILL : ORANGE_BOAT_FILL;
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Puts back the alpha, the line width and the clip together, the same
+      // contract the two blocks above rely on.
+      ctx.restore();
     }
 
     // ---- Wind arrow, on the true bearing, from the LIVE frame -------------
@@ -1018,12 +1176,9 @@ export function createRadar(
     ctx.restore();
 
     // ---- Own ship, always dead centre and always pointing up --------------
-    ctx.beginPath();
-    ctx.moveTo(0, -0.115);
-    ctx.lineTo(0.072, 0.072);
-    ctx.lineTo(0, 0.03);
-    ctx.lineTo(-0.072, 0.072);
-    ctx.closePath();
+    // The same shape every raider is drawn with, issued with no transform in
+    // force: see `blipPath`.
+    blipPath(ctx);
     ctx.fillStyle = '#ff4fd8';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
