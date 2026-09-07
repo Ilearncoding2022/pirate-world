@@ -16,7 +16,7 @@ Measured on the owner's machine, at the sizes and settings checked in:
 
 | Command | What it is | Cost |
 |---|---|---|
-| `npm test` | Unit tier. Node, no WebGL. | ~2 s, 59 tests |
+| `npm test` | Unit tier. Node, no WebGL. | ~2 s, 129 tests |
 | `npm run test:all` | Build, unit tier, browser tier. | ~51 s |
 | `npm run shots` | Screenshots only, no assertions. | ~29 s |
 | `npm run build` | Alone. | ~2 s |

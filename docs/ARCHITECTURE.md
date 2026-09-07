@@ -267,8 +267,9 @@ shader.
 | `hazardfield.ts` | `HAZARD_GLSL`, `hazardHeight(dir, hazards)`, `MAX_HAZARDS`, the crest/funnel sizes | the SECOND height field, beside `waveField` and never inside it: GLSL for three consumers and a float32 CPU port for the hull. Polynomial plus one `sqrt`, which is what makes its parity free — see **Hazards** |
 | `waterpatch.ts` | `createWaterPatch(water, quality)`, `WaterPatch` | ship-following grid that actually displaces in the vertex shader, reusing the sphere's already-assembled fragment shader byte for byte; built after the water plugins are woven in |
 | `grid.ts` | `createGrid()` | lat/long lines |
-| `sky.ts` | `createSky()` | atmosphere shell + starfield |
-| `daynight.ts` | `createDayNight()` | lights, writes `WorldEnv` |
+| `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
+| `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time |
+| `celestial.ts` | `createCelestial()` | the sun disc and the moon as things you can see; draws only what `daynight.ts` already decided and writes nothing |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
@@ -742,6 +743,59 @@ about two minutes, and full ahead west stretches it a long way without quite
 stopping the sun the way it used to. Only a shorter day, a slower ship or a
 larger `GLOBE_RADIUS` moves that ratio — the last because it slows the ship in
 degrees without slowing the sun.
+
+### The moon
+The moon is placed the same way and on its own period, not opposite the sun. It
+circles slightly slower than the sun does (`MOON_DAY_LENGTH`, derived so the sun
+gains exactly one lap per `MOON_MONTH_DAYS`), which is the whole mechanism: it
+rises later each night, it is sometimes up in daylight and sometimes gone by
+dark, and its phase is `(1 - dot(sunDirection, moonDirection)) / 2` — so a full
+moon is one that rises as the sun sets, by construction rather than by
+arrangement. The fill light follows that number, so a new moon, or a moon below
+the horizon, leaves the night hemisphere on the hemisphere light and the ambient
+floor alone. Nights are no longer interchangeable.
+
+Two constants exist only to stop degenerate openings. `MOON_PHASE_OFFSET` keeps
+the world from starting on a new moon beside a noon sun, the one arrangement in
+which there is nothing to see. And the sun's and moon's declinations run on
+6- and 5-day beats, so the two orbits are inclined to each other and exact new
+and exact full are never quite reached — the same reason eclipses are rare, and
+the reason `daynight-moon.test.ts` pins a swing rather than the endpoints.
+
+### The sky, and the two views it serves
+`sky.ts` draws a graded sky dome as well as the atmosphere rim shell, and the
+chase camera is a continuous wheel between the two views they each belong to: a
+deck under an atmosphere, and a planet in space. So they cross-fade over camera
+altitude, in opposite directions. Getting that wrong is not subtle — the shell
+is additive and sits exactly where the dome is brightest, and at noon the two
+summed past white and bleached the horizon.
+
+Every horizon effect in the dome is measured from the **limb**, not from eye
+level. On a globe this small they are nowhere near each other: 9.5 units above
+a radius-200 planet puts the horizon about 17° BELOW horizontal, and it drops
+further as the camera climbs. `limbElev` is recomputed per pixel from
+`cameraPosition`, and the gradient, the twilight band and the sun's glow lobe
+all key off `rayElev - limbElev`.
+
+### Draw order in the sky
+Everything in the sky is centred on the world origin, so Three's back-to-front
+distance sort sees it all at the same depth and `renderOrder` is the only thing
+holding the layering up. It is set explicitly, in one place per file:
+
+| Object | `renderOrder` |
+|---|---|
+| starfield (`sky.ts`) | -20 |
+| sky dome (`sky.ts`) | -10 |
+| moon (`celestial.ts`) | -5 |
+| sun disc (`celestial.ts`) | -4 |
+| atmosphere shell (`sky.ts`) | 0 |
+| cloud slices (`clouds.ts`) | 2 + i |
+
+The sun and the moon are deliberately NOT on `LAYER_REFLECTED`: they sit at
+8 × `GLOBE_RADIUS`, outside the reflection cube's 3 × far plane, and the water
+draws its own sun disc in the specular anyway. The sky dome IS on it, since a
+sea reflecting a dawn sky rather than a constant is most of what that pass is
+for.
 
 ## The boot, and the screen it happens behind
 `startGame()` is `async`, and the reason is not concurrency. Building the world
