@@ -269,7 +269,7 @@ shader.
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
 | `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS`, `START_ELAPSED` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time |
-| `celestial.ts` | `createCelestial()` | the sun disc and the moon as things you can see; draws only what `daynight.ts` already decided and writes nothing |
+| `celestial.ts` | `createCelestial()` | the sun disc, the moon and the moon's halo as things you can see; draws only what `daynight.ts` already decided and writes nothing |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
@@ -310,9 +310,9 @@ shader.
 | `fishcover.ts` | `createFishCover(deps)` | the activity screen [FISH] opens; holds the power gate, and picks the harbour or open-water plate off `energy.mode` at the moment it opens |
 | `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
 | `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers; `spend` is all-or-nothing for the shop and `lose` is best-effort for a defeat, which is not a purchase and must not be refused for an empty purse |
-| `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CAPACITY` | the bought backup cell; the only charge in the world nothing recharges |
+| `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CELL`, `BATTERY_CELLS_MAX`, `BATTERY_CAPACITY` | the bought backup cells; the only charge in the world nothing recharges |
 | `harpoons.ts` | `createHarpoonStore(initial)`, `HARPOON_BUNDLE`, `HARPOON_STORE_MAX`, `HARPOON_PER_SESSION_MAX` | the spare-harpoon locker, and its two different ceilings |
-| `shop.ts` | `createShop(deps)`, `BATTERY_PRICE`, `HARPOONS_PRICE` | the chandlery panel; the only place gold leaves the purse |
+| `shop.ts` | `createShop(deps, search)`, `BATTERY_PRICE`, `HARPOONS_PRICE`, `DEV_GOLD_GRANT`, `isDevMode` | the chandlery panel; the only place gold leaves the purse, and behind `?dev` the only place it is minted |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `blackout.ts` | `createBlackout()` | the fade a wreck happens behind, and both of a battle's; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
@@ -777,6 +777,23 @@ arrangement. The fill light follows that number, so a new moon, or a moon below
 the horizon, leaves the night hemisphere on the hemisphere light and the ambient
 floor alone. Nights are no longer interchangeable.
 
+The moon carries a **halo**, drawn with the same billboard as the sun's disc and
+separated from it by one uniform. `uCoreGain` is what makes the sun a hard disc
+inside a wide falloff; the moon sets it to **zero**, which drops the core term
+entirely and leaves only the falloff. That is not a saving, it is the
+requirement: the moon already draws its own body as a lit sphere, and a second
+bright disc behind that sphere would fill in the dark half and destroy the
+phase. A crescent has to stay a crescent with the glow on.
+
+Its peak brightness is derived rather than written down —
+`(SUN_CORE_GAIN + SUN_CORONA_GAIN) * 0.1`, a tenth of the sun's peak, which is
+0.215 and therefore comfortably under `postfx.ts`'s `BLOOM_THRESHOLD` of 0.9.
+Deriving it means retuning either of the sun's gains carries the moon with it
+instead of quietly ending the tenth. `uCoronaGain` is then scaled every frame by
+`env.moonIllumination`, because a glow is light coming off the lit face and a new
+moon has no lit face to give any — left flat, the one night the moon is a dark
+disc would be the night it wore its brightest ring.
+
 Two constants exist only to stop degenerate openings. `MOON_PHASE_OFFSET` keeps
 the world from starting on a new moon beside a noon sun, the one arrangement in
 which there is nothing to see. And the sun's and moon's declinations run on
@@ -808,10 +825,15 @@ holding the layering up. It is set explicitly, in one place per file:
 |---|---|
 | starfield (`sky.ts`) | -20 |
 | sky dome (`sky.ts`) | -10 |
+| moon glow (`celestial.ts`) | -6 |
 | moon (`celestial.ts`) | -5 |
 | sun disc (`celestial.ts`) | -4 |
 | atmosphere shell (`sky.ts`) | 0 |
 | cloud slices (`clouds.ts`) | 2 + i |
+
+The halo goes UNDER its own body on purpose. Both are centred on the same point,
+so the distance sort cannot separate them, and drawn the other way round the
+glow would paint over the terminator it is supposed to surround.
 
 The sun and the moon are deliberately NOT on `LAYER_REFLECTED`: they sit at
 8 × `GLOBE_RADIUS`, outside the reflection cube's 3 × far plane, and the water
@@ -1240,11 +1262,22 @@ nothing downstream assumes it is.
 names `daynight.ts` as its sole writer, and a second writer is a harder thing
 to give up than an extra argument.
 
-The three wave layers drift along `wind.direction` at 1.5 / 1.9 / 2.4 world
-units per second at `OCEAN_CAP`, and wave height runs as `strength²`, where
-`strength` is `seaWindStrength(speed)`. Height square, drift linear: a
-freshening wind lengthens the swell noticeably before it starts throwing it
-about.
+The three wave layers drift at 1.5 / 1.9 / 2.4 world units per second at
+`OCEAN_CAP`, and wave height runs as `strength²`, where `strength` is
+`seaWindStrength(speed)`. Height square, drift linear: a freshening wind
+lengthens the swell noticeably before it starts throwing it about.
+
+**The drift offset marches UPWIND, and that sign is the whole of which way the
+sea runs.** `waveField` in `waterglsl.ts` samples the noise at `p + offset`, so
+marching the offset one way slides the pattern the other: to make the crests
+travel downwind — the way a wind-driven sea moves, and the way
+`WindState.direction` points — the offset has to be integrated against
+`wind.direction`. It was added rather than subtracted until v0.11.0, which put
+the whole sea running into the weather that raised it. All three layers take the
+same sign, so they still travel together and the ratios between the three speeds
+are untouched, and `ship.ts` and `wavefield.ts` read the very same `Vector3`s
+through `Water.offsets`, so the hull and the CPU port of the field turn round
+with the shader rather than against it.
 
 **The sea is drawn four knots ahead of the weather.** `seaWindStrength` is
 `(speed + SEA_WIND_BIAS) / OCEAN_CAP`, clamped — so the 1 kn lull that
@@ -1514,6 +1547,21 @@ The split is the same one `hazards.ts` and `waterhazard.ts` keep. `aiboats.ts`
 is the sim and `aihulls.ts` is what puts meshes where it says; `battle.ts` is
 the ruleset and `battlescene.ts` is what draws it. Both sims are DOM-free and
 scene-free, which is what makes them the modules the unit tests exercise.
+
+### Both raiders run at the same speed
+`RED_SPEED` and `ORANGE_SPEED` are both 15, against the player's `MAX_FORWARD`
+of 10. The aggressor is deliberately NOT the faster hull: what separates the two
+colours is intent, not pace. A red boat re-aims at the player every frame while
+an orange one runs a track drawn once and never revised, so red closes because
+it is pointed at you, not because it is quick.
+
+Both are still faster than the player, which is the load-bearing part — neither
+can be outrun in a straight line, so avoiding a fight has to be a **turn**. The
+escape survives the speed drop and gets easier in degree: at 15 kn against
+`RED_TURN_RATE`'s 35°/s the chaser's turning circle is about 25 units where it
+was 33, and its whole pursuit leg covers 75 to 120 units rather than 100 to 160.
+Any future item that lets the player simply outrun a raider deletes this
+arrangement rather than extending it — see `docs/SHOP_PLAN.md`.
 
 ### The beat before a fight
 A ram does not open the arena. It halts the ship, raises `battlecover.ts` and
@@ -1961,6 +2009,12 @@ bought anything, which is exactly what absent-means-zero gives back. Both
 fields are also clamped to their ceilings on the way in, because an edited
 file claiming 900 harpoons is the cheapest cheat there is.
 
+**The cell's range doubled without a bump either.** `reserve` is clamped on the
+way in to `BATTERY_CAPACITY * 100`, which went from 50 to 100 when the ship
+gained a second cell slot, so an old save's 0-50 is still a legal 0-100 value
+and needs no migration. The clamp reads the constant rather than a literal,
+which is the only reason that was free.
+
 **The cell is the only saved thing that moves continuously**, and it is why
 `battery.ts` notifies its subscribers on the *persisted* figure — whole percent
 of a main tank — rather than on every draw. Without that, a ship burning
@@ -1983,6 +2037,58 @@ from four), and the mock-ups won. The separator is written out by hand rather
 than through `toLocaleString`, which would print `12,400` here and `12.400` on
 a German machine: the HUD is one instrument in one language.
 
+
+## The chandlery
+`shop.ts` owns the panel, its own Escape and the only path by which gold leaves
+the purse. It knows nothing about who may open it: `main.ts` gates that on the
+berth and `hud.ts` dims the key when there is no berth to gate on.
+
+Every purchase is two all-or-nothing moves in a fixed order — test the goods,
+take the gold, hand the goods over — and the test runs BEFORE the wallet is
+touched. Both halves can refuse (a full store refuses a cell, a full locker
+refuses a bundle), and the order where the wallet went first would make a
+refusal on the second half mean gold spent on nothing.
+
+### Two cells, one price, and no top-up bargain
+`BATTERY_CELL` is what a purchase buys — half a main tank — and
+`BATTERY_CAPACITY` is what the ship can hold, derived as
+`BATTERY_CELL * BATTERY_CELLS_MAX`. They were the same number until the ship
+gained a second slot, and keeping them separate is what lets the HUD's bar, the
+save file's clamp and the shop's stock line all move together from one edit.
+
+`charge()` adds a fixed cell and clamps, rather than filling to capacity. That
+is not a detail: a `charge()` that topped up to the top would make the cheapest
+way to stay full a purchase every time a berth went past, which is the exact
+trap the single-cell version was written to avoid. Adding a fixed amount instead
+means a cell bought at 90% wastes the overflow, and the waste is the deterrent.
+
+### The dev gold button, and the trap it shipped with
+Behind `?dev` the panel grows a third control that is not an offer:
+`DEV_GOLD_GRANT` (10 000) straight into the wallet, per click. It is read
+through `URLSearchParams` and never through `import.meta.env.MODE`, on exactly
+the terms `?quality=` and `?hazard=` are read on — `vite preview` serves a
+genuine production build and these harnesses are meant to be used against one,
+so a MODE test would switch the button off in the very build it is wanted in.
+It is deliberately not routed through the purchase helper above: that helper
+exists to guarantee gold never leaves the purse for nothing, and this moves gold
+the other way, so it has neither half of that contract to honour.
+
+**It shipped visible to every player, and the cause is worth writing down.**
+`.shop__dev` sets `display: flex`, which **beats the UA's
+`[hidden] { display: none }`** — the same trap `.shop[hidden]` already carries an
+explicit guard against, and the fishing card before it. So the row rendered for
+everyone: `shop.ts` only writes the label and attaches the listener behind
+`?dev`, and what a player without the query actually got was an unlabelled box
+that did nothing when clicked. Any new rule that sets `display` on an element
+that is ever `hidden` needs the same guard in the same commit.
+
+The check that MISSED it asserted `element.hidden === true`. That property was
+set the whole time; it was the CSS ignoring it. **To prove something is not
+visible, ask the renderer** — `toBeHidden()`, `getComputedStyle(el).display`, or
+`offsetParent === null` — never the attribute, because the attribute was never
+the thing that was wrong. `tests/smoke/game.spec.ts` now asks all three, and the
+pair of tests there was confirmed to fail with the guard removed before being
+trusted.
 
 ## The ship model
 `assets/pirateship_beginner.glb` is built by `tools/build_ship.py` (headless

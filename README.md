@@ -94,7 +94,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   — and moonlight follows the phase, which means a new moon, or a moon below
   the horizon, is a genuinely darker night than the one before it. The world
   opens on a moon 80% lit and 38 degrees up, setting astern as the sun rises
-  ahead.
+  ahead. It carries a **halo** now, a silvery yellow-white a tenth as bright as
+  the sun's — enough to read as a light source rather than a painted disc, and
+  far enough under the bloom line that it can never be mistaken for a second
+  sun. The halo follows the phase, so a thin crescent wears a thin ring.
 - **A sky, from the deck.** Blue overhead and pale at the horizon by day, warm
   along the whole limb at dawn and dusk, and a thin navy veil at night that the
   stars and the moon still show through. Zoom out and it thins away, because at
@@ -158,8 +161,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   Only one of each colour is ever on the water, which is the real brake on it:
   what the odds actually buy is that the next one is up almost as soon as the
   last one has gone. There are two kinds. A **red** one spawns forty to sixty units
-  off on any bearing, runs at twice your top speed and comes straight for you,
-  and it has five to eight seconds to get there. It turns wide, so it can be
+  off on any bearing, runs half again your top speed — fifteen knots to your ten,
+  the same pace as the orange sort — and comes straight for you, and it has five
+  to eight seconds to get there. What makes it dangerous is that it is aimed,
+  not that it is quick. It still turns wider than you do, so it can still be
   shaken: put the helm hard over across its bow and it will overshoot, and when
   its clock runs out its light turns orange and it wanders off on a straight
   line like the other sort. An **orange** one never chases at all. It picks a
@@ -221,9 +226,14 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 - **The chandlery.** Alongside a berth, `[SHOP]` sells the two things gold is
   for. A **backup cell** at 1000 gold holds half a tank and is only ever drawn
   on once the main reserve is flat — no berth and no sunrise will put it back,
-  so it is a consumable wearing a battery's clothes. **Five spare harpoons** at
-  500 gold go into a locker that holds a hundred; a session may reach ten of
-  them, and only after its own ten are gone. Both survive a reload.
+  so it is a consumable wearing a battery's clothes. The ship stows **two** of
+  them, bought one at a time at the same price, so a full backup is a whole
+  tank's worth for 2000 gold. There is no bulk discount and no partial refill:
+  a cell bought at 90% wastes the overflow, which is what stops the cheapest way
+  to stay full being a purchase every time a berth goes past. **Five spare
+  harpoons** at 500 gold go into a locker that holds a hundred; a session may
+  reach ten of them, and only after its own ten are gone. Both survive a
+  reload.
 - **Fishing.** Anywhere on the globe, docked or not, day or night: press
   `[FISH]` and the world stops behind a cover screen with two ways in —
   START FISHING, and the FISHING RECORD. The screen knows where you are: tied
