@@ -165,7 +165,15 @@ const WAVE_AMPLITUDE = 0.1;
  * plays with its own `uWaveStrength`.
  */
 const NORMAL_STEP = 0.6;
-const NORMAL_STRENGTH = 3.0;
+/*
+ * Three was too much, measured by eye against `?battle=1`: at that
+ * exaggeration the fine octave's slopes are steep enough that the glint lobe
+ * lands on scattered single facets rather than on runs of them, and the sea
+ * reads as static. Read this together with SPEC_POWER above -- they are one
+ * decision written as two numbers, and moving either alone brings the specks
+ * back.
+ */
+const NORMAL_STRENGTH = 1.7;
 
 /**
  * Deep-water colours, taken from `water.ts`'s own ocean and deep bands so the
@@ -178,9 +186,24 @@ const SEA_DEEP = '#02101c';
 const SEA_SKY = '#3d74b4';
 const SEA_HORIZON = '#7ba4d4';
 
-/** Blinn-Phong glint, the same tight highlight `water.ts` runs at. */
-const SPEC_POWER = 300;
-const SPEC_STRENGTH = 1.1;
+/**
+ * Blinn-Phong glint.
+ *
+ * `water.ts` runs a highlight three times tighter than this and it is right to
+ * there, because the sea it runs it on is displaced geometry lit across a
+ * whole planet: the exponent picks out a glitter path and everything either
+ * side of it stays dark. Here the surface is one flat plane whose normal is
+ * exaggerated by NORMAL_STRENGTH, so an exponent that tight lights only the
+ * few facets that happen to align exactly and the sea comes out as white
+ * static -- thousands of isolated specks, no path through them. Broadening the
+ * lobe is what turns those specks back into water: the same total light, spread
+ * over the crests around each one instead of stopping at its edge.
+ *
+ * Tuned by eye against `?battle=1`, which is the only way this can be tuned;
+ * no test in this project asserts on how anything looks.
+ */
+const SPEC_POWER = 110;
+const SPEC_STRENGTH = 0.6;
 
 const SEA_VERTEX = [
   'varying vec3 vWorldPos;',

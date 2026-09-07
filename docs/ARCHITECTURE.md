@@ -1344,6 +1344,23 @@ is the sim and `aihulls.ts` is what puts meshes where it says; `battle.ts` is
 the ruleset and `battlescene.ts` is what draws it. Both sims are DOM-free and
 scene-free, which is what makes them the modules the unit tests exercise.
 
+### The world's instruments come down with the fade
+A battle is the one overlay in this project that is **not** a card over a
+frozen world. The arena is a live scene, and the HUD would otherwise sit on
+top of it still reading the world: a scope plotting a coastline a hundred
+units from an arena that has no coast, a SPEED off a halted hull, a WIND
+nobody is sailing in. So `main.ts` puts `in-battle` on the document body and
+`style.css`'s BATTLE block hides the telemetry panel, the scope, the activity
+keys and the controls legend behind it.
+
+Two details are load bearing. The class is toggled from **inside the
+blackout's `onBlack`**, both ways, at the same point `inArena` flips: the swap
+therefore happens on a screen that is already opaque, and hiding the
+instruments at `open()` instead would pop the whole HUD out in front of a
+player still looking at the sea. And the **helm keys stay**, dimmed rather
+than removed for port and starboard: W and S are the throttle on the circle,
+and on a touch device that pad is the only way to reach it.
+
 ### The player's real hull is reparented, not cloned
 For the length of a fight `ship.object` is a child of the **arena** scene, and
 `main.ts` moves it there and back inside the two blackout fades. It is the

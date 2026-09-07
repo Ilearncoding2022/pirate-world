@@ -388,6 +388,12 @@ async function startGame(): Promise<void> {
       contactHullHome = contactHull ? contactHull.parent : null;
       battleScene.enter(ship.object, contactHull, solarElevation());
       inArena = true;
+      // With the arena. The world's instruments are hidden from here rather
+      // than from `open()` so the change happens on a screen that is already
+      // opaque: hiding them the moment the fight was declared would pop the
+      // whole HUD out in front of a player who is still looking at the sea.
+      // See the `body.in-battle` block in `style.css` for what goes and why.
+      document.body.classList.add('in-battle');
     });
   }
 
@@ -447,6 +453,8 @@ async function startGame(): Promise<void> {
       contactHullHome = null;
       battleUi.close();
       inArena = false;
+      // And back, in the same breath and behind the same opaque screen.
+      document.body.classList.remove('in-battle');
     });
   }
 

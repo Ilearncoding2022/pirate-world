@@ -2882,6 +2882,47 @@ kbd {
   }
 }
 
+/* ---- the world's own instruments, while the fight is on -------------- */
+
+/*
+ * A battle is the one overlay in this project that is NOT a card over a frozen
+ * world: the arena is a live scene of its own, and the HUD sits on top of it
+ * rather than behind it. So every instrument that reads the world has to go,
+ * because each of them is now describing somewhere the player is not. The
+ * scope is the clearest case, plotting a coastline a hundred units from an
+ * arena that has no coast, but the telemetry panel is no better: its SPEED is
+ * a halted hull's, its WIND is weather nobody is sailing in, and its POWER is
+ * a tank quietly taking on sun while two ships shoot at each other.
+ *
+ * `main.ts` puts this class on the body from inside the blackout's `onBlack`,
+ * both ways, so the instruments never visibly pop: the swap happens on a
+ * screen that is already opaque. That is also why this is a class on the body
+ * and not something `hud.ts` decides -- the moment is the fade's, not the
+ * HUD's.
+ */
+body.in-battle .panel--telemetry,
+body.in-battle .panel--radar,
+body.in-battle .dock,
+body.in-battle .legend {
+  display: none;
+}
+
+/*
+ * The helm keys STAY, because two of them are the throttle.
+ *
+ * W and S change a boat's pace on the circle, and on a touch device those two
+ * keys are the only way to reach that -- hiding the pad would leave a phone
+ * player with FIRE and nothing else. Port and starboard have no meaning in an
+ * arena that steers itself, so they are dimmed and made unpressable rather
+ * than removed: taking two keys out of a four-key cross would move the other
+ * two under the thumb that is already reaching for them.
+ */
+body.in-battle .dbtn--left,
+body.in-battle .dbtn--right {
+  opacity: 0.22;
+  pointer-events: none;
+}
+
 /* END BATTLE */
 
 /* ============================================================
