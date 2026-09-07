@@ -86,17 +86,18 @@
 
         <!-- True wind. The arrow is bow-relative, matching the bow-up scope
              rather than the north-up compass, so it points where the wind is
-             pushing the hull. It ships calm because the sim does; hud.ts
-             reads that class back rather than assuming it. -->
+             pushing the hull. It ships blowing because the wind never drops
+             to nothing -- see LULL_SPEED in wind.ts -- and hud.ts reads that
+             class back rather than assuming it. -->
         <div class="readout">
           <span class="readout__key">WIND</span>
-          <span class="wnd wnd--calm" id="hud-wnd">
+          <span class="wnd wnd--blowing" id="hud-wnd">
             <span class="wnd__arrow" id="hud-wnd-arrow" aria-hidden="true">
               <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" focusable="false">
                 <polygon class="wnd__dart" points="50,8 80,92 50,70 20,92" />
               </svg>
             </span>
-            <span class="readout__val wnd__val" id="hud-wnd-value">CALM</span>
+            <span class="readout__val wnd__val" id="hud-wnd-value">1 kn</span>
           </span>
         </div>
 

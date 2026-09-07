@@ -698,10 +698,11 @@ export function createRadar(
      * ship swings and settles late, which is the reading a player would call
      * broken. The north mark below is live for exactly the same reason.
      *
-     * `bearing` holds its last value through a calm rather than going stale in
-     * some detectable way, so the calm has to be tested on `speed`, which
-     * `wind.ts` puts at exactly 0. Drawing the held bearing anyway would put a
-     * short arrow on the rim reporting a wind that is not blowing.
+     * The speed test is now only a guard against a zero-length arrow, not a
+     * calm: `wind.ts` floors the weather at LULL_SPEED and there is no longer
+     * a state in which nothing is blowing. It is kept because this file also
+     * runs against hand-built `WindState`s in the tests, and an arrow scaled
+     * off a zero speed is a division waiting to happen.
      */
     if (wind.speed > 0) {
       const windAngle = scopeAngle(wind.bearing, ship.heading);

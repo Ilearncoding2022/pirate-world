@@ -273,7 +273,7 @@ shader.
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
 | `energy.ts` | `createEnergy(towns, battery)` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` |
-| `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE` | calm/event weather; owns `WindState`; probes the shared height map for the coast |
+| `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast |
 | `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
 | `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
 | `wakemap.ts` | `createWakeMap(size, ribbonGeometry)`, `WakeMap`, `computeWakeFrame`, `createWakeFrame`, `projectToMapUV`, `WAKE_MAP_EXTENT`, `WAKE_HEIGHT_SCALE`, `WAKE_BREAKUP_GLSL` | renders the wake's foam/height/age into a small top-down render target every frame; see **Shader notes** for the channel layout |
@@ -976,9 +976,27 @@ the same terms as `EnergyState`: `ship.ts`, `hud.ts`, `radar.ts` and `shipfx.ts`
 all hold that one reference. Handing out a copy would leave them reading a wind
 that had stopped moving.
 
-**The state machine** alternates forever between a **calm** (3–15 s, speed
-exactly 0) and an **event** (5–30 s, one fixed bearing drawn uniformly per
-event). Speed during an event is `envelope × gust × cap`:
+**The wind never stops.** It alternates forever between a **lull** (3–15 s,
+speed exactly `LULL_SPEED` = 1.0 world units/s, which `hud.ts` prints as 1 kn)
+and an **event** (5–30 s, one fixed bearing drawn uniformly per event). A lull
+was a dead calm once, and two things follow from its no longer being one:
+
+- **`hud.ts` has no CALM state.** The WIND row has one appearance, always
+  carries a figure, and always points the arrow somewhere real; `.wnd--calm`
+  and its arrow-hiding rule are gone from `style.css`, and `index.html` ships
+  the row blowing. `radar.ts`'s `wind.speed > 0` test survives only as a guard
+  against a zero-length arrow in a hand-built `WindState`, not as a calm.
+- **A lull draws its own fresh bearing**, exactly as an event does. It used to
+  hold the last event's, because at zero speed nothing read the direction and
+  spinning the arrow through a dead calm would have reported weather that was
+  not there. Now the reverse is true: holding it would make every lull a weak
+  continuation of the gust before it, and the wind would only ever change
+  direction on the way *up*.
+
+`LULL_SPEED` is applied as a **floor on the finished speed**, not as an offset:
+`Math.max(LULL_SPEED, ramp × gust × cap)`. The top of the range is exactly
+where it was, and the fades at either end of an event no longer pass through
+zero. Speed during an event is otherwise `envelope × gust × cap`:
 
 - the **envelope** fades in over `FADE` (2 s) and out again, *clamped to a
   quarter of the event's own duration*. Without that clamp a 5 s event spends
@@ -1050,11 +1068,13 @@ a 90° shift moves the field by one frame's travel, 0.025 world units. The lake
 clock still works because `motion` is constant in time, so scaling an
 integrated offset is the same as integrating a scaled rate.
 
-Two floors, both deliberate departures from strict proportionality. Calms run
+Two floors, both deliberate departures from strict proportionality. Lulls run
 3–15 s, and a sea whose height and drift both go to zero is a mirror — which
 reads as a bug, not as weather. `CALM_DRIFT` (0.2) and `CALM_INTENSITY` (0.16)
-survive a calm, running on the last bearing the wind held, which is roughly
-what real swell does. Between those floors and a full gale the law is exact:
+keep the swell running through one, which is roughly what real swell does.
+They are named for a state the wind no longer has, and they still earn their
+place: at `LULL_SPEED` the wind's own contribution is a hundredth of the
+height, so these two are still what the sea is made of between gusts. Between those floors and a full gale the law is exact:
 half the wind gives 25.0% of the height. Coastal foam keeps its own fixed
 drift — surf runs onto the beach, not downwind.
 

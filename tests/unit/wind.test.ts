@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
-import { createWind, OCEAN_CAP } from '../../src/wind';
+import { createWind, LULL_SPEED, OCEAN_CAP } from '../../src/wind';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { createHeightMap } from '../../src/heightmap';
 import { latLonToDir, headingToForward } from '../../src/geo';
@@ -44,17 +44,27 @@ describe('wind', () => {
     const energy = energyState('drain');
     const dt = 0.05;
 
-    let sawPositiveSpeed = false;
+    let sawGust = false;
+    const bearings: number[] = [];
     for (let i = 0; i < 250 / dt; i++) {
       wind.update(dt, ship, energy);
       expect(wind.state.speed).toBeLessThanOrEqual(OCEAN_CAP + 1e-6);
-      expect(wind.state.speed).toBeGreaterThanOrEqual(0);
+      // The floor, and it is the whole point of LULL_SPEED: there is no calm
+      // any more, so nothing downstream ever sees a wind that is not blowing.
+      // `hud.ts` dropped its CALM state on the strength of this.
+      expect(wind.state.speed).toBeGreaterThanOrEqual(LULL_SPEED - 1e-6);
       expect(wind.state.direction.length()).toBeCloseTo(1, 6);
-      if (wind.state.speed > 0) sawPositiveSpeed = true;
+      if (wind.state.speed > LULL_SPEED * 2) sawGust = true;
+      if (i % 20 === 0) bearings.push(wind.state.bearing);
     }
-    // Over 250s of calm/event cycling (each phase at most 30s) there must
-    // have been at least one event.
-    expect(sawPositiveSpeed).toBe(true);
+    // A floor is not a flat line: over 250 s of cycling (each phase at most
+    // 30 s) the wind must still get up well past it.
+    expect(sawGust).toBe(true);
+    // And it must come round while it is quiet as well as while it blows --
+    // a lull draws its own bearing, so the compass cannot sit still for the
+    // length of the run.
+    const spread = Math.max(...bearings) - Math.min(...bearings);
+    expect(spread).toBeGreaterThan(1);
   });
 
   it('eases the push to zero once docked', () => {

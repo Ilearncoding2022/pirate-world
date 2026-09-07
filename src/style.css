@@ -495,27 +495,20 @@ body {
 /* ---------------------------------------------------------------------
    WIND — bow-relative arrow and true wind speed
 
-   One modifier class on .wnd carries the whole calm/blowing distinction, the
-   same trick .pwr uses for its four states: hud.ts writes one class and the
-   colour and the arrow follow, so the arrow can never still be pointing
-   somewhere while the text says CALM.
+   The row has ONE state. It used to have two, and .wnd--calm greyed the
+   figure and hid the arrow for the seconds between gusts; the wind is now
+   floored at 1 kn (LULL_SPEED in wind.ts) and never stops, so there is no
+   calm to draw and the modifier that drew it is gone with it.
    ------------------------------------------------------------------- */
 
 .wnd {
-  /* blowing: the base state, same cyan as the rest of the instrument, so
-     .wnd--blowing needs no rule of its own — it is the absence of --calm. */
+  /* blowing: the only state, and the same cyan as the rest of the instrument,
+     so .wnd--blowing needs no rule of its own. */
   --wnd-accent: var(--cyan);
   --wnd-glow: rgba(63, 224, 255, 0.45);
   display: flex;
   align-items: baseline;
   gap: 7px;
-}
-
-/* A calm is not an alarm — it recedes to the key colour rather than picking
-   up a warning hue, because nothing is wrong and nothing needs doing. */
-.wnd--calm {
-  --wnd-accent: var(--ink-mute);
-  --wnd-glow: transparent;
 }
 
 .wnd__arrow {
@@ -537,12 +530,6 @@ body {
 /* Points north at rotate(0), so hud.ts can hand it a bearing unaltered. */
 .wnd__dart {
   fill: currentColor;
-}
-
-/* Hidden, not removed: a calm must not reflow the row, and the transform
-   hud.ts left on the span stays valid for when the wind comes back. */
-.wnd--calm .wnd__arrow {
-  visibility: hidden;
 }
 
 /* Rides on .readout__val for size and tabular figures, and only recolours. */

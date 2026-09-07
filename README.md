@@ -82,16 +82,21 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the banks have flat bases, domed tops and real thickness at the horizon. How
   tall a bank builds varies from place to place, between two thirds and all of
   the deck's depth.
-- **Wind.** Gusts blow up on a random bearing, hold for five to thirty seconds
-  and drop away again, with calms between them. It is a real push, not a
-  number: just over a third of the wind's speed is added to your own, so 8
-  knots of engine under a 10 knot tailwind makes 11.5 over the ground — and a beam
-  wind carries you sideways off your course while the bow holds its heading.
-  The open ocean blows twice as hard as the shoreline, building over the first
-  40 units offshore, so hugging the coast is shelter and standing out to sea is
-  a gamble. A berth is dead calm. It raises the sea as well as pushing the
-  hull, so the water tells you what the weather is doing before the panel does.
-  The weather is seeded, so the same world always blows the same way.
+- **Wind.** It never stops. Gusts blow up on a random bearing and hold for five
+  to thirty seconds, and between them the wind falls away to a lull of a knot
+  rather than to nothing — a lull that draws its own fresh bearing, so the
+  weather comes round while it is quiet instead of only ever changing on the
+  way up. There is no CALM on the panel any more, because there is no calm:
+  the arrow always points at something. It is a real push, not a number: just
+  over a third of the wind's speed is added to your own, so 8 knots of engine
+  under a 10 knot tailwind makes 11.5 over the ground — and a beam wind carries
+  you sideways off your course while the bow holds its heading. The open ocean
+  blows twice as hard as the shoreline, building over the first 40 units
+  offshore, so hugging the coast is shelter and standing out to sea is a
+  gamble. A berth is still dead calm, and it is now the only place that is. It
+  raises the sea as well as pushing the hull, so the water tells you what the
+  weather is doing before the panel does. The weather is seeded, so the same
+  world always blows the same way.
 - **Ship wake** that follows the curve of the planet and fades behind you. It
   is drawn into the water rather than laid on top of it, so it tilts the
   surface and raises its own foam, and the foam sits still in the sea instead

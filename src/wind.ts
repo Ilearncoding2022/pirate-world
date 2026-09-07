@@ -51,11 +51,31 @@ export const OCEAN_CAP = 10.4;
  */
 export const OPEN_SEA_DISTANCE = 40;
 
-/** Event and calm durations, seconds. Drawn uniformly from each band. */
+/** Event and lull durations, seconds. Drawn uniformly from each band. */
 const EVENT_MIN = 5;
 const EVENT_MAX = 30;
-const CALM_MIN = 3;
-const CALM_MAX = 15;
+const LULL_MIN = 3;
+const LULL_MAX = 15;
+
+/**
+ * The floor under the wind, world units/s, which `hud.ts` reads out as 1 kn.
+ *
+ * The weather used to stop dead between events and the panel said CALM for
+ * anything up to fifteen seconds at a time. It does not any more: there is
+ * always a wind, it is always going somewhere, and the quiet part of the
+ * cycle is a LULL rather than a calm.
+ *
+ * One knot is deliberately the smallest thing the HUD can print. It is a
+ * tenth of the ocean cap and 0.35 of it reaches the hull, so it moves a
+ * drifting ship about a third of a knot -- felt over a minute, invisible over
+ * a second. What it buys is that nothing downstream ever has to special-case
+ * a wind that is not blowing: the arrow always points somewhere real, the sea
+ * always has a direction to run in, and a wave always has a way to travel.
+ *
+ * It is applied as a FLOOR rather than as an offset, so the top of the range
+ * is exactly where it was and only the bottom moved.
+ */
+export const LULL_SPEED = 1.0;
 
 /**
  * Seconds an event spends ramping in, and again ramping out.
@@ -243,11 +263,11 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
     state.bearing = normalizeAngle(bearing);
   }
 
-  // Open on a calm. The first thing a new player meets should be the sea as
+  // Open on a lull. The first thing a new player meets should be the sea as
   // the rest of the game already taught it, not a gust they have no name for.
   let inEvent = false;
   let phaseTime = 0;
-  let phaseDuration = CALM_MIN + rng() * (CALM_MAX - CALM_MIN);
+  let phaseDuration = LULL_MIN + rng() * (LULL_MAX - LULL_MIN);
   // Offset into the gust curve, redrawn per event so that two events of the
   // same length do not gust identically.
   let gustLane = rng() * 1000;
@@ -332,7 +352,20 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
         setDirectionFromBearing(rng() * TWO_PI, ship.position);
         gustLane = rng() * 1000;
       } else {
-        phaseDuration = CALM_MIN + rng() * (CALM_MAX - CALM_MIN);
+        phaseDuration = LULL_MIN + rng() * (LULL_MAX - LULL_MIN);
+        /*
+         * A lull draws its own bearing, exactly as an event does.
+         *
+         * It used to hold the last event's, because at zero speed nothing
+         * read the direction and spinning the HUD's arrow through a dead calm
+         * would have been reporting weather that was not there. Now there is
+         * always weather, so the reverse is true: holding the bearing would
+         * make every lull a weak continuation of the gust before it, and the
+         * wind would only ever change direction on the way UP. Drawing here
+         * is what lets it come round while it is quiet, which is what a real
+         * wind does.
+         */
+        setDirectionFromBearing(rng() * TWO_PI, ship.position);
       }
       // Guard against a carried-over remainder longer than the phase it lands
       // in, which would otherwise skip that phase whole on the next frame.
@@ -349,12 +382,13 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
       const n = gustNoise(phaseTime * GUST_RATE + gustLane, 0);
       const gust = GUST_FLOOR + (1 - GUST_FLOOR) * (n * 0.5 + 0.5);
 
-      state.speed = ramp * gust * state.cap;
+      // Floored, not offset: an event's own ramp passes through zero at each
+      // end, and without this the wind would still die for a second or two
+      // either side of every gust -- the exact thing the floor is here to
+      // stop. The cap and the gust shape above are untouched.
+      state.speed = Math.max(LULL_SPEED, ramp * gust * state.cap);
     } else {
-      // The bearing is left where the last event set it. Nothing reads it
-      // while the speed is zero, and rewriting it would spin the HUD's arrow
-      // through a calm, which looks like weather that is not there.
-      state.speed = 0;
+      state.speed = LULL_SPEED;
     }
 
     // ---- Carry the wind across the ship's own motion ----------------------

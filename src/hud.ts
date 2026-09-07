@@ -491,14 +491,14 @@ export function createHud(wallet: Wallet): {
       writeSpeedWind(share);
       writeSpdState(share === '' ? 'calm' : 'wind');
 
-      // A calm holds its last bearing rather than clearing it, so the arrow is
-      // hidden by the class instead of being pointed anywhere, and its
-      // transform is left alone: nothing to write for the seconds between
-      // events, and the direction is already correct when one begins.
-      const blowing = wind.speed > 0;
-      writeWndState(blowing ? 'blowing' : 'calm');
-      writeWndValue(blowing ? formatSpeed(wind.speed) : 'CALM');
-      if (blowing) writeWndArrow(`rotate(${windArrowDeg(wind, ship).toFixed(1)}deg)`);
+      // There is no calm any more -- `wind.ts` floors the weather at LULL_SPEED
+      // -- so this row has one state and always carries a real figure and a
+      // real bearing. The modifier is still written rather than dropped
+      // because the markup ships it and `modifierWriter` reads that back; it
+      // costs one comparison a frame and nothing after the first.
+      writeWndState('blowing');
+      writeWndValue(formatSpeed(wind.speed));
+      writeWndArrow(`rotate(${windArrowDeg(wind, ship).toFixed(1)}deg)`);
 
       writeLat(formatLat(ship.latDeg));
       writeLon(formatLon(ship.lonDeg));
