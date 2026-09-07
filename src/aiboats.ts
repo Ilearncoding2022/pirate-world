@@ -79,20 +79,26 @@ export interface AiBoats {
  * Seconds between spawn rolls, and the odds each colour is drawn at on one.
  *
  * Read them together: they are one rate written as a cadence and two chances.
- * Over a ten-minute sail that is about five red boats and seven orange ones
- * before any suppression, which is often enough to be a feature of the sea and
- * rare enough that a player crossing an ocean is not being harassed the whole
- * way. The period is deliberately twice `hazards.ts`'s: a raider is a longer
- * interruption than a wave, so it may not arrive as often.
+ * Over a ten-minute sail that is about ten red boats and fourteen orange ones
+ * on the nominal figures, which is often enough that meeting one is the normal
+ * condition of being at sea rather than an event. The period is deliberately
+ * twice `hazards.ts`'s: a raider is a longer interruption than a wave, so it
+ * may not arrive as often.
+ *
+ * Both chances were doubled from 8% and 12% (2026-09-07, owner's call). The
+ * nominal counts above are therefore ceilings that the sea does not actually
+ * deliver, and by a wider margin than they used to be: the odds are per roll
+ * and per COLOUR, a colour already on the water is drawn for and skipped, and
+ * at these odds a colour is far more often already out. The real rate is
+ * governed by how long a boat LIVES at least as much as by these numbers --
+ * see PHASE_SECONDS and the post-fight grace.
  *
  * Move the period and both frequencies move with it, which is usually not what
- * you wanted; move a single probability instead. And note the odds are per
- * roll and per COLOUR: a colour already on the water is drawn for and skipped,
- * so the real rate sags a little once the sea is busy.
+ * you wanted; move a single probability instead.
  */
 export const ROLL_PERIOD = 10;
-export const P_RED = 0.08;
-export const P_ORANGE = 0.12;
+export const P_RED = 0.16;
+export const P_ORANGE = 0.24;
 
 /**
  * The fixed order the two colours are drawn in, every roll, live or not.

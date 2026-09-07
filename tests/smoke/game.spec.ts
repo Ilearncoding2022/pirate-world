@@ -224,7 +224,7 @@ test.describe('game smoke', () => {
     /*
      * The arena is a SECOND scene with its own sea shader, its own lights and
      * its own camera, and none of it is compiled by an ordinary session: a
-     * fight is an 8%-per-ten-seconds draw away, and the whole point of this
+     * fight is a 16%-per-ten-seconds draw away, and the whole point of this
      * tier is that it executes shaders Node never sees. `?battle=1` puts an
      * orange boat on the hull three seconds in, so the contact, the fade and
      * the arena all happen inside one boot.

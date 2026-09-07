@@ -766,7 +766,7 @@ async function startGame(): Promise<void> {
    * against one. An ordinary player's session sets no query, so nothing below
    * ever fires for them.
    *
-   * They exist because the spawn is a 8%-and-12%-per-ten-seconds draw. Waiting
+   * They exist because the spawn is a 16%-and-24%-per-ten-seconds draw. Waiting
    * for one is a vigil rather than a test, and the budget in docs/TESTING.md
    * does not have a vigil in it.
    */
