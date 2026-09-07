@@ -818,8 +818,8 @@ about the *net* result rather than the gross.
 |---|---|
 | Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2` |
 | 15 / 7.5 / 5 kn to dry | 90 s / 5.4 min / 10.5 min |
-| Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 185 s at noon, 6.6 min at 30°, negative after dark |
-| Berth | 40 s, overrides solar rather than stacking |
+| Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 0.5%/s net at noon (200 s to full), 7.2 min at 30°, negative after dark |
+| Berth | 2.0%/s net (50 s to full), overrides solar rather than stacking |
 | Mooring | 2 s continuously inside the ring — see below |
 | Empty | thrust refused until `RESTART_LEVEL` (3%) |
 
