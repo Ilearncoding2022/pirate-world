@@ -28,6 +28,12 @@
  *     `east = normalize(cross(north, centre))`, `extent` is measured along
  *     `east` and `halfWidth` along `north`. Swap those two and a 20-unit wall
  *     of water becomes a 5-unit stub.
+ *
+ * A crest's `centre` and `extent` are both live: land eats a wave from the
+ * end that met it (`clipToWater`), which shortens `extent` and slides
+ * `centre` onto the middle of what survives. Nothing downstream needs to know
+ * — the shader, the CPU port the hull rides, the contact test and the scope
+ * all read the pair — but nothing may cache either of them across a frame.
  */
 import { Vector3 } from 'three';
 import type {
@@ -102,20 +108,25 @@ export interface Hazards {
  * Seconds between rolls, and the odds each kind is drawn at on a roll.
  *
  * Read them together: they are one rate, expressed as a cadence and three
- * chances. The sea is now four times as busy as it first shipped, and the
- * four is two changes rather than one: the period was halved AND every
- * probability doubled, which multiply. Expected waits, at one roll every five
- * seconds — a strong wave every 25 s, a great wave every 50, and a maelstrom
- * every 250 s of sailing, so a maelstrom is a thing a player meets a few
- * times an hour rather than a thing they have to be told exists.
+ * chances. The period is the tick BOTH kinds are drawn on — there is one
+ * timer, not one per kind — so moving it moves all three frequencies
+ * together, which is usually not what you wanted; move a single probability
+ * instead.
  *
- * Move the period and all three frequencies move with it, which is usually
- * not what you wanted; move a single probability instead. And note the odds
- * are per roll and per KIND: a kind that is already on the water is drawn for
- * and skipped, so the actual rate is a little under these numbers once the
- * sea is busy enough to be holding one of each.
+ * At one roll a second the nominal waits are a strong wave every 5 s, a great
+ * wave every 10 and a maelstrom every 50 s of sailing. Those are ceilings
+ * rather than rates: only one hazard of each kind is ever on the water (see
+ * ROLL_ORDER), a crest lives up to CREST_LIFE = 10 s and a funnel up to
+ * MAELSTROM_LIFE + 2 * MAELSTROM_GROW = 36, so what a second-by-second roll
+ * actually buys is that the next one rises very soon after the last one dies,
+ * not three hazards deep. The sea is close to always running, and a maelstrom
+ * is a thing a player meets rather than a thing they have to be told exists.
+ *
+ * Note the odds are per roll and per KIND: a kind that is already on the
+ * water is drawn for and skipped, so the actual rate is well under these
+ * numbers once the sea is busy enough to be holding one of each.
  */
-export const ROLL_PERIOD = 5;
+export const ROLL_PERIOD = 1;
 const P_WAVE = 0.2;
 const P_GREATWAVE = 0.1;
 const P_MAELSTROM = 0.02;
@@ -213,6 +224,36 @@ const CREST_LIFE = 10;
  */
 const CREST_RISE = 1;
 const CREST_FADE = 1.5;
+
+/**
+ * The coast clip: how many intervals the crest line is probed on, how many
+ * bisection steps place each surviving end on the waterline, and the shortest
+ * half-length left worth drawing, world units.
+ *
+ * **A crest that meets land loses the part that met it, not the whole wave.**
+ * Every frame the surviving stretch is re-measured along `east` and the
+ * hazard's `centre` and `extent` are moved onto it, so a 20-unit front running
+ * onto a headland is a shortening wall of water beside the rock rather than a
+ * wave that either climbs the beach or vanishes off open sea a moment before
+ * it arrives. There is no fade on the lost part: it is gone the frame the
+ * water under it turns to land, which is what "breaks on the shore" looks like
+ * from the deck.
+ *
+ * 24 intervals over a 20-unit front is a probe every 0.83 units, which is
+ * about the height map's own texel at the equator (2048 texels round a 1257-
+ * unit globe), so a finer grid would only resample the same bilinear ramp. It
+ * does mean an islet under ~1.7 units across can fall between two probes and
+ * be passed over; `islets.ts` culls land that small anyway, and a wave that
+ * ignored a rock the size of the hull is a cheaper wrong answer than 40 probes
+ * a frame. The 5 bisection steps then place the end itself to 0.03 units, so
+ * the shortening is smooth in time rather than stepping a probe at a time.
+ *
+ * MIN_EXTENT is a quarter of the hull: below it there is no wave left to draw
+ * or to be hit by, and the hazard is dropped outright.
+ */
+const COAST_INTERVALS = 24;
+const COAST_REFINE = 5;
+const CREST_MIN_EXTENT = 0.75;
 
 /**
  * Seconds a crest takes to dissipate once it has hit the hull, and the peak
@@ -380,9 +421,12 @@ interface MutableHazard {
   /** The age at which it was consumed; -1 while it is still travelling. */
   consumedAt: number;
   /**
-   * Whether being consumed carries a push. False for a crest killed by the
-   * coast, which is consumed only so that it dissipates instead of climbing
-   * the beach.
+   * Whether being consumed carries a push. Only the hull consumes a crest
+   * now, so this is true wherever `consumed` is — it is kept as its own flag
+   * because the two are separate facts and a future consumer (a crest broken
+   * on a reef, say) would be the case that separates them again. The coast no
+   * longer uses either: land cuts the wave back rather than consuming it, see
+   * `clipToWater`.
    */
   pushing: boolean;
 }
@@ -719,10 +763,9 @@ export function createHazards(deps: HazardsDeps): Hazards {
    *
    * The step is a great-circle rotation and `north` is carried by exactly
    * that same rotation — parallel transport, `ship.ts`'s way with the bow.
-   * The re-orthogonalisation afterwards is not decoration: each step leaves
-   * `north` a rounding error out of the tangent plane, and over a 60-unit
-   * life those errors accumulate into a crest that is no longer flat on the
-   * sea. `east` is then rebuilt from the corrected `north`.
+   * The `reframe` afterwards is not decoration: each step leaves `north` a
+   * rounding error out of the tangent plane, and over a 60-unit life those
+   * errors accumulate into a crest that is no longer flat on the sea.
    */
   function transport(h: MutableHazard, dt: number): void {
     _prevCentre.copy(h.centre);
@@ -735,10 +778,128 @@ export function createHazards(deps: HazardsDeps): Hazards {
       const cos = Math.max(-1, Math.min(1, _prevCentre.dot(h.centre)));
       h.north.applyAxisAngle(_axis, Math.atan2(sin, cos));
     }
+    reframe(h);
+  }
+
+  /**
+   * Re-orthonormalise a crest's frame after its centre has been moved, and
+   * rebuild `east` from the corrected `north`.
+   *
+   * Shared by `transport` (which moves the centre along `north`) and
+   * `shiftAlongEast` (which moves it along `east`); both leave `north` a
+   * rounding error out of the new tangent plane, and over a 60-unit life
+   * those errors accumulate into a crest that is no longer flat on the sea.
+   */
+  function reframe(h: MutableHazard): void {
     h.north.addScaledVector(h.centre, -h.north.dot(h.centre));
     if (h.north.lengthSq() > 1e-12) h.north.normalize();
     else tangentFrame(h.centre, h.north, _east);
     h.east.crossVectors(h.north, h.centre).normalize();
+  }
+
+  /**
+   * Slide a crest's centre `offset` world units along its own long axis.
+   *
+   * This is how the coast clip re-centres a wave on what is left of it: the
+   * profile in `hazardfield.ts` is symmetric about `centre` and measured out
+   * to `extent`, so a crest that has lost one end has to move onto the middle
+   * of the other rather than grow an offset the shader has no uniform for.
+   * Everything downstream — the shader, the CPU port the hull rides, the
+   * contact test, the scope's bar — then follows from `centre` and `extent`
+   * with no further change.
+   *
+   * The rotation is about `north` (the axis `stepAlong` builds is
+   * `centre x east`, which is `north` by construction), so the travel
+   * direction is untouched and only the frame needs tidying afterwards.
+   */
+  function shiftAlongEast(h: MutableHazard, offset: number): void {
+    if (offset === 0) return;
+    if (!stepAlong(h.centre, h.centre, h.east, offset * ARC)) return;
+    reframe(h);
+  }
+
+  /** True where the crest line at `offset` world units along `east` is dry. */
+  function landAlongCrest(h: MutableHazard, offset: number): boolean {
+    if (!stepAlong(_probe, h.centre, h.east, offset * ARC)) _probe.copy(h.centre);
+    return heightMap.sample(_probe) > terrain.seaLevel;
+  }
+
+  /**
+   * Bisect between a dry offset and a wet one, and return the wettest bound
+   * it is sure of.
+   *
+   * Conservative by construction: the value returned has been sampled as
+   * water, so the surviving span never reaches past the waterline onto the
+   * beach even when the bisection runs out of steps.
+   */
+  function waterline(h: MutableHazard, dry: number, wet: number): number {
+    for (let k = 0; k < COAST_REFINE; k++) {
+      const mid = (dry + wet) / 2;
+      if (landAlongCrest(h, mid)) dry = mid;
+      else wet = mid;
+    }
+    return wet;
+  }
+
+  /**
+   * Cut a crest back to the longest stretch of open water it still covers,
+   * and say whether anything is left of it.
+   *
+   * Called every frame a crest travels, so the wave breaks up as it meets the
+   * shore rather than at some threshold moment. Three properties are worth
+   * keeping if this is ever rewritten:
+   *
+   *   - **It only ever shrinks.** The probe runs between the crest's CURRENT
+   *     ends, so a wave that has broken cannot grow its lost end back when it
+   *     travels clear of the rock again — which is both what water does and
+   *     what stops the clip from oscillating on a bilinear waterline.
+   *   - **The longest run wins.** A wave cut in two by an islet keeps the
+   *     bigger half. One hazard is one span in the shader's uniforms, so the
+   *     alternative to choosing is drawing a wall of water across the rock.
+   *   - **The line is the whole test.** The crest has depth (`halfWidth`, 2.5
+   *     units) but only its own centre line is probed, so a wave's face may
+   *     overlap a beach for a fraction of a second before the line does. A
+   *     second row of probes would double the cost to move the moment of
+   *     breaking by about 0.4 s at CREST_SPEED.
+   */
+  function clipToWater(h: MutableHazard): boolean {
+    const half = h.extent;
+    if (half <= 0) return false;
+    const n = COAST_INTERVALS;
+    const stride = (2 * half) / n;
+
+    // The longest run of consecutive wet probes, as an index pair.
+    let bestFrom = -1;
+    let bestTo = -1;
+    let runFrom = -1;
+    for (let i = 0; i <= n; i++) {
+      if (landAlongCrest(h, -half + stride * i)) {
+        runFrom = -1;
+        continue;
+      }
+      if (runFrom < 0) runFrom = i;
+      if (bestFrom < 0 || i - runFrom > bestTo - bestFrom) {
+        bestFrom = runFrom;
+        bestTo = i;
+      }
+    }
+    // Every probe dry: the whole front is on the beach, and it goes now.
+    if (bestFrom < 0) return false;
+    // Every probe wet, ends included: open water, and nothing to re-measure.
+    if (bestFrom === 0 && bestTo === n) return true;
+
+    const from =
+      bestFrom === 0
+        ? -half
+        : waterline(h, -half + stride * (bestFrom - 1), -half + stride * bestFrom);
+    const to =
+      bestTo === n ? half : waterline(h, -half + stride * (bestTo + 1), -half + stride * bestTo);
+
+    const extent = (to - from) / 2;
+    if (extent < CREST_MIN_EXTENT) return false;
+    shiftAlongEast(h, (from + to) / 2);
+    h.extent = extent;
+    return true;
   }
 
   /* ---- The spiral ---------------------------------------------------- */
@@ -821,19 +982,16 @@ export function createHazards(deps: HazardsDeps): Hazards {
     }
 
     // ---- Age, travel, and the coast ---------------------------------
-    for (let i = 0; i < state.live.length; i++) {
+    // Backwards, because a crest with no open water left under it is dropped
+    // here and now: the part of a wave that meets land is gone on the frame
+    // it meets it, with no dissipation to fade out through, so a front that
+    // has lost every part of itself has nothing left to remove later.
+    for (let i = state.live.length - 1; i >= 0; i--) {
       const h = state.live[i];
       h.age += dt;
       if (h.kind === 'maelstrom') continue;
       transport(h, dt);
-      // A crest whose centre has run aground is consumed with no push, so it
-      // dies against the coast over a second or two instead of climbing the
-      // beach for the rest of its life.
-      if (!h.consumed && heightMap.sample(h.centre) > terrain.seaLevel) {
-        h.consumed = true;
-        h.consumedAt = h.age;
-        h.pushing = false;
-      }
+      if (!clipToWater(h)) state.live.splice(i, 1);
     }
 
     // ---- Contact ----------------------------------------------------

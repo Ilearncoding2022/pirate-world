@@ -1165,10 +1165,14 @@ the sim, `hazardfield.ts` the height field, `waterhazard.ts` the plugin that
 draws it. The brief is `docs/HAZARDS_PLAN.md`; this section records the two
 decisions a later reader is most likely to undo by accident.
 
-Three hazards at most, one of each kind, rolled every **5 s at 20% / 10% / 2%**.
-That is four times the original rate and it is two multiplied changes, not one:
-the period was halved *and* every probability doubled. Retuning either alone
-moves the sea by two, not four. A crest is a 20-unit travelling line that
+Three hazards at most, one of each kind, rolled every **1 s at 20% / 10% / 2%**.
+There is ONE roll timer and both waves and maelstroms are drawn on it, so
+`ROLL_PERIOD` moves all three frequencies together — retune a single
+probability instead. At a roll a second the nominal waits are 5 s / 10 s / 50 s,
+but those are ceilings rather than rates: only one hazard of each kind is ever
+on the water, so what the fast tick actually buys is that the next one rises
+soon after the last one dies, not a sea three deep. A crest is a 20-unit
+travelling line that
 shoves the hull the way the water went — the push is a velocity, added exactly
 as the wind's is, so the bow holds its heading and the ship is carried off its
 course with the helm still answering. A maelstrom is a 20-unit funnel that
@@ -1221,6 +1225,25 @@ Local coordinates are dot products, never angles: `u = dot(p, east)`,
 `GLOBE_RADIUS` for world units. That is the small-angle approximation — at 30
 units on a radius of 200 the error is under 0.2%, and both sides make the same
 error.
+
+**A crest breaks on the shore, and loses only the part that met it.** Every
+frame a travelling crest's centre line is probed along `east` between its own
+current ends (`clipToWater`, 24 intervals plus 5 bisection steps), the longest
+stretch still over water wins, and `extent` and `centre` are moved onto it —
+`centre` slides along `east` onto the middle of what survived, because the
+profile in `hazardfield.ts` is symmetric about `centre` and there is no offset
+uniform to carry the difference. So the shader, the CPU field the hull rides,
+the contact test and the scope's bar all follow from the same two numbers with
+no change of their own, and **nothing may cache a crest's `centre` or `extent`
+across a frame**. There is no fade on the lost part: it is gone the frame the
+water under it turns to land, and a wave with nothing left is dropped outright
+rather than dissipated. The clip only ever shrinks — the probe runs between the
+current ends, so a wave that has broken cannot grow the lost end back when it
+travels clear of the rock, which is both what water does and what stops the
+clip oscillating on a bilinear waterline. Only the centre line is probed, not
+the crest's 2.5-unit depth, and a wave cut in two by an islet keeps the bigger
+half: one hazard is one span in the uniforms, so the alternative to choosing is
+a wall of water across the rock.
 
 **The distance fade is what keeps a hazard on the patch.** `waterpatch.ts` is
 80 units square and fades its displacement to zero over its outer 15%, from 34

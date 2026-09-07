@@ -238,7 +238,8 @@ export function createHazards(deps: HazardsDeps): {
 
 ### The roll
 
-A timer fires every `ROLL_PERIOD = 10` s. For each kind in a fixed order
+A timer fires every `ROLL_PERIOD = 1` s — one tick for every kind, waves and
+maelstroms alike. For each kind in a fixed order
 (`wave`, `greatwave`, `maelstrom`): if no live hazard of that kind exists and
 `rng() < P[kind]`, spawn one. Always draw the number, even when the kind is
 live, so the seeded stream stays in step regardless of what is on the water.
@@ -268,9 +269,11 @@ Up to 24 attempts, then give up until the next roll:
 Crest: rises over `CREST_RISE = 1` s (smoothstep), holds, and either fades
 over the last `CREST_FADE = 1.5` s of `CREST_LIFE = 10` s, or — once
 `consumed` at age `tc` — over `DISSIPATE[kind]` = 3 s / 5 s from `tc`, after
-which it is removed. If a travelling crest's centre lands on land it is marked
-consumed with no push, so it dies against the coast in a second rather than
-climbing the beach.
+which it is removed.
+
+Land is not an envelope. See **The coast clip** below: a crest that meets the
+shore loses the part that met it on that frame, with no dissipation, and is
+removed outright once nothing is left.
 
 Maelstrom: `size` grows 0 → 1 over `MAELSTROM_GROW = 3` s, `envelope` with it;
 holds until age ≥ `MAELSTROM_LIFE = 30` s; then both shrink over
@@ -285,6 +288,34 @@ A crest's `centre` is advanced along `north` by `CREST_SPEED = 6` units/s each
 frame (great-circle step). `north` is carried by parallel transport across
 that step, `wind.ts`'s way, and `east` is rebuilt from it. A maelstrom does not
 move.
+
+### The coast clip
+
+Immediately after transport, `clipToWater` cuts the crest back to the longest
+stretch of open water its own line still covers:
+
+1. Probe `heightMap.sample > terrain.seaLevel` at `COAST_INTERVALS = 24` even
+   intervals between the crest's CURRENT ends, `-extent` to `+extent` along
+   `east`.
+2. Take the longest run of consecutive wet probes. No wet probe at all: the
+   whole front is aground and the hazard is removed this frame.
+3. Place each end of that run on the waterline with `COAST_REFINE = 5`
+   bisection steps, always returning the bound that sampled as water, so the
+   surviving span never reaches onto the beach.
+4. Slide `centre` along `east` onto the middle of the span and set `extent` to
+   its half-length. Below `CREST_MIN_EXTENT = 0.75` units there is no wave
+   left and the hazard is removed.
+
+Three properties are load-bearing. The clip **only ever shrinks**, because the
+probe runs between the current ends — a broken wave cannot regrow. The
+**longest run wins**, because one hazard is one span in the shader's uniforms.
+And **the line is the whole test**: the crest's `halfWidth` is not probed, so a
+wave's face may overlap a beach for a fraction of a second before its centre
+line does.
+
+24 intervals over a 20-unit front is a probe every 0.83 units, about the height
+map's own texel at the equator, so an islet under ~1.7 units across can fall
+between two probes and be passed over.
 
 ### Contact and push
 
