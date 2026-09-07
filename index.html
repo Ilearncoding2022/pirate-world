@@ -605,6 +605,16 @@
           </article>
         </div>
 
+        <!-- Dev only. Ships HIDDEN and stays hidden unless `?dev` is on the
+             URL -- shop.ts is the only thing that can unhide it, and it will
+             not without that query. An ordinary player's session never sets
+             one, so this is markup they can never reach. The amount, like
+             every other figure in this panel, is written by shop.ts. -->
+        <div class="shop__dev" id="shop-dev" hidden>
+          <span class="shop__dev-tag">DEV</span>
+          <button class="fbtn shop__dev-btn" id="shop-dev-gold" type="button"></button>
+        </div>
+
         <footer class="shop__foot">
           <span class="shop__foot-key">PURSE</span>
           <span class="shop__purse" id="shop-purse">0</span>

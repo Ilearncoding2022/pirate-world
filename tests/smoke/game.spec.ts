@@ -218,6 +218,84 @@ test.describe('game smoke', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   });
 
+  test('the dev gold row is invisible and inert without ?dev', async ({ page }) => {
+    /*
+     * A regression test for a bug that shipped, and for the reason it shipped.
+     *
+     * `.shop__dev` sets `display: flex`, which BEATS the UA's
+     * `[hidden] { display: none }` -- the same trap `.shop[hidden]` already
+     * guards against. So the row rendered for every player: `shop.ts` only
+     * writes its label and attaches its listener behind `?dev`, and what a
+     * player without the query actually got was an unlabelled box that did
+     * nothing when clicked.
+     *
+     * The check that MISSED it asserted `element.hidden === true`. That
+     * property was set the whole time; it was the CSS that ignored it. So
+     * this asks the renderer -- offsetParent and the computed display -- and
+     * never the attribute, because the attribute was never the thing that was
+     * wrong. Playwright's `toBeHidden` is the same question.
+     */
+    await boot(page, '/');
+
+    // The panel is shut at boot, so unhide only the OVERLAY. The dev row must
+    // stay invisible on its own account, which is exactly what failed before.
+    await page.evaluate(() => {
+      const shop = document.getElementById('shop');
+      if (shop) {
+        shop.hidden = false;
+        shop.setAttribute('aria-hidden', 'false');
+      }
+    });
+
+    await expect(page.locator('#shop-dev')).toBeHidden();
+
+    const state = await page.evaluate(() => {
+      const row = document.getElementById('shop-dev');
+      const btn = document.getElementById('shop-dev-gold');
+      return {
+        display: row === null ? 'missing' : getComputedStyle(row).display,
+        rendered: row !== null && row.offsetParent !== null,
+        label: btn?.textContent ?? '',
+      };
+    });
+    expect(state.display, 'computed display of #shop-dev without ?dev').toBe('none');
+    expect(state.rendered, '#shop-dev is laid out without ?dev').toBe(false);
+    // Unlabelled is the tell that shop.ts never wired it either.
+    expect(state.label, '#shop-dev-gold label without ?dev').toBe('');
+  });
+
+  test('the dev gold row is visible and mints gold with ?dev', async ({ page }) => {
+    await boot(page, '/?dev');
+
+    await page.evaluate(() => {
+      const shop = document.getElementById('shop');
+      if (shop) {
+        shop.hidden = false;
+        shop.setAttribute('aria-hidden', 'false');
+      }
+    });
+
+    await expect(page.locator('#shop-dev')).toBeVisible();
+
+    const purse = (): Promise<string> =>
+      page.evaluate(() => document.getElementById('shop-purse')?.textContent ?? '');
+    expect(await purse()).toBe('0');
+
+    // A real, hit-tested click -- not `element.click()`. The button being
+    // reachable by the pointer is half of what is being tested.
+    await page.click('#shop-dev-gold');
+    // U+2009 THIN SPACE, the grouping `shop.ts` prints gold with.
+    await expect
+      .poll(purse, { message: 'purse after one dev click' })
+      .toBe('10\u2009000');
+
+    // And the HUD's own GOLD row, which is a separate subscriber.
+    const hudGold = await page.evaluate(
+      () => document.getElementById('hud-gold')?.textContent ?? '',
+    );
+    expect(hudGold, 'HUD gold after one dev click').toBe('10\u2009000');
+  });
+
   test('battle=1 boots into the arena clean', async ({ page }) => {
     const problems = collectConsoleProblems(page);
 

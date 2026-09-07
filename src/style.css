@@ -2851,6 +2851,47 @@ kbd {
   text-shadow: 0 0 12px rgba(255, 196, 77, 0.35);
 }
 
+/* The dev row. Deliberately ugly against the rest of the panel -- amber where
+   everything else is cyan, and labelled -- because a button that mints gold
+   must never be mistaken for one of the two real offers above it. It is only
+   ever on screen behind `?dev`; see shop.ts. */
+.shop__dev {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 196, 77, 0.35);
+}
+
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat -- the same trap .shop[hidden] guards against, and the same
+   guard. Without this the row is on screen for EVERY player: shop.ts only
+   labels and wires it behind ?dev, so what they would get is an unlabelled
+   box that does nothing, which is exactly what it did. */
+.shop__dev[hidden] {
+  display: none;
+}
+
+.shop__dev-tag {
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  color: var(--gold);
+  opacity: 0.75;
+}
+
+.shop__dev-btn {
+  flex: 0 1 auto;
+  border-color: rgba(255, 196, 77, 0.45);
+  background: rgba(255, 196, 77, 0.08);
+  color: var(--gold);
+}
+
+.shop__dev-btn:hover:not(:disabled) {
+  background: rgba(255, 196, 77, 0.18);
+  box-shadow: 0 0 14px rgba(255, 196, 77, 0.28);
+}
+
 @media (max-width: 560px) {
   /* The two halves stop competing and stack, which is the only way the buy
      button keeps its full width on a phone. */

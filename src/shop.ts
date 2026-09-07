@@ -7,10 +7,10 @@ import { HARPOON_BUNDLE, HARPOON_PER_SESSION_MAX, HARPOON_STORE_MAX } from './ha
 /**
  * shop.ts — the chandlery, open only alongside a berth.
  *
- * Two offers and nothing else. It owns its own DOM and its own Escape, the
- * same shape `fishbook.ts` has, and it knows nothing about who is allowed to
- * open it: `main.ts` gates that on the berth, and `hud.ts` dims the key when
- * there is no berth to gate on.
+ * Two offers, and behind `?dev` a third control that is not an offer at all.
+ * It owns its own DOM and its own Escape, the same shape `fishbook.ts` has,
+ * and it knows nothing about who is allowed to open it: `main.ts` gates that
+ * on the berth, and `hud.ts` dims the key when there is no berth to gate on.
  *
  * Every purchase is two all-or-nothing moves in a fixed order — take the gold,
  * then hand over the goods — and the second one is tested BEFORE the first
@@ -41,6 +41,35 @@ export const BATTERY_PRICE = 1000;
  * about what the player is short of rather than about which is better value.
  */
 export const HARPOONS_PRICE = 500;
+
+/**
+ * Gold the dev button mints per click.
+ *
+ * Ten thousand: ten backup cells, or twenty bundles of harpoons, so one click
+ * is enough to test any offer in the panel and a second click is enough to
+ * test what the panel does when nothing is short of gold. A figure small
+ * enough to need repeated clicking would just be a slower version of the same
+ * thing.
+ */
+export const DEV_GOLD_GRANT = 10_000;
+
+/**
+ * Whether this session may mint gold, read from the URL and nothing else.
+ *
+ * `?dev` (with or without a value) and never `import.meta.env.MODE`, on
+ * exactly the terms `?quality=` and `?hazard=` are read on: `vite preview`
+ * serves a genuine production build and these harnesses are meant to be used
+ * against one, so a MODE test would switch the button off in the very build
+ * it is wanted in. An ordinary player sets no query, so for them this is
+ * always false and the row below stays hidden and unwired.
+ *
+ * Exported for `shop.test.ts` and for the same reason `createQuality` takes
+ * its `search`: a gate that can only be exercised by editing the address bar
+ * is a gate nothing can test.
+ */
+export function isDevMode(search: string): boolean {
+  return new URLSearchParams(search).has('dev');
+}
 
 export interface ShopPanel {
   readonly isOpen: boolean;
@@ -108,7 +137,7 @@ export interface ShopDeps {
  * take the frame loop down, and — the part that matters where money is
  * involved — it must not be able to spend anything either.
  */
-export function createShop(deps: ShopDeps): ShopPanel {
+export function createShop(deps: ShopDeps, search: string = window.location.search): ShopPanel {
   const root = document.getElementById('shop');
   const backdrop = document.getElementById('shop-backdrop');
   const closeButton = document.getElementById('shop-close');
@@ -117,6 +146,8 @@ export function createShop(deps: ShopDeps): ShopPanel {
   const harpoonStock = document.getElementById('shop-harpoon-stock');
   const batteryBuy = document.getElementById('shop-battery-buy');
   const harpoonBuy = document.getElementById('shop-harpoon-buy');
+  const devRow = document.getElementById('shop-dev');
+  const devGold = document.getElementById('shop-dev-gold');
 
   if (
     root === null ||
@@ -152,6 +183,21 @@ export function createShop(deps: ShopDeps): ShopPanel {
   );
   textWriter(document.getElementById('shop-battery-price'))(`${formatGold(BATTERY_PRICE)} G`);
   textWriter(document.getElementById('shop-harpoon-price'))(`${formatGold(HARPOONS_PRICE)} G`);
+
+  /*
+   * The dev row: unhidden, labelled and wired ONLY behind `?dev`.
+   *
+   * All three happen together and nowhere else, so there is no arrangement in
+   * which a player's session has a live listener on a button it cannot see.
+   * Outside dev mode the markup stays exactly as index.html ships it —
+   * hidden, and with no text in it — and `onDevGold` is never subscribed.
+   */
+  const devMode = isDevMode(search);
+  const buyDevGold = devMode && devGold instanceof HTMLButtonElement ? devGold : null;
+  if (devMode && devRow !== null) {
+    devRow.hidden = false;
+    textWriter(buyDevGold)(`+${formatGold(DEV_GOLD_GRANT)} G`);
+  }
 
   const writePurse = textWriter(purse);
   const writeBatteryStock = textWriter(batteryStock);
@@ -220,6 +266,22 @@ export function createShop(deps: ShopDeps): ShopPanel {
     );
   }
 
+  /**
+   * Mints gold. The one thing in this file that is not a trade.
+   *
+   * Deliberately NOT routed through `buy` above: `buy` exists to guarantee
+   * that gold never leaves the purse for nothing, and this moves gold the
+   * other way, so it has neither half of that contract to honour. Going
+   * straight to `wallet.add` — which is already the best-effort side of the
+   * wallet, see its own comment — keeps `buy` describing purchases only.
+   *
+   * The panel redraws itself off the `onChange` subscription below, exactly
+   * as it does after a real purchase, so nothing here touches the DOM.
+   */
+  function onDevGold(): void {
+    deps.wallet.add(DEV_GOLD_GRANT);
+  }
+
   const unsubWallet = deps.wallet.onChange(refresh);
   const unsubBattery = deps.battery.onChange(refresh);
   const unsubHarpoons = deps.harpoons.onChange(refresh);
@@ -255,6 +317,7 @@ export function createShop(deps: ShopDeps): ShopPanel {
   backdrop?.addEventListener('click', onClose);
   buyBattery.addEventListener('click', onBuyBattery);
   buyHarpoons.addEventListener('click', onBuyHarpoons);
+  buyDevGold?.addEventListener('click', onDevGold);
 
   return {
     get isOpen(): boolean {
@@ -273,6 +336,7 @@ export function createShop(deps: ShopDeps): ShopPanel {
       backdrop?.removeEventListener('click', onClose);
       buyBattery.removeEventListener('click', onBuyBattery);
       buyHarpoons.removeEventListener('click', onBuyHarpoons);
+      buyDevGold?.removeEventListener('click', onDevGold);
       unsubWallet();
       unsubBattery();
       unsubHarpoons();
