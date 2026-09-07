@@ -25,8 +25,19 @@ export const TOWN_SEED = 0x5eed17;
  * quarter, from 76, when that rule came in: 76 towns used to yield 48 berths,
  * and leaving the target alone would have handed the player half again as many
  * places to charge as the world was balanced around.
+ *
+ * 57 to 40 (2026-09-07, owner's call). It is a TARGET rather than a count --
+ * `CLUSTER_TRIES` attempts are made and a candidate that cannot find lowland,
+ * open coast, room from its neighbours or reachable water is simply not
+ * founded -- so the world ends up with at most this many and usually fewer.
+ * What the player feels is a longer run between charges: the reserve, the
+ * solar rate and the 2%/s shore rate are all untouched, so a thinner coast is
+ * the same tank across a wider gap. `CLUSTER_MIN_ARC` is deliberately NOT
+ * relaxed to spread 40 towns over the same coastline: the spacing is what
+ * every berth-overlap argument below leans on, and a world with fewer ports
+ * should read as emptier rather than as evenly thinned.
  */
-const CLUSTER_TARGET = 57;
+const CLUSTER_TARGET = 40;
 const CLUSTER_TRIES = 20000;
 /**
  * Minimum arc, in radians, between two settlement centres. At GLOBE_RADIUS 200

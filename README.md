@@ -190,7 +190,7 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   sun overhead, which is three and a half minutes from empty, stretching past
   seven at a low sun and going negative after dark. Run dry and you keep the
   helm but lose the engines, drifting until the sun comes up.
-- **Ports.** Every one of the world's 57 settlements is a port — a town that
+- **Ports.** Every one of the world's 40 settlements is a port — a town that
   could not find water the ship can reach is never founded — so a settlement on
   the scope is always somewhere you can charge. Each has a lit ring on the
   water under a beacon mast. Stay inside the ring for two seconds and you are

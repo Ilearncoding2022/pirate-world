@@ -1624,10 +1624,24 @@ move.
 
 **Every town is a port.** A candidate that cannot find a berth is not founded
 at all, so `Town.dock` is non-null for every town in `all` and the fleet is the
-map. `CLUSTER_TARGET` came down a quarter with that rule, 76 → **57**, because
+map. `CLUSTER_TARGET` came down a quarter with that rule, 76 → 57, because
 76 towns used to yield 48 berths and leaving the target alone would have handed
-the player half again as many places to charge. It fills in under 6000 of its
-20000 tries.
+the player half again as many places to charge. It came down again on the
+owner's call, 57 → **40** (2026-09-07). It fills in under 6000 of its 20000
+tries.
+
+It is a TARGET, not a count: a candidate that cannot find lowland, open coast,
+room from its neighbours or reachable water is simply not founded, so the world
+gets at most this many and can get fewer. At seed 1337 it gets exactly 40, and
+`world-golden.json` pins that — `townCount` and `dockCount` moved together,
+which is the golden's own restatement that every town is a port.
+
+`CLUSTER_MIN_ARC` was deliberately NOT relaxed to spread 40 towns over the same
+coastline. The spacing is what every berth-overlap argument here leans on, and
+a world with fewer ports should read as emptier rather than as evenly thinned.
+Nothing else was retuned with it: the reserve, the solar rate and the 2%/s
+shore rate are untouched, so what the player feels is the same tank across a
+wider gap between charges.
 
 The berth search still draws **nothing** from the PRNG — only from the height
 map — so the random stream advances exactly once per candidate whatever the
