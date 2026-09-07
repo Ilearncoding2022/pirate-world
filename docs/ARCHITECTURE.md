@@ -273,9 +273,16 @@ shader.
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
-| `energy.ts` | `createEnergy(towns, battery)` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState`; `spend(level)` is the overlays' withdrawal and `wreck()` is the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` are untouched |
+| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState`; `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast |
 | `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards** |
+| `aiboats.ts` | `createAiBoats(deps)`, `AiBoatsDeps`, `AiBoats`, `ROLL_PERIOD`, the spawn and pursuit constants | the raider sim: the roll, spawning, transport, pursuit, conversion, contact and the post-fight grace. Owns `AiBoatState`, mutated in place; DOM-free, scene-free and seeded, exactly as `hazards.ts` is; see **AI boats and the battle** |
+| `aihulls.ts` | `createAiHulls(scene, cloneHull)`, `AiHulls` | the raiders as things you can see: at most two hull clones from `ship.cloneHull()`, placed on the globe from `AiBoatState` each frame, neon recoloured, `rimglow.ts` installed. `hullOf(boat)` is what the arena borrows |
+| `rimglow.ts` | `installRimGlow(root, color, strength?)`, `RimGlow`, `RIM_STRENGTH` | the Fresnel `onBeforeCompile` patch that lights a whole silhouette in one colour. Installed BEFORE `postFx.adopt` chains its own hook; see **Post-processing** |
+| `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `ROUNDS`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the rounds, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
+| `bounty.ts` | `WIN_TIERS`, `rollWinGold(rng)`, `lossGold(purse)`, `rollDrawGold(rng, purse)`, `LOSS_SHARE`/`LOSS_MIN`/`LOSS_MAX`, `DRAW_SWING` | data and pure functions for the three gold outcomes; every roll takes the caller's `rng` |
+| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the arena: a SECOND `Scene` with its own flat sea, lights, fixed camera, cannonballs and splashes. It is not the globe water and must never import `water.ts`; see **AI boats and the battle** |
+| `battleui.ts` | `createBattleUi(deps)`, `BattleUi`, `BattleResult` | the fight's overlay: the rounds-and-hits strip, the FIRE key, the Space capture and the result card; `isOpen` is a LIVE GETTER, on the pause contract's terms |
 | `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
 | `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
 | `wakemap.ts` | `createWakeMap(size, ribbonGeometry)`, `WakeMap`, `computeWakeFrame`, `createWakeFrame`, `projectToMapUV`, `WAKE_MAP_EXTENT`, `WAKE_HEIGHT_SCALE`, `WAKE_BREAKUP_GLSL` | renders the wake's foam/height/age into a small top-down render target every frame; see **Shader notes** for the channel layout |
@@ -285,12 +292,12 @@ shader.
 | `waterreflect.ts` | `createWaterReflectPlugin(cubeTexture)` | the `WaterPlugin` that mixes the decoded cube into `skyCol` and paints a fake hull-neon streak, since the hull itself cannot appear in its own reflection camera |
 | `postfx.ts` | `createPostFx(renderer, quality)`, `GpuFrameStats` | composer / bloom; `adopt(root)` for late materials; chains its sRGB self-encode `onBeforeCompile` after a material's own hook (see **Post-processing**); owns the optional GPU/CPU/draw-call timer toggled with Backquote |
 | `globe.ts` | `createGlobe(terrain, quality, waterPlugins?): { group, heightMap, waterBodies, towns, waveOffsets, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map; builds the displacement patch after the water plugins are woven into the shader |
-| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?, onHullProgress?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** — and its optional sixth is `hazards.state`, a push spent like the wind's plus a drive that takes the helm away entirely; `place(dir, heading)` is the respawn's teleport, `halt()` the overlays' stop |
-| `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
+| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?, onHullProgress?)`, `MAX_FORWARD`, `MODEL_SCALE`, `HULL_OFFSET` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** — and its optional sixth is `hazards.state`, a push spent like the wind's plus a drive that takes the helm away entirely; `place(dir, heading)` is the respawn's teleport, `halt()` the overlays' stop; `cloneHull()` is the AI boats' copy, geometry shared and every material cloned, null until `ready` settles |
+| `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
 | `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel |
-| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards)` — hazards are drawn from the LIVE frame in `--magenta`, like the wind arrow and for the same reason |
+| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?)`; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
 | `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
@@ -299,13 +306,13 @@ shader.
 | `fishing.ts` | `createFishing(deps)`, `SESSION_COST` | the overlay: card DOM, input capture, gold and book bookkeeping |
 | `fishcover.ts` | `createFishCover(deps)` | the activity screen [FISH] opens; holds the power gate, and picks the harbour or open-water plate off `energy.mode` at the moment it opens |
 | `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
-| `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers |
+| `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers; `spend` is all-or-nothing for the shop and `lose` is best-effort for a defeat, which is not a purchase and must not be refused for an empty purse |
 | `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CAPACITY` | the bought backup cell; the only charge in the world nothing recharges |
 | `harpoons.ts` | `createHarpoonStore(initial)`, `HARPOON_BUNDLE`, `HARPOON_STORE_MAX`, `HARPOON_PER_SESSION_MAX` | the spare-harpoon locker, and its two different ceilings |
 | `shop.ts` | `createShop(deps)`, `BATTERY_PRICE`, `HARPOONS_PRICE` | the chandlery panel; the only place gold leaves the purse |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
-| `blackout.ts` | `createBlackout()` | the fade a wreck happens behind; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
+| `blackout.ts` | `createBlackout()` | the fade a wreck happens behind, and both of a battle's; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
 | `loading.ts` | `createLoading()` | drives the splash `index.html` ships visible; the only UI a module does not build |
 | `main.ts` | — | staged bootstrap and frame loop |
 
@@ -415,17 +422,48 @@ Two more things follow from the stack and are easy to undo by accident:
 energy.update(dt, shipState, env)          // burn / solar / dock, on last frame's speed
 wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
 hazards.update(dt, shipState, energyState) // rolls, transport, contact, push, spiral; writes HazardState
+aiBoats.update(dt, shipState, energyState, hazards.state, suppressed())  // after hazards: needs this frame's phase. Before the ship: a contact halts the hull this frame
 ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
+aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
 globe.update(dt, env, wind.state, shipState, camera)  // daynight, fog, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
 hud.update(shipState, energyState, windState)
-radar.update(dt, shipState, windState, hazards.state)
+radar.update(dt, shipState, windState, hazards.state, aiBoats.state)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
+
+`suppressed()` is `main.ts`'s own one-line verdict, `energy.mode === 'docked'
+|| blackout.active || hazards.state.phase !== 'free'`, and it is computed
+there rather than inside `aiboats.ts` because all three of its terms are owned
+by other modules. Overlays are not in it and do not need to be: the loop does
+not reach `aiBoats.update` under one at all.
+
+While a battle is up the loop takes a THIRD branch, tested **before** the
+overlay branch below:
+
+```
+energy.update(dt, restingShip, env)        // the plant keeps running, on a resting hull
+battleSim.update(dt, battleUi.input(controls.input))   // only while inArena: the fire edge plus W/S
+settleOutcome(...)                         // once, the frame `outcome` first becomes non-null
+battleScene.update(dt, battleSim.state)
+battleUi.update(battleSim.state)
+hud.update(shipState, energyState, windState)
+timeDial.update(shipState, env)            // redrawn, not advanced, as under an overlay
+postFx.render(dt, inArena ? battleScene.scene : scene, inArena ? battleScene.camera : view.camera)
+controls.endFrame()
+```
+
+It is tested first because it is the more specific state, and because it is
+the one branch that renders a **different scene**: it therefore cannot share
+the frozen branch's `postFx.render(0, scene, camera)`, and it renders LIVE
+rather than at dt 0, because the arena is the game while it is up. A fight and
+a card can never be up together anyway: a contact halts the ship and flips
+`battleUi.isOpen` synchronously, and no contact can happen under an overlay
+because the sim does not run there. See **AI boats and the battle**.
 
 While a fishing overlay is up the loop takes a different branch and stops after
 five calls:
@@ -887,6 +925,22 @@ Stale together is coherent; stale apart is a bug that reads as the radar lying.
 Culling is a dot product against a precomputed cosine, so only the handful of
 towns actually in range ever reach `acos`.
 
+**Raiders are own ship's own blip, moved and turned.** `blipPath` emits the
+arrowhead once and both the centre mark and every AI boat are drawn with it,
+because they are the same kind of thing and the scope has to say so: a raider
+drawn a shade smaller would read as further off than the projection had
+already placed it, and the player would be judging a closing distance against
+a mark quietly lying about it. Colour is the whole warning, `--red` for the
+hunter and `--orange` for the one running a straight line past you, and the
+mark carries the boat's `envelope` as its alpha, so it arrives on the scope as
+the hull arrives on the water and leaves the same way. Like the crests, they
+are placed from the LIVE frame rather than the raster's: a raider is attached
+to nothing on the picture, and the thing it is closing on is at the centre of
+the scope. Which way its bow points is measured between two world vectors, not
+subtracted between two compass readings, per **Frames, and where they stop
+working**; both the crests and the raiders project through one captured live
+frame rather than each building its own.
+
 The panel's head row carries **LAT, heading and LON** above the glass. The
 range readout is gone — it never varied, so it was a constant printed every
 frame. The wind arrow rides the rim on the true bearing from the **live** frame,
@@ -1275,6 +1329,141 @@ seconds after the first frame. It is guarded through `URLSearchParams` and
 never through `import.meta.env.MODE`, on the same terms as `?quality=`: the
 owner uses it against a `vite preview` production build, and a 1%-per-10-s
 event cannot otherwise be seen inside the testing budget.
+
+## AI boats and the battle
+`docs/BATTLE_PLAN.md` is the approved brief and the record of what was
+decided; this section is the contract the rest of the codebase has to keep.
+
+Seven modules, one overlay and one more branch in the frame loop. Two raiders
+sail the world, and touching either one takes the fight to a **separate
+screen**: the world is frozen exactly as it is under the fishing card, and an
+arena scene with its own flat ocean and its own camera is rendered instead.
+
+The split is the same one `hazards.ts` and `waterhazard.ts` keep. `aiboats.ts`
+is the sim and `aihulls.ts` is what puts meshes where it says; `battle.ts` is
+the ruleset and `battlescene.ts` is what draws it. Both sims are DOM-free and
+scene-free, which is what makes them the modules the unit tests exercise.
+
+### The world's instruments come down with the fade
+A battle is the one overlay in this project that is **not** a card over a
+frozen world. The arena is a live scene, and the HUD would otherwise sit on
+top of it still reading the world: a scope plotting a coastline a hundred
+units from an arena that has no coast, a SPEED off a halted hull, a WIND
+nobody is sailing in. So `main.ts` puts `in-battle` on the document body and
+`style.css`'s BATTLE block hides the telemetry panel, the scope, the activity
+keys and the controls legend behind it.
+
+Two details are load bearing. The class is toggled from **inside the
+blackout's `onBlack`**, both ways, at the same point `inArena` flips: the swap
+therefore happens on a screen that is already opaque, and hiding the
+instruments at `open()` instead would pop the whole HUD out in front of a
+player still looking at the sea. And the **helm keys stay**, dimmed rather
+than removed for port and starboard: W and S are the throttle on the circle,
+and on a touch device that pad is the only way to reach it.
+
+### The player's real hull is reparented, not cloned
+For the length of a fight `ship.object` is a child of the **arena** scene, and
+`main.ts` moves it there and back inside the two blackout fades. It is the
+real hull rather than a copy because `ship.ts`'s `applyTransform` rebuilds
+`object.position` and `object.quaternion` from scratch every frame, so the
+arena can drive the object directly and the first world frame after the fight
+puts it back where the state says. The alternative was a second copy of a 5 MB
+model's materials, with its own neon and its own charge dimming to keep in
+step.
+
+Two things follow, and both have to be held on to:
+
+- **Any future code that assumes `ship.object` never leaves the world scene
+  will be surprised.** It leaves twice per fight.
+- **The parent is read, never assumed.** `main.ts` captures
+  `ship.object.parent` and the AI clone's parent on the way in and adds each
+  hull back to what it captured, rather than to `scene`. The clone's owner is
+  `aihulls.ts` and where it keeps its pool is that module's business.
+
+Both moves happen inside `blackout.run`'s `onBlack`, which is the one instant
+in the game the world may be rearranged unseen. `inArena` is what says which
+scene is being rendered, and it is false for the whole of the first fade and
+true for the whole of the second, so the cut between two scenes is always
+under an opaque screen.
+
+`ship.update` is not called during a fight at all. The sail and the flag
+therefore hang still in the arena; animating them would need `shipfx.ts` to
+learn to tick without a hull update, and that is out of scope.
+
+### The arena sea is not the globe water
+`battlescene.ts` builds its own plane and its own small shader out of
+`NOISE_GLSL` and `fogglsl.ts`, and it **must never import `water.ts`**. The
+globe's water is a full sphere at `GLOBE_RADIUS` carrying a wave field, a
+depth ramp, a foam pass and every registered `WaterPlugin`; the arena is 300
+units of flat open ocean with nothing under it and nothing to sample. Reaching
+for the real water here would drag the wake map, the reflection cube and the
+displacement patch into a scene that has no ship state to feed any of them.
+
+The arena is a **flat plane in world units**: plain `x`/`z` metres about its
+own centre with `+y` up, and nothing in it is on the globe. The hull is drawn
+at `MODEL_SCALE` and mounted at `MODEL_MOUNT_Y`, exactly as in the world, so
+the two scenes agree about how big a ship is and about nothing else.
+
+### The rim patch goes on before `postFx.adopt`
+`rimglow.ts` installs an `onBeforeCompile` hook on every
+`MeshStandardMaterial` under a cloned hull, and `postfx.ts`'s sRGB self-encode
+patch **chains** after whatever hook a material already carries. So the order
+is fixed: install the rim first, adopt second. Adopt first and the encode
+patch captures an empty hook, the rim's own `onBeforeCompile` replaces it
+outright, and the clone renders unencoded. See **Post-processing** for the
+`customProgramCacheKey` trap that makes this worse than it sounds: two
+differently-hooked materials that collapse onto one cache key silently render
+with each other's code.
+
+`aihulls.ts` is the only module that adopts a clone, and it does exactly this.
+Nothing else may adopt one.
+
+### Suppression, and where the verdict lives
+No raider spawns, closes or touches the hull while the ship is **docked**,
+while a **blackout** is running, or while a **maelstrom** has the hull.
+`main.ts` computes that as one expression and hands it to `aiBoats.update`,
+because all three terms are owned by other modules: `energy.ts` owns the
+project's single definition of docked, `blackout.ts` owns whether a fade is
+running, and `hazards.ts` owns the phase. A sim that re-derived any of them
+would be a second definition free to disagree with the first.
+
+Overlays are not in that verdict and must not be added to it. The loop does
+not call `aiBoats.update` under one at all, so a contact under a card is not
+possible: a fight opens from `onContact`, which halts the ship and flips
+`battleUi.isOpen` synchronously, and by then no overlay is up.
+
+The other direction does need a guard, and `[FISH]` and `[SHOP]` carry it.
+Unlike every other overlay in the project, the battle's is a HUD over a LIVE
+scene rather than a card over a frozen one: it paints a strip, a key and a
+card and is `pointer-events: none` everywhere else, so the telemetry panel and
+its two keys stay on screen and stay pressable underneath it. And the battle
+branch is tested first, so a cover screen opened over a fight would never be
+ticked and never be closed. Both buttons therefore test `battleUi.isOpen`
+alongside the four overlays and the hazard phase.
+
+A red boat that reaches a docked ship gives up and turns orange. That is the
+rule, not a bug.
+
+### The outcome is rolled once, and it is rolled early
+The result card prints the gold and the power the player **actually got**, so
+the roll and the payment happen the frame `outcome` first becomes non-null,
+not on CONTINUE. `main.ts` latches that with `outcomeSettled` rather than
+testing `outcome` alone, because `battle.ts` keeps the boats circling and the
+balls flying after the fight is decided: the card sits over a live scene, and
+the frame that ended it is followed by however many the player leaves the card
+up for. CONTINUE only runs the second fade.
+
+The three payouts go through `bounty.ts`, which is pure, and then through
+`wallet.ts` and `energy.ts`, which are the only writers of gold and charge.
+`wallet.lose` is best-effort where `spend` is all-or-nothing, and that
+difference is the whole reason it exists: a purchase that cannot be paid for
+must be refused whole, but a defeat is another captain going through the hold,
+and an empty hold does not save a player from having lost.
+
+`energy.defeat` reaches the backup cell through `battery.draw` and never
+through a setter, because `draw` is what notifies the cell's subscribers and
+the only subscriber is the save file. A defeat written straight into
+`battery.level` would leave the run playing on a cell the reload puts back.
 
 ## Towns, berths and the dock zones
 `towns.ts` owns settlement placement, which used to live inside `citylights.ts`

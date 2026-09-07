@@ -36,7 +36,7 @@ import { OCEAN_CAP } from './wind';
  * have to move together. It is a mounting height, not the waterline -- see
  * MODEL_WATERLINE_Y for where the sea actually cuts the glTF hull.
  */
-const HULL_OFFSET = 0.6;
+export const HULL_OFFSET = 0.6;
 
 /**
  * Model-space Y at which the glTF hull is meant to meet the water.
@@ -427,6 +427,18 @@ export interface Ship {
    * without walking it there.
    */
   place(dir: Vector3, headingRad: number): void;
+  /**
+   * A copy of the loaded glTF hull, for an AI boat to wear.
+   *
+   * Null before `ready` settles and null forever if the load failed — an AI
+   * boat is not worth showing as the stand-in. Geometry is SHARED with the
+   * player's hull and every material is CLONED, so a raider's recoloured neon
+   * and its rim glow can never reach the ship the player is standing on.
+   *
+   * Scaled and mounted exactly as the player's is, so a clone dropped at the
+   * same radius floats at the same waterline.
+   */
+  cloneHull(): Object3D | null;
   /**
    * Stops the hull dead, where it stands, this instant.
    *
@@ -1081,5 +1093,65 @@ export function createShip(
     applyTransform();
   }
 
-  return { object, state: state as ShipState, ready, update, halt, place };
+  /**
+   * A copy of the loaded glTF hull for an AI boat to wear. See the docstring
+   * on `Ship.cloneHull` above for the contract this keeps.
+   *
+   * The loaded model is found by the name `loadHull` gives it rather than
+   * being held in a second closure variable, so there is exactly one fact
+   * about whether the hull is aboard: it is a child of `object` or it is not.
+   * The stand-in is unnamed, so this is null while it is still standing in and
+   * null forever if the load failed.
+   *
+   * Materials are cloned through a map keyed on the SOURCE material, not one
+   * clone per mesh. The build script joins the ship by material precisely so
+   * it draws in 26 calls rather than one per bolt; cloning per mesh would hand
+   * every mesh its own material and quietly undo that on the raider.
+   *
+   * `userData` is emptied on each clone, and that line is load bearing.
+   * `Material.copy` deep-copies `userData` but does NOT copy `onBeforeCompile`
+   * or `customProgramCacheKey`, so a clone taken after `main.ts` has already
+   * run `postFx.adopt(ship.object)` inherits the "already encoded" flag from
+   * postfx.ts without the hook that flag stands for -- and `adopt` then skips
+   * it and it renders a stop dark. Same trap `shipfx.ts` documents from the
+   * other side, which is why it clones its lamps during the load instead.
+   */
+  function cloneHull(): Object3D | null {
+    const model = object.getObjectByName('ship-hull');
+    if (!model) return null;
+
+    const clone = model.clone(true);
+    clone.name = 'ai-hull';
+    // `clone(true)` already carries these across; set again so the mount the
+    // raider floats at is stated here rather than inherited silently, exactly
+    // as `loadHull` states it.
+    clone.scale.setScalar(MODEL_SCALE);
+    clone.position.y = MODEL_MOUNT_Y;
+
+    const clones = new Map<Material, Material>();
+    function cloneMaterial(source: Material): Material {
+      const seen = clones.get(source);
+      if (seen) return seen;
+      const copy = source.clone();
+      copy.userData = {};
+      clones.set(source, copy);
+      return copy;
+    }
+
+    clone.traverse((node) => {
+      const mesh = node as Mesh;
+      if ((mesh as { isMesh?: boolean }).isMesh !== true) return;
+      // Geometry is deliberately left shared: it is the same hull, and a 5 MB
+      // model's buffers are not worth a second copy. The cost is the one
+      // `docs/BATTLE_PLAN.md` accepts -- the AI's cloth deforms in step with
+      // the player's, since `shipfx.ts` rewrites vertices these share.
+      mesh.material = Array.isArray(mesh.material)
+        ? mesh.material.map(cloneMaterial)
+        : cloneMaterial(mesh.material);
+    });
+
+    return clone;
+  }
+
+  return { object, state: state as ShipState, ready, update, halt, place, cloneHull };
 }

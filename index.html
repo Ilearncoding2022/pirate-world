@@ -530,6 +530,86 @@
     </div>
     <!-- END SHOP -->
 
+    <!-- ===================== BATTLE =====================
+         The cannon fight's overlay. `battleui.ts` owns everything inside
+         this block, and it is the ONLY writer here — every other module
+         reaches its own marked block, never this one.
+
+         It ships hidden, and it ships with its furniture: the strip, the
+         FIRE key and the result card are authored here, the way every other
+         overlay in the project is, and `battleui.ts` fills them in. The one
+         exception is anything whose COUNT comes off a constant, the hit pips
+         above all, which are built in code from HITS_TO_LOSE so the markup
+         cannot come to disagree with the rule. Below the blackout, which
+         outranks it: both fades of a battle happen behind an opaque
+         screen. -->
+    <!-- BATTLE -->
+    <div class="battle" id="battle" hidden aria-hidden="true">
+      <!-- The strip. Own ship on the left in the HUD's cyan, the raider on the
+           right in its own hue, which battleui.ts selects by putting
+           `battle--red` or `battle--orange` on the root above: one class, and
+           style.css owns everything that follows from it. -->
+      <header class="battle__strip">
+        <div class="bside bside--you">
+          <span class="bside__name">YOU</span>
+          <span class="bside__key">ROUNDS</span>
+          <span class="bside__rounds" id="battle-you-rounds">0</span>
+          <span class="bside__key">HITS</span>
+          <!-- The pips ship EMPTY and are built by battleui.ts from
+               `HITS_TO_LOSE`. Three typed here would be three the markup
+               claims beside a sim that might end a fight on two, and the count
+               of them is the only thing the player is really watching. -->
+          <span class="bside__pips" id="battle-you-pips"></span>
+        </div>
+
+        <div class="bside bside--foe">
+          <span class="bside__name">FOE</span>
+          <span class="bside__key">ROUNDS</span>
+          <span class="bside__rounds" id="battle-foe-rounds">0</span>
+          <span class="bside__key">HITS</span>
+          <span class="bside__pips" id="battle-foe-pips"></span>
+        </div>
+      </header>
+
+      <!-- The screen edge, flashed when a ball lands on the PLAYER's hull.
+           `battlescene.ts` answers a hit in world space with a light on the
+           hull that took it, which is the wrong half of the answer when the
+           hull that took it is the one the camera is behind: at the arena's
+           range own ship is a small shape among two, and a hit on it has to
+           be felt at the edge of the frame rather than found in the middle of
+           it. It is inert until a class lands on it. -->
+      <div class="battle__hit" id="battle-hit" aria-hidden="true"></div>
+
+      <!-- Hidden by battleui.ts the moment the first round is spent. -->
+      <p class="battle__prompt" id="battle-prompt">SPACE to fire &middot; W/S to change speed</p>
+
+      <!-- The touch key, and the only pointer-interactive thing on this
+           overlay while a fight is running. Sized off the D-pad's own key so
+           the two controls are the same size under the same thumb. -->
+      <button class="battle__fire" id="battle-fire" type="button">FIRE</button>
+
+      <!-- The result. It sits OVER the live arena rather than replacing it:
+           the two hulls keep circling behind the card, which is what stops the
+           end of a fight reading as the game freezing. Every figure in it
+           ships empty and is written from what was actually paid. -->
+      <section
+        class="battle__card"
+        id="battle-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="battle-title"
+        hidden
+      >
+        <h2 class="battle__title" id="battle-title"></h2>
+        <p class="battle__gold" id="battle-gold"></p>
+        <p class="battle__power" id="battle-power" hidden></p>
+        <button class="fbtn fbtn--go battle__continue" id="battle-continue" type="button">
+          Continue
+        </button>
+      </section>
+    </div>
+    <!-- END BATTLE -->
+
     <!-- ===================== BLACKOUT =====================
          The fade a wreck happens behind. `blackout.ts` owns it.
 

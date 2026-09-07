@@ -23,6 +23,17 @@ export interface Wallet {
    * act on — this file neither knows nor cares what was being bought.
    */
   spend(amount: number): boolean;
+  /**
+   * Takes what it can, up to `amount`, and returns what it actually took.
+   *
+   * NOT `spend`, and the difference is the point: a purchase that cannot be
+   * paid for must be refused whole, but a defeat is not a purchase — it is
+   * another captain going through the hold, and an empty hold does not save
+   * the player from having lost. So this one is best-effort where `spend` is
+   * all-or-nothing, and it is the only way gold leaves the purse without
+   * something coming back.
+   */
+  lose(amount: number): number;
   /** Returns an unsubscribe function. Fires immediately with the current gold. */
   onChange(cb: (gold: number) => void): () => void;
 }
@@ -76,6 +87,15 @@ export function createWallet(initialGold = 0): Wallet {
       gold -= cost;
       notify();
       return true;
+    },
+
+    lose(amount: number): number {
+      const want = toGold(amount);
+      const taken = want > gold ? gold : want;
+      if (taken === 0) return 0;
+      gold -= taken;
+      notify();
+      return taken;
     },
 
     onChange(cb: (gold: number) => void): () => void {

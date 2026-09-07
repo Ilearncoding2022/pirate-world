@@ -64,12 +64,46 @@ Three reads a hex, for the `ship.ts` stand-in to match against.
 | `neon_lime` | `(0.48, 1.0, 0.16)` | `#b8ff6f` | Cabin lights, weapon tips |
 | `thruster_flame` | `(0.80, 0.60, 1.0)` | `#e7cbff` | Exhaust only |
 
+Two more, and they are not on the player's ship. The AI boats are the same
+hull recoloured, and the colour is the entire warning: red hunts you, orange
+is running a straight line past you, and that has to be readable at sixty
+units before the silhouette is. `aihulls.ts` writes them into every material
+`shipfx.ts`'s `isNeon` matches, and `rimglow.ts` lights the whole hull in the
+same value, so a raider reads as one solid coloured shape rather than as a
+grey boat with lit windows.
+
+| Name | Emissive (linear) | sRGB | Use |
+|---|---|---|---|
+| `RED_NEON` | `(1.0, 0.09, 0.05)` | `#ff553f` | The hunting raider, hull and rim |
+| `ORANGE_NEON` | `(1.0, 0.34, 0.05)` | `#ff9e3f` | The wandering raider, hull and rim |
+
+`aihulls.ts` is the authority on both, and the linear column is copied from its
+constants rather than picked again here: two pairs claiming to be the same
+colour is exactly the drift this table exists to stop. The rim carries the same
+value at `RIM_STRENGTH` (1.6), which is the authored neon's own order of
+magnitude, so the bloom treats a raider's silhouette as neon rather than as a
+lit edge.
+
+These are IN-WORLD values and are not the UI's `--red` / `--orange` in §2.3.
+The two pairs are near neighbours by design and are not interchangeable: one
+is a linear emissive on a lit surface that blooms and is occluded, the other
+is a flat hue on a 2D canvas. Same rule, and the same reason, as the two
+cyans in §2.4.
+
 Emissive **strength** stays in the 2.2-3.5 band. Above roughly 5 every hue
 clips to the same white blob and the palette above stops existing.
 
 ### 2.3 UI chrome (2D, from `src/style.css`)
 `--cyan #3fe0ff` primary · `--magenta #ff4fd8` accent · `--ink #cfeffb` ·
 `--bg #05080f` / `--bg-deep #02040a` · power states `#4bf0a6` / `#ffb445` / `#ff5470`.
+
+The two raiders: `--red #ff4a3c` the hunter, `--orange #ff9a3c` the one just
+passing through. They paint the scope's arrowheads and the battle strip's FOE
+side, and they are UI-only on §2.4's terms; the hulls' own neon is the linear
+pair in §2.2. `radar.ts` carries the same two values written out as `rgb()`
+literals, because a 2D canvas context has no cascade to read and a
+`getComputedStyle` per mark per frame would be the most expensive thing on the
+instrument. Keep the two copies in step.
 
 ### 2.4 The magenta rule
 **Magenta is UI-only. It never appears on an in-world object.**

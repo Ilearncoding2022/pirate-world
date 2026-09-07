@@ -46,6 +46,27 @@ export interface Energy {
    * unaffected — a wreck can only ever move the level down.
    */
   wreck(): void;
+  /**
+   * Takes the hull's loss when an AI boat has won the cannon fight.
+   *
+   * The main tank goes to ZERO, and the backup cell — which a wreck leaves
+   * alone because it was bought with gold — is drawn down here too, because a
+   * defeat is not weather: it is another captain taking what the ship had. A
+   * cell holding more than DEFEAT_KEEP_ABOVE is left on DEFEAT_KEEP, and one
+   * at or below it is emptied outright, so the consolation exists only for a
+   * player who had genuinely invested in the cell.
+   *
+   * `rate` and `mode` are untouched, exactly as `spend` and `wreck` leave
+   * them: they describe the plant over the last frame and this is not the
+   * plant. Gold is not this module's to take — see `bounty.ts`.
+   */
+  defeat(): void;
+  /**
+   * Takes a draw's bruise: STALEMATE_COST off the main tank, floored at zero,
+   * and nothing else. Percentage POINTS off the bar, not a share of what was
+   * held — a wreck keeps a fraction, a stand-off costs a fixed amount.
+   */
+  stalemate(): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -248,6 +269,49 @@ const RESTART_LEVEL = 0.03;
  */
 const WRECK_KEEP = 0.25;
 
+/**
+ * The charge a backup cell has to be holding for a defeat to leave any of it.
+ *
+ * A fifth of a main tank, which is 40% of a full cell. Below that the cell is
+ * emptied outright, and the reason is the same one WRECK_KEEP is written as a
+ * fraction KEPT: the consolation has to be legible as a consolation. A player
+ * who had genuinely invested in the cell walks away with something to sail on;
+ * a player who was already down to the dregs of it walks away with the dregs
+ * rounded off, which is a cleaner reading than a tenth of a tenth.
+ */
+const DEFEAT_KEEP_ABOVE = 0.2;
+
+/**
+ * What is left in the cell after a defeat that qualifies: a tenth of a main
+ * tank, a fifth of a full cell.
+ *
+ * 10% is 20 s of running at top speed, or 4 minutes hove to. Enough to reach a
+ * berth that is already in sight and not enough to carry on as if nothing had
+ * happened, which is the whole shape of losing a fight: it is a setback, and
+ * the walk home is the cost of it.
+ *
+ * Exported because `battleui.ts`'s result card prints the cell that is
+ * actually left rather than this number; the export exists so the card and the
+ * rule can be read side by side, not so the card can restate the constant.
+ */
+export const DEFEAT_KEEP = 0.1;
+
+/**
+ * What a stand-off costs the main tank: 25 percentage POINTS of the bar the
+ * HUD shows, floored at zero, not a quarter of whatever was held.
+ *
+ * The asymmetry with WRECK_KEEP is deliberate and is the difference between
+ * the two events. A wreck keeps a FRACTION, so it hurts most at full and
+ * cannot quite finish a ship that was already nearly dry. A draw costs a FIXED
+ * amount, so it is the same bruise whatever the tank held: a full ship shrugs
+ * it off and a ship on 20% is put on the floor by it, which is what makes
+ * taking a fight on a low tank a decision rather than a formality.
+ *
+ * Exported so `battleui.ts` can print the figure it charged instead of typing
+ * a second 25 into the result card.
+ */
+export const STALEMATE_COST = 0.25;
+
 /* ------------------------------------------------------------------ */
 /* Energy                                                              */
 /* ------------------------------------------------------------------ */
@@ -410,5 +474,40 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     state.level *= WRECK_KEEP;
   }
 
-  return { state: state as EnergyState, update, spend, wreck };
+  /**
+   * See `Energy.defeat`. The main tank, and then the cell the wreck spares.
+   *
+   * The cell is drawn down through `battery.draw` rather than through a setter
+   * this file would have to add, and that is not a style preference: `draw` is
+   * what notifies the cell's subscribers, and the only subscriber is the save
+   * file. A defeat written straight into `battery.level` would leave the run
+   * playing on a cell the reload puts back.
+   *
+   * `draw` takes what it can and reports it, so the shortfall case needs no
+   * test of its own here: asking for more than the cell holds empties it,
+   * which is exactly what the below-the-threshold branch wants.
+   */
+  function defeat(): void {
+    state.level = 0;
+    // What the raider leaves behind, which is nothing at all unless the cell
+    // was carrying a real charge. Written as the amount KEPT and subtracted,
+    // so the two branches differ by one number rather than by two code paths.
+    const keep = battery.level > DEFEAT_KEEP_ABOVE ? DEFEAT_KEEP : 0;
+    battery.draw(battery.level - keep);
+    state.reserve = battery.level;
+  }
+
+  /**
+   * See `Energy.stalemate`. One subtraction and a floor, and nothing else.
+   *
+   * The floor is the rule and not float dust: a stand-off on 10% takes the
+   * ship to zero rather than to -15%, and a negative tank would put the HUD's
+   * bar off the bottom of its own track and `canThrust` into a state no
+   * charge could climb out of.
+   */
+  function stalemate(): void {
+    state.level = Math.max(0, state.level - STALEMATE_COST);
+  }
+
+  return { state: state as EnergyState, update, spend, wreck, defeat, stalemate };
 }

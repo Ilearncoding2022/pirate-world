@@ -28,7 +28,9 @@ the first frame you are handed does not stutter.
 | on-screen `[FISH]` | Open the fishing screen — start a session, or read the record |
 | on-screen `[SHOP]` | Open the chandlery — only alongside a berth |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
-| `Esc` | End a fishing session, or close any panel |
+| `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. One a second, ten rounds |
+| `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
+| `Esc` | End a fishing session, or close any panel. It will not get you out of a battle |
 
 The ship cannot sail onto land. Running at a coastline stops the ship; turn away to get free.
 
@@ -119,6 +121,39 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   bow-down. A berth is immune to all of it, and the scope marks both in magenta
   while there is still time to steer around them. The rolls are seeded, so the
   same world throws up the same weather.
+- **Raiders.** You are not alone out here. Every ten seconds the sea rolls for
+  a boat, and there are two kinds. A **red** one spawns forty to sixty units
+  off on any bearing, runs at twice your top speed and comes straight for you,
+  and it has five to eight seconds to get there. It turns wide, so it can be
+  shaken: put the helm hard over across its bow and it will overshoot, and when
+  its clock runs out its light turns orange and it wanders off on a straight
+  line like the other sort. An **orange** one never chases at all. It picks a
+  track and runs it for five to eight seconds, and half the time that track is
+  aimed somewhere near where you are going to be, so it is dangerous by
+  coincidence rather than by intent. Both are plotted on the scope in their own
+  colour while they are inside its range, and both are lit up in it: a Fresnel
+  glow around the whole silhouette, so at sixty units you can see which one is
+  coming before you can see what it is.
+  Touch either hull, either way round, and there is a cannon fight. The screen
+  fades, the world stops where it stands, and the two boats come up circling on
+  a ring of open ocean that closes in as it goes. You cannot steer. `W` and `S`
+  speed you up and slow you down on the circle, and that is the whole helm,
+  because the guns fire **straight out of the inboard beam**: the ring is what
+  makes the firing windows, and pulling ahead or dropping back is how you open
+  yours and close theirs. `Space` fires, one round a second, ten rounds, and
+  the ball only hits if the other boat is on the line when it gets there.
+  **Three hits lose it.** The other captain shoots the same way you do, with a
+  reaction and a wobble, so their misses come out of the same geometry as
+  yours and you can dodge a ball already in the air by changing speed.
+  Win and you take gold from a tiered purse: five hundred most of the time,
+  twenty thousand once in a very long while. Lose and the main tank goes to
+  zero, the backup cell is stripped to a tenth of a tank if it held more than a
+  fifth and emptied if it did not, and ten percent of your gold goes with the
+  boarding party, floored at five hundred and capped at ten thousand. Fight to
+  a stand-off and it costs twenty-five points of the tank and a coin-toss of a
+  thousand gold either way. In all three you come back to the exact spot and
+  heading you were rammed at, stopped, with the other boat gone and half a
+  minute before anything else comes looking.
 - **Ship wake** that follows the curve of the planet and fades behind you. It
   is drawn into the water rather than laid on top of it, so it tilts the
   surface and raises its own foam, and the foam sits still in the sea instead
