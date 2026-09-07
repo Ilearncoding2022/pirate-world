@@ -69,9 +69,19 @@ describe('moon orbit', () => {
     }
   });
 
-  it('runs a full new -> full -> new cycle over one month', () => {
-    // Sampled finely enough to catch both ends: a month that never reaches
-    // either extreme would still pass the [0, 1] bound above.
+  it('swings from a thin crescent to nearly full over one month', () => {
+    /*
+     * A month that never got near either end would still pass the [0, 1]
+     * bound above, so the swing itself is what is pinned here.
+     *
+     * Note what is NOT asserted: that the moon ever reaches exactly new or
+     * exactly full. It does not, and should not. The two orbits are inclined
+     * to each other -- the sun's declination runs on a 6 day beat and the
+     * moon's on a 5 day one -- so the bodies almost never line up exactly,
+     * which is the same reason eclipses are rare rather than monthly. The
+     * measured extremes are about 0.04 and 0.94; the bounds below leave room
+     * for the beats to drift without leaving room for the cycle to collapse.
+     */
     const month = DAY_LENGTH * MOON_MONTH_DAYS;
     let min = Infinity;
     let max = -Infinity;
@@ -80,8 +90,22 @@ describe('moon orbit', () => {
       min = Math.min(min, lit);
       max = Math.max(max, lit);
     }
-    expect(min).toBeLessThan(0.02);
-    expect(max).toBeGreaterThan(0.98);
+    expect(min).toBeLessThan(0.08);
+    expect(max).toBeGreaterThan(0.90);
+  });
+
+  it('opens on a moon that can actually be seen', () => {
+    /*
+     * The world used to start with both bodies over longitude 0: a new moon,
+     * at noon, next to the sun -- the one arrangement in which there is
+     * nothing to look at. MOON_PHASE_OFFSET exists to prevent exactly that,
+     * so it gets a test rather than a comment alone.
+     */
+    const env = envAt(0);
+    expect(env.moonIllumination).toBeGreaterThan(0.2);
+    // East of the sun, so it rides up into the evening rather than setting
+    // ahead of it. Longitude on geo.ts's convention, sun at 0 when t is 0.
+    expect(lon(env.moonDirection)).toBeGreaterThan(0);
   });
 
   it('lets the sun gain exactly one lap on the moon per month', () => {

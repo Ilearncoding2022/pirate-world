@@ -11,6 +11,7 @@ import { createWaterBodies } from './waterbodies';
 import { cullIslets } from './islets';
 import { createGrid } from './grid';
 import { createSky } from './sky';
+import { createCelestial } from './celestial';
 import { createDayNight } from './daynight';
 import { createClouds } from './clouds';
 import { createCityLights } from './citylights';
@@ -104,6 +105,7 @@ export function createGlobe(
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
   const sky = createSky();
+  const celestial = createCelestial();
 
   group.add(dayNight.group);
   group.add(water.mesh);
@@ -113,6 +115,7 @@ export function createGlobe(
   group.add(clouds.object);
   group.add(createGrid());
   group.add(sky.group);
+  group.add(celestial.group);
 
   return {
     group,
@@ -135,6 +138,9 @@ export function createGlobe(
       cityLights.update(dt, env);
       clouds.update(dt, env);
       sky.update(dt, env);
+      // After dayNight.update, like every other consumer: it only draws what
+      // the sun and moon vectors already say.
+      celestial.update(dt, env);
     },
   };
 }

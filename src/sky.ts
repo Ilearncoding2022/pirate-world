@@ -136,6 +136,16 @@ function buildStars(): THREE.Points {
 
   const points = new THREE.Points(geometry, material);
   points.name = 'starfield';
+  /*
+   * Every transparent thing in the sky is centred on the world origin, so
+   * Three's back-to-front distance sort sees them all at the same depth and
+   * `renderOrder` is the only thing deciding who paints over whom. The stars
+   * are the backdrop, so they go first and everything else is explicit about
+   * sitting on top of them:
+   *
+   *   starfield -20 | moon -5 | sun disc -4 | atmosphere 0 | clouds 2 + i
+   */
+  points.renderOrder = -20;
   return points;
 }
 

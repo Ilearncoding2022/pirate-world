@@ -142,6 +142,24 @@ const MOON_DECL_TILT = 0.5;
 const MOON_DECL_DAYS = 5;
 /** Declination phase at t = 0, so the world does not open on an equatorial moon. */
 const MOON_DECL_PHASE = 1.7;
+/**
+ * The moon's head start on the sun at t = 0, in turns.
+ *
+ * Not decorative. Without it both bodies start over longitude 0, which is a
+ * NEW moon -- an unlit disc, at noon, in the one part of the sky the sun is
+ * already blowing out. The world would open on the single configuration in
+ * which the moon cannot be seen at all, and stay that way for the first few
+ * minutes of play.
+ *
+ * A fifth of a turn is the best a noon spawn allows, and the trade is forced:
+ * elongation is what lights the moon, and it is also what drags it toward the
+ * horizon at local noon. At 72 degrees the moon is about a third lit and
+ * roughly 20 degrees up in the eastern sky -- visible immediately, clearly a
+ * crescent rather than a disc, and it waxes to gibbous within the first day
+ * because the gap opens by an eighth of a turn per day. East of the sun, so it
+ * rides up into the evening sky rather than setting ahead of it.
+ */
+const MOON_PHASE_OFFSET = 0.2;
 
 /** Floor light, so no part of the world is ever pure black. */
 const AMBIENT_TINT = new THREE.Color('#54637d');
@@ -285,7 +303,8 @@ export function createDayNight(): DayNight {
     // ---- Where the moon is --------------------------------------------
     // Placed from elapsed time on its own period, in the same basis as the
     // sun above, so the two are comparable and the phase below is real.
-    const moonLon = -(env.elapsed / MOON_DAY_LENGTH) * Math.PI * 2;
+    const moonLon =
+      (MOON_PHASE_OFFSET - env.elapsed / MOON_DAY_LENGTH) * Math.PI * 2;
     const moonSeason =
       (env.elapsed / (DAY_LENGTH * MOON_DECL_DAYS)) * Math.PI * 2 + MOON_DECL_PHASE;
     const moonDec = Math.sin(moonSeason) * MOON_DECL_TILT;
