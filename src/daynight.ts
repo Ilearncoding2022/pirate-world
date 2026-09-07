@@ -41,7 +41,7 @@ export interface DayNight {
  * things move the ratio: the day's length, the ship's speed, or a larger
  * GLOBE_RADIUS, which slows the ship in degrees without slowing the sun.
  */
-const DAY_LENGTH = 1200;
+export const DAY_LENGTH = 1200;
 
 /**
  * Days in one seasonal cycle. The subsolar latitude drifts on this much slower
@@ -80,13 +80,68 @@ const HEMI_NIGHT = 0.16;
 const HEMI_DAY = 0.34;
 
 /*
- * Moonlight: a cool fill aimed from roughly opposite the sun, so it lands only
- * on the night hemisphere and gives the dark terrain some shape. Tilted north
- * of the true antisolar point so it does not read as a mirrored sun.
+ * Moonlight: a cool fill, and now a body with somewhere of its own to be.
+ *
+ * The moon used to be parked opposite the sun and tilted north, which made it
+ * a mirrored sun that could never be anywhere else and never be anything but
+ * full. It now keeps its own orbit, placed from elapsed time exactly the way
+ * the sun is, so three things follow that nothing has to model:
+ *
+ *   - it rises later each day, because it tracks westward more slowly than the
+ *     sun (see MOON_DAY_LENGTH), so the sun laps it once a month;
+ *   - it is therefore sometimes up in daylight and sometimes absent all night;
+ *   - its phase is the angle between the two directions, so a full moon is by
+ *     construction one that rises as the sun sets.
+ *
+ * The fill light follows the phase, so nights are no longer interchangeable.
+ * A new moon, or a moon below the horizon, leaves only the hemisphere light
+ * and the ambient floor -- darker than any night before this. That is the
+ * point, and AMBIENT_INTENSITY is what stops it reaching black.
  */
 const MOON_TINT = new THREE.Color('#93b4ec');
+/** Fill intensity at a full moon. */
 const MOON_INTENSITY = 0.3;
-const MOON_TILT = 0.5;
+/**
+ * Fraction of the full-moon fill that survives at a new moon.
+ *
+ * Not zero. A new moon is still a disc in the sky catching earthshine, and
+ * more practically, dropping the fill to nothing costs the night terrain all
+ * its shape at once rather than over the month.
+ */
+const MOON_FLOOR = 0.2;
+/**
+ * Game days in one phase cycle, new moon to new moon.
+ *
+ * Eight, against Earth's 29.5, for the same reason DAY_LENGTH is twenty
+ * minutes against Earth's day: a player has to be able to *see* the cycle. One
+ * eighth of a turn per day means the moon is visibly a different shape, in a
+ * visibly different part of the sky, from one night to the next.
+ */
+export const MOON_MONTH_DAYS = 8;
+/**
+ * Seconds for the moon to make one circuit of the globe.
+ *
+ * Slightly longer than DAY_LENGTH, and this is the whole mechanism: over one
+ * month the sun makes MOON_MONTH_DAYS circuits and the moon makes one fewer,
+ * so the sun gains exactly a full lap and the phase runs new -> full -> new.
+ * Deriving it this way rather than writing a number means the month cannot
+ * drift out of step with the phase it is supposed to produce.
+ */
+const MOON_DAY_LENGTH = (DAY_LENGTH * MOON_MONTH_DAYS) / (MOON_MONTH_DAYS - 1);
+/**
+ * Peak lunar declination, radians. A little over the sun's AXIAL_TILT, so the
+ * moon's track across the sky is visibly its own rather than the sun's path
+ * walked at a different hour.
+ */
+const MOON_DECL_TILT = 0.5;
+/**
+ * Days in one declination cycle. Deliberately coprime with neither -- 5
+ * against the season's 6 and the month's 8 -- so the sky's three beats take
+ * 120 days to line up again and nothing reads as a loop.
+ */
+const MOON_DECL_DAYS = 5;
+/** Declination phase at t = 0, so the world does not open on an equatorial moon. */
+const MOON_DECL_PHASE = 1.7;
 
 /** Floor light, so no part of the world is ever pure black. */
 const AMBIENT_TINT = new THREE.Color('#54637d');
@@ -96,12 +151,10 @@ const AMBIENT_INTENSITY = 0.1;
 /* Scratch                                                             */
 /* ------------------------------------------------------------------ */
 
-const WORLD_UP = new THREE.Vector3(0, 1, 0);
 /** Sub-camera direction used until the first frame reports a camera. */
 const DEFAULT_VIEW_DIR = new THREE.Vector3(0, 0, 1);
 
 const _viewDir = new THREE.Vector3();
-const _moonDir = new THREE.Vector3();
 
 function smoothstep(edge0: number, edge1: number, x: number): number {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
@@ -229,13 +282,37 @@ export function createDayNight(): DayNight {
     // Thicker air near the horizon: dim the key as the sun drops.
     sun.intensity = KEY_LOW + (KEY_HIGH - KEY_LOW) * smoothstep(0.0, 0.42, elevation);
 
-    // Opposite the sun, lifted toward the pole so the fill is not a mirror.
-    _moonDir
-      .copy(env.sunDirection)
-      .multiplyScalar(-1)
-      .addScaledVector(WORLD_UP, MOON_TILT)
-      .normalize();
-    moon.position.copy(_moonDir).multiplyScalar(SUN_DISTANCE);
+    // ---- Where the moon is --------------------------------------------
+    // Placed from elapsed time on its own period, in the same basis as the
+    // sun above, so the two are comparable and the phase below is real.
+    const moonLon = -(env.elapsed / MOON_DAY_LENGTH) * Math.PI * 2;
+    const moonSeason =
+      (env.elapsed / (DAY_LENGTH * MOON_DECL_DAYS)) * Math.PI * 2 + MOON_DECL_PHASE;
+    const moonDec = Math.sin(moonSeason) * MOON_DECL_TILT;
+    const cosMoonDec = Math.cos(moonDec);
+
+    env.moonDirection.set(
+      cosMoonDec * Math.sin(moonLon),
+      Math.sin(moonDec),
+      cosMoonDec * Math.cos(moonLon),
+    );
+
+    /*
+     * Phase, straight from the two vectors.
+     *
+     * `dot` is 1 with the moon in front of the sun (new: its lit face is
+     * turned away from the globe) and -1 with the moon opposite (full), so
+     * (1 - dot) / 2 is the illuminated fraction. This is the same quantity
+     * the moon's own shader recovers per pixel from `dot(normal, sunDir)`,
+     * which is why the two can never disagree about the shape in the sky.
+     */
+    env.moonIllumination = (1 - env.sunDirection.dot(env.moonDirection)) * 0.5;
+
+    moon.position.copy(env.moonDirection).multiplyScalar(SUN_DISTANCE);
+    // Directional, so it lights only the hemisphere it faces: a moon below
+    // the horizon contributes nothing there, without any test for it here.
+    moon.intensity =
+      MOON_INTENSITY * (MOON_FLOOR + (1 - MOON_FLOOR) * env.moonIllumination);
 
     hemi.intensity = HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * env.dayFactor;
     hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, env.dayFactor);
