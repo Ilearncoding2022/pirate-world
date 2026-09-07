@@ -8,6 +8,7 @@ import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
 import { bakeTerrain, HORIZON_MAX_DEGREES } from './terrainbake';
+import { sessionQuality } from './quality';
 
 /**
  * Outward displacement of the highest land.
@@ -118,20 +119,102 @@ const WET_DARKEN = 0.55;
  */
 const CURVATURE_TINT = 1.8;
 
-/**
- * Blend between the flat geometric (low-poly facet) normal and a per-pixel
- * normal reconstructed from the height-map gradient. 0 = pure facets, 1 =
- * fully smooth. The art direction wants beveled low-poly forms -- not flat
- * blocks, not photoreal -- so 0.4 is an opening bid at neither extreme.
+/*
+ * The blend between the flat geometric (low-poly facet) normal and a
+ * per-pixel normal reconstructed from the height-map gradient -- 0 = pure
+ * facets, 1 = fully smooth -- used to be a `FACET_BLEND = 0.4` here. It now
+ * lives in the quality table as `landFacetBlend` (low 0.6, medium 0.8, high
+ * 0.85): at 0.4 the facets were 60% of what the eye saw, and next to water
+ * that reads as one continuous surface the land looked chipped out of a
+ * block.
+ *
+ * It is the ONE tunable in this file fed to GLSL as a uniform rather than
+ * baked into the source as a `*_C` const. Every other constant here is a
+ * shape decision that only changes when someone edits this file, so baking
+ * it lets the compiler fold it; this one has to differ per tier, and a
+ * per-tier bake would make the shader source -- and so the program cache
+ * key -- depend on the tier. A uniform is one register and no branch.
  */
-const FACET_BLEND = 0.4;
+
 /**
  * How strongly the height gradient tilts the per-pixel normal before the
- * FACET_BLEND mix. Dimensionless, in the same spirit as water.ts's `tilt`:
- * the raw gradient is small (terrain noise is broad relative to
+ * facet blend. Dimensionless, in the same spirit as water.ts's `tilt`: the
+ * raw gradient is small (terrain noise is broad relative to
  * SLOPE_STEP_WORLD), so this amplifies it into a visible tilt.
+ *
+ * Raised from 8 with the blend, and the number comes out of `landRadius`.
+ * A gradient in height-field units becomes a real world slope through
+ * d(radius)/dh = 2 * MAX_LAND_RELIEF * a / 0.6, i.e. between 0 at the
+ * waterline and ~16.7 at full relief -- so a single strength can only be
+ * honest at one elevation, and 8 was honest at a ~ 0.48. Above that it
+ * UNDER-reads the slope, which did not matter while the facet normal (which
+ * carries the true tilt) was 60% of the mix and matters a great deal at 15%.
+ * Solving for the strength that reproduces the old blended tilt on a
+ * 20-degree slope at a ~ 0.7 -- the hill-and-cliff band where relief
+ * actually reads -- gives 9.8; at a ~ 0.85 it gives 11.0 and at a ~ 0.4 it
+ * gives 7.2. 10 is the round number in the middle of the band that matters.
  */
-const NORMAL_GRADIENT_STRENGTH = 8;
+const NORMAL_GRADIENT_STRENGTH = 10;
+
+/**
+ * Weight of the detail normal (below) where it applies in full. A mix
+ * between the height-map normal and that same normal tilted by the fine
+ * noise gradient, so 0 is today's surface and 1 is all grain; the mix is
+ * between two unit vectors, which is what bounds a noise gradient that is
+ * otherwise unbounded in slope.
+ */
+const DETAIL_NORMAL = 0.35;
+/**
+ * Finite-difference step for the detail normal, world units. About a third
+ * of ROCK_WAVELENGTH_2: small enough to read the octave's own slope, large
+ * enough that the difference is not two samples of the same lobe.
+ */
+const DETAIL_STEP_WORLD = 0.25;
+
+/**
+ * Distance fades, world units. The height map is 2048x1024 equirect, so a
+ * texel is ~0.6 world units at the equator and every noise term above is
+ * finer than that: at orbit height they all land inside one pixel and turn
+ * into uniform grain, which is exactly what made land read as "rough" at
+ * every zoom. Water solves this with `lod`/`nearMid`/`fadeFine`
+ * (waterglsl.ts); these are the same shape.
+ *
+ * The detail normal goes to zero, because grain the eye cannot resolve is
+ * only noise -- and going to zero is also what lets the two extra `snoise`
+ * taps be branched away entirely, which is what keeps the orbit framing at
+ * today's cost. The mottling and striation only go to half: they are colour
+ * variation rather than surface detail, and a continent with none at all
+ * reads as painted plastic.
+ */
+const DETAIL_FADE_NEAR = 18;
+const DETAIL_FADE_FAR = 40;
+const GRAIN_FADE_NEAR = 45;
+const GRAIN_FADE_FAR = 120;
+const GRAIN_FADE_FLOOR = 0.5;
+
+/**
+ * Per-mask roughness for the `<roughnessmap_fragment>` chunk. The material's
+ * own 0.88 (grass and forest) stays the base and is never restated here --
+ * each of these is a mix away from whatever roughness the material carries.
+ *
+ * This is the only view-dependent term land has: at 0.88 a MeshStandard
+ * surface has no usable specular lobe at all, which is why the sea has a sun
+ * road, a rim and a sheen and the coast beside it has none of the three. Wet
+ * sand is the shiniest thing on a beach, bare rock is polished by weather
+ * where turf is not, and a snow-lit peak sits between them.
+ */
+const WET_ROUGHNESS = 0.45;
+const ROCK_ROUGHNESS = 0.6;
+const PEAK_ROUGHNESS = 0.7;
+/**
+ * Height band, in the height field's own units above sea level, over which
+ * `colorForLand` is mixing rock into peak. Derived from that ramp rather
+ * than typed again so the two cannot drift: `t` there is
+ * (a - BEACH_BAND) / 0.5, and peak starts at t = 0.75.
+ */
+const PEAK_RAMP = 0.5;
+const PEAK_START = BEACH_BAND + PEAK_RAMP * 0.75;
+const PEAK_FULL = BEACH_BAND + PEAK_RAMP;
 
 /**
  * Ambient occlusion strength: 0 leaves the surface fully lit regardless of
@@ -172,6 +255,9 @@ function freq(wavelengthWorld: number): string {
 // "the single easiest way to get this stream wrong".
 const SLOPE_DV = (SLOPE_STEP_WORLD / (Math.PI * GLOBE_RADIUS)).toFixed(8);
 const SLOPE_DU_BASE = (SLOPE_STEP_WORLD / (2 * Math.PI * GLOBE_RADIUS)).toFixed(8);
+// The detail normal's step is taken along the unit-direction tangent frame,
+// not in UV, so it is a plain angle: arc length over radius.
+const DETAIL_STEP_RAD = (DETAIL_STEP_WORLD / GLOBE_RADIUS).toFixed(8);
 const HORIZON_SOFTNESS_RAD = ((HORIZON_SOFTNESS_DEG * Math.PI) / 180).toFixed(8);
 const HORIZON_MAX_RAD = ((HORIZON_MAX_DEGREES * Math.PI) / 180).toFixed(8);
 
@@ -197,6 +283,10 @@ const FRAGMENT_DECLARATIONS = [
   'uniform float uSeaLevel;',
   'uniform vec3 uSunDirection;',
   'uniform float uDayFactor;',
+  // The quality table's `landFacetBlend`, and the one tunable here that is a
+  // uniform rather than a baked const -- see the comment where FACET_BLEND
+  // used to be, above, for why.
+  'uniform float uFacetBlend;',
   NOISE_GLSL,
   HEIGHTMAP_GLSL,
   FOG_GLSL,
@@ -208,8 +298,20 @@ const FRAGMENT_DECLARATIONS = [
   `const float WET_BAND_C = ${WET_BAND.toFixed(6)};`,
   `const float WET_DARKEN_C = ${WET_DARKEN.toFixed(4)};`,
   `const float CURVATURE_TINT_C = ${CURVATURE_TINT.toFixed(4)};`,
-  `const float FACET_BLEND_C = ${FACET_BLEND.toFixed(4)};`,
   `const float NORMAL_GRADIENT_STRENGTH_C = ${NORMAL_GRADIENT_STRENGTH.toFixed(4)};`,
+  `const float DETAIL_NORMAL_C = ${DETAIL_NORMAL.toFixed(4)};`,
+  `const float DETAIL_STEP_WORLD_C = ${DETAIL_STEP_WORLD.toFixed(4)};`,
+  `const float DETAIL_STEP_RAD_C = ${DETAIL_STEP_RAD};`,
+  `const float DETAIL_FADE_NEAR_C = ${DETAIL_FADE_NEAR.toFixed(4)};`,
+  `const float DETAIL_FADE_FAR_C = ${DETAIL_FADE_FAR.toFixed(4)};`,
+  `const float GRAIN_FADE_NEAR_C = ${GRAIN_FADE_NEAR.toFixed(4)};`,
+  `const float GRAIN_FADE_FAR_C = ${GRAIN_FADE_FAR.toFixed(4)};`,
+  `const float GRAIN_FADE_FLOOR_C = ${GRAIN_FADE_FLOOR.toFixed(4)};`,
+  `const float WET_ROUGHNESS_C = ${WET_ROUGHNESS.toFixed(4)};`,
+  `const float ROCK_ROUGHNESS_C = ${ROCK_ROUGHNESS.toFixed(4)};`,
+  `const float PEAK_ROUGHNESS_C = ${PEAK_ROUGHNESS.toFixed(4)};`,
+  `const float PEAK_START_C = ${PEAK_START.toFixed(6)};`,
+  `const float PEAK_FULL_C = ${PEAK_FULL.toFixed(6)};`,
   `const float AO_STRENGTH_C = ${AO_STRENGTH.toFixed(4)};`,
   `const float HORIZON_SOFTNESS_RAD_C = ${HORIZON_SOFTNESS_RAD};`,
   `const float HORIZON_MAX_RAD_C = ${HORIZON_MAX_RAD};`,
@@ -261,6 +363,13 @@ const FRAGMENT_DECLARATIONS = [
  * then darkens wet sand, reveals rock on steep slopes, tints ridges/valleys
  * by curvature, and mottles grass and striates rock with two-octave
  * direction-space noise (4 snoise calls total).
+ *
+ * It also builds the two distance fades and the masks that the later
+ * injection points read: `<roughnessmap_fragment>` and
+ * `<normal_fragment_maps>` both run after `<color_fragment>` in Three's
+ * meshphysical fragment shader, in that order, and all three injections land
+ * in the same function scope -- which is how the normal injection already
+ * reuses this one's five height taps rather than taking them twice.
  */
 const FRAGMENT_COLOR_INJECT = [
   '#include <color_fragment>',
@@ -282,6 +391,21 @@ const FRAGMENT_COLOR_INJECT = [
   'float terrainSlope = length(vec2(terrainHE - terrainHW, terrainHN - terrainHS)) / (2.0 * SLOPE_STEP_WORLD_C);',
   'float terrainCurvature = terrainHE + terrainHW + terrainHN + terrainHS - 4.0 * terrainH0;',
   '',
+  '// ---- distance and grazing fades --------------------------------------',
+  '// Built the way waterglsl.ts builds `lod`/`nearMid`/`fadeFine`, and for',
+  '// the same reason: a pixel covers more ground both with distance and at',
+  '// a grazing angle, and every noise term below is finer than a height-map',
+  '// texel. Held at full amplitude the way they were, they are the same',
+  '// grain from the deck and from orbit, which is what reads as roughness',
+  '// rather than as texture.',
+  'vec3 terrainToCam = cameraPosition - vTerrainWorldPos;',
+  'float terrainCamDist = length(terrainToCam);',
+  'vec3 terrainViewDir = terrainToCam / max(terrainCamDist, 1e-4);',
+  'float terrainGraze = clamp(dot(terrainUp, terrainViewDir), 0.0, 1.0);',
+  'float terrainLod = smoothstep(0.06, 0.38, terrainGraze);',
+  'float terrainDetailFade = (1.0 - smoothstep(DETAIL_FADE_NEAR_C, DETAIL_FADE_FAR_C, terrainCamDist)) * terrainLod;',
+  'float terrainGrainFade = mix(1.0, GRAIN_FADE_FLOOR_C, smoothstep(GRAIN_FADE_NEAR_C, GRAIN_FADE_FAR_C, terrainCamDist));',
+  '',
   '// Wet sand: darken just above the waterline, fading out over WET_BAND.',
   'float terrainWetT = 1.0 - smoothstep(0.0, WET_BAND_C, max(0.0, terrainH0 - uSeaLevel));',
   'diffuseColor.rgb *= mix(1.0, WET_DARKEN_C, terrainWetT);',
@@ -297,25 +421,68 @@ const FRAGMENT_COLOR_INJECT = [
   '',
   '// Two-octave direction-space noise: grass mottling everywhere, rock',
   '// striation only where the slope mask above has already revealed rock.',
+  '// Both are held down by terrainGrainFade with distance rather than being',
+  '// the same amplitude at every zoom.',
   'float terrainMottle = snoise(terrainUp * GRASS_FREQ_1) * 0.6 + snoise(terrainUp * GRASS_FREQ_2) * 0.4;',
-  'diffuseColor.rgb *= 1.0 + terrainMottle * MOTTLE_STRENGTH_C;',
-  'float terrainStriation = snoise(terrainUp * ROCK_FREQ_1) * 0.6 + snoise(terrainUp * ROCK_FREQ_2) * 0.4;',
-  'diffuseColor.rgb *= 1.0 + terrainStriation * STRIATION_STRENGTH_C * terrainRockMask;',
+  'diffuseColor.rgb *= 1.0 + terrainMottle * MOTTLE_STRENGTH_C * terrainGrainFade;',
+  '// ROCK_FREQ_2 is 0.7 world units, which is also the wavelength the detail',
+  '// normal wants, so this centre tap is deliberately shared with it: the',
+  '// grain and the streaks are then the same rock rather than two unrelated',
+  '// fields, and the normal injection needs only its two offset taps to stay',
+  '// inside the stream\'s +2 snoise budget.',
+  'float terrainDetail = snoise(terrainUp * ROCK_FREQ_2);',
+  'float terrainStriation = snoise(terrainUp * ROCK_FREQ_1) * 0.6 + terrainDetail * 0.4;',
+  'diffuseColor.rgb *= 1.0 + terrainStriation * STRIATION_STRENGTH_C * terrainRockMask * terrainGrainFade;',
+  '',
+  '// The peak band, for roughness below: the same slice of the height ramp',
+  '// `colorForLand` is mixing rock into peak over.',
+  'float terrainPeakMask = smoothstep(PEAK_START_C, PEAK_FULL_C, terrainH0 - uSeaLevel);',
+].join('\n');
+
+/**
+ * Injected right after `<roughnessmap_fragment>`, which has just set
+ * `roughnessFactor` from the material's own `roughness` (0.88).
+ *
+ * At 0.88 across the whole surface there is no usable specular lobe
+ * anywhere: no glint, no Fresnel rim, nothing that changes as the camera
+ * moves. The water beside it has all three, and that difference alone is
+ * most of why land reads as clay next to a sea that reads as water. Driving
+ * roughness from the masks this file already computes costs nothing -- the
+ * masks exist -- and gives the coast a wet sheen, the cliffs a hard
+ * highlight and the turf exactly what it has today.
+ */
+const FRAGMENT_ROUGHNESS_INJECT = [
+  '#include <roughnessmap_fragment>',
+  '',
+  '// Each of these is a mix away from whatever the material carries, so the',
+  '// grass/forest case stays the material\'s own roughness by construction',
+  '// rather than by a constant repeated here. Wet sand is applied last: at',
+  '// the waterline it is the whole surface, whatever else is under it.',
+  'roughnessFactor = mix(roughnessFactor, ROCK_ROUGHNESS_C, terrainRockMask);',
+  'roughnessFactor = mix(roughnessFactor, PEAK_ROUGHNESS_C, terrainPeakMask);',
+  'roughnessFactor = mix(roughnessFactor, WET_ROUGHNESS_C, terrainWetT);',
 ].join('\n');
 
 /**
  * Injected right after `<normal_fragment_maps>`, once the flat/geometric
  * `normal` (view space) exists. Reconstructs a per-pixel normal from the
  * same height taps `FRAGMENT_COLOR_INJECT` already sampled, tilts it by the
- * gradient, transforms it into view space with `normalMatrix` (already
- * declared by Three; never redeclared here), and blends it with the facet
- * normal at FACET_BLEND.
+ * gradient, adds a fine detail tilt where the surface is rock and the camera
+ * is close enough to resolve it, transforms the result into view space with
+ * `normalMatrix` (already declared by Three; never redeclared here), and
+ * blends it with the facet normal at `uFacetBlend`.
+ *
+ * The height map is 2048x1024 equirect, so its texels are ~0.6 world units
+ * apart at the equator and there is simply no data between them: from the
+ * deck a cliff face is smooth and blank however hard the gradient is
+ * pushed. The detail octave is the only thing here that adds information
+ * rather than amplifying what the map already holds.
  */
 const FRAGMENT_NORMAL_INJECT = [
   '#include <normal_fragment_maps>',
   '',
   '// Blend the flat geometric (low-poly facet) normal with a per-pixel',
-  '// normal from the height-map gradient -- FACET_BLEND toward 0 keeps the',
+  '// normal from the height-map gradient -- uFacetBlend toward 0 keeps the',
   '// facets, toward 1 reads as fully smooth. Neither extreme is the target.',
   'vec3 terrainNorth;',
   'vec3 terrainEast;',
@@ -323,8 +490,31 @@ const FRAGMENT_NORMAL_INJECT = [
   'float terrainGradE = (terrainHE - terrainHW) / (2.0 * SLOPE_STEP_WORLD_C);',
   'float terrainGradN = (terrainHN - terrainHS) / (2.0 * SLOPE_STEP_WORLD_C);',
   'vec3 terrainHeightNormalObj = normalize(terrainUp - (terrainEast * terrainGradE + terrainNorth * terrainGradN) * NORMAL_GRADIENT_STRENGTH_C);',
+  '',
+  '// Detail normal: the fine octave already sampled at the centre for the',
+  '// striation, finite-differenced along the same tangent frame. Masked to',
+  '// rock so turf stays soft and stone gets grain, and branched on the fade',
+  '// so the two taps are not paid for at all past DETAIL_FADE_FAR -- which',
+  '// is what returns the orbit framing to its old cost. The branch is',
+  '// coherent at that range (the whole screen fails it together), which is',
+  '// the only kind of branch worth writing in a fragment shader.',
+  'float terrainDetailAmt = DETAIL_NORMAL_C * terrainRockMask * terrainDetailFade;',
+  'if (terrainDetailAmt > 0.002) {',
+  '  float terrainDetailE = snoise((terrainUp + terrainEast * DETAIL_STEP_RAD_C) * ROCK_FREQ_2);',
+  '  float terrainDetailN = snoise((terrainUp + terrainNorth * DETAIL_STEP_RAD_C) * ROCK_FREQ_2);',
+  '  vec3 terrainDetailTilt = terrainEast * (terrainDetailE - terrainDetail) + terrainNorth * (terrainDetailN - terrainDetail);',
+  '  // The tilt is applied to the height normal and re-normalized BEFORE the',
+  '  // mix, so the mix is between two unit vectors that differ only by the',
+  '  // grain. Mixing toward a normal built around `terrainUp` instead would',
+  '  // pull the macro slope back toward flat, and a noise gradient has no',
+  '  // bound on its slope, so this is also what keeps a rare steep lobe from',
+  '  // flipping the normal outright.',
+  '  vec3 terrainDetailNormalObj = normalize(terrainHeightNormalObj - terrainDetailTilt / DETAIL_STEP_WORLD_C);',
+  '  terrainHeightNormalObj = normalize(mix(terrainHeightNormalObj, terrainDetailNormalObj, terrainDetailAmt));',
+  '}',
+  '',
   'vec3 terrainHeightNormalView = normalize(normalMatrix * terrainHeightNormalObj);',
-  'normal = normalize(mix(normal, terrainHeightNormalView, FACET_BLEND_C));',
+  'normal = normalize(mix(normal, terrainHeightNormalView, uFacetBlend));',
 ].join('\n');
 
 /**
@@ -427,8 +617,10 @@ const LAND_DETAIL = Math.round((96 * GLOBE_RADIUS) / 100);
  * docs/RENDER_PLAN.md Phase 1 stream C, so the flat vertex-coloured look does
  * not read as clay: per-pixel slope, curvature, wetness and noise modulate the
  * PALETTE base, a baked ambient-occlusion and 8-azimuth horizon shadow light
- * it, and a height-gradient normal softens (never replaces) the low-poly
- * facets. `postfx.ts`'s chained `onBeforeCompile` (Phase 0 / Q) is what makes
+ * it, a height-gradient normal plus a fine detail octave soften (never
+ * replace) the low-poly facets, and the same masks drive roughness so wet
+ * sand and bare rock catch the sun the way the water beside them does.
+ * `postfx.ts`'s chained `onBeforeCompile` (Phase 0 / Q) is what makes
  * this legal: this hook runs first, then the composer's sRGB self-encode
  * chains on top untouched.
  */
@@ -508,6 +700,10 @@ export function createLand(terrain: Terrain, heightMap: HeightMap): Land {
     uSeaLevel: { value: terrain.seaLevel },
     uSunDirection: { value: new THREE.Vector3(0.62, 0.42, 0.66).normalize() },
     uDayFactor: { value: 1 },
+    // The quality table's `landFacetBlend`. `globe.ts` builds the land
+    // without handing it a Quality, so this reads the one `main.ts` already
+    // resolved rather than resolving a second copy -- see `sessionQuality`.
+    uFacetBlend: { value: sessionQuality().landFacetBlend },
     // Aerial perspective (`fogglsl.ts`'s contract): the one shared object, so
     // land and water always agree on the fog within a frame.
     ...fogUniforms,
@@ -521,6 +717,7 @@ export function createLand(terrain: Terrain, heightMap: HeightMap): Land {
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', '#include <common>\n' + FRAGMENT_DECLARATIONS)
       .replace('#include <color_fragment>', FRAGMENT_COLOR_INJECT)
+      .replace('#include <roughnessmap_fragment>', FRAGMENT_ROUGHNESS_INJECT)
       .replace('#include <normal_fragment_maps>', FRAGMENT_NORMAL_INJECT)
       .replace('#include <lights_fragment_end>', FRAGMENT_LIGHTS_INJECT)
       .replace('#include <opaque_fragment>', FRAGMENT_OPAQUE_INJECT);

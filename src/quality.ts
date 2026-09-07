@@ -40,6 +40,17 @@ export interface QualitySettings {
   reflectionSize: number;
   /** Reflection cube faces refreshed per frame; 0 disables the cube outright. Read by Stream D, later -- Q does not consume this. */
   reflectionFacesPerFrame: number;
+  /**
+   * How far land's per-pixel height-map normal replaces the flat facet
+   * normal: 0 = pure low-poly facets, 1 = fully smooth. Read by `land.ts` and
+   * fed to the shader as a uniform, so unlike every other row above it costs
+   * nothing to move at runtime -- it is the one land tunable the owner
+   * expects to keep turning by eye.
+   *
+   * Not world-scale or ship-scale: it is a blend weight, like the rest of
+   * this table's pipeline numbers.
+   */
+  landFacetBlend: number;
 }
 
 /**
@@ -62,6 +73,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     patchSegments: 96,
     reflectionSize: 0,
     reflectionFacesPerFrame: 0,
+    landFacetBlend: 0.6,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -71,6 +83,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     patchSegments: 128,
     reflectionSize: 128,
     reflectionFacesPerFrame: 1,
+    landFacetBlend: 0.8,
   },
   high: {
     pixelRatioCap: 2,
@@ -80,6 +93,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     patchSegments: 160,
     reflectionSize: 256,
     reflectionFacesPerFrame: 2,
+    landFacetBlend: 0.85,
   },
 };
 
@@ -150,6 +164,9 @@ declare global {
   }
 }
 
+/** Set by `createQuality`, read by `sessionQuality` below. */
+let session: Quality | null = null;
+
 /**
  * Builds the frozen settings for this session and, if the URL asks for it,
  * publishes the debug hook. Called once, at the top of `main.ts`, before the
@@ -159,6 +176,7 @@ declare global {
 export function createQuality(search: string = window.location.search): Quality {
   const tier = resolveTier(search);
   const quality: Quality = Object.freeze({ tier, ...QUALITY_TABLE[tier] });
+  session = quality;
 
   const params = new URLSearchParams(search);
   if (params.has('quality') || params.has('debug')) {
@@ -166,4 +184,25 @@ export function createQuality(search: string = window.location.search): Quality 
   }
 
   return quality;
+}
+
+/**
+ * The settings the last `createQuality()` produced, for a module that is
+ * built without being handed them.
+ *
+ * There is exactly one caller: `land.ts`. `globe.ts` constructs the land as
+ * `createLand(terrain, heightMap)` and already holds a `Quality` it could
+ * pass, but that call site belongs to another stream; this is the additive
+ * way to read one row of the table without it. It is deliberately NOT a
+ * second resolution -- it hands back the same frozen object `main.ts` made,
+ * so nothing downstream can drift out of step with the table, which is the
+ * property the file header exists to protect.
+ *
+ * The fallback matters: `tests/fixtures/generate.ts` calls `createLand` in
+ * plain Node, where there is no `window` for `createQuality` to read and no
+ * startup to have called it. Falling back to the 'high' row keeps that path
+ * free of any DOM access at all.
+ */
+export function sessionQuality(): Quality {
+  return (session ??= Object.freeze({ tier: 'high', ...QUALITY_TABLE.high }));
 }
