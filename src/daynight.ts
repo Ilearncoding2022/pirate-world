@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
+import { SPAWN_LON_DEG } from './terrain';
 
 export interface DayNight {
   /** Lights and any sun-following objects. Added to the world group. */
@@ -42,6 +43,38 @@ export interface DayNight {
  * GLOBE_RADIUS, which slows the ship in degrees without slowing the sun.
  */
 export const DAY_LENGTH = 1200;
+
+/**
+ * Local solar time the world opens at, in the same [0, 1) the time dial reads:
+ * 0 is local midnight, 0.5 local noon. A quarter is **06:00**.
+ *
+ * The world used to open at local noon, with the sun overhead and behind the
+ * chase camera, so the one thing the sky is for was the one thing the player
+ * could not see. At dawn the sun is dead ahead instead: the ship spawns on
+ * heading 090 (`main.ts`), and by definition a sunrise is in the east.
+ *
+ * Worth knowing before reading the horizon: the sun is at 0 degrees elevation
+ * at 06:00, but the VISIBLE horizon on a globe this small is about 17 degrees
+ * below eye level, so a sun on the geometric horizon still clears the limb
+ * comfortably. See **The sky, and the two views it serves** in
+ * docs/ARCHITECTURE.md.
+ */
+const START_LOCAL_TIME = 0.25;
+
+/**
+ * `env.elapsed` at world creation, so the ship's FIRST frame is at
+ * `START_LOCAL_TIME` on its own meridian.
+ *
+ * Derived, not written down as a number, and that is the point. Local time
+ * here is the angle between the ship's meridian and the sun's -- never a clock
+ * the world carries -- so the elapsed seconds that put the spawn at dawn
+ * depend on where the spawn is and how long a day lasts. Both of those are
+ * documented as retunable. Inverting `solartime.ts`'s own relation
+ * (`time = fract(0.5 + tod + lon / 2PI)`) means changing either one moves this
+ * with it instead of silently opening at the wrong hour.
+ */
+export const START_ELAPSED =
+  DAY_LENGTH * (((START_LOCAL_TIME - 0.5 - SPAWN_LON_DEG / 360) % 1) + 1) % DAY_LENGTH;
 
 /**
  * Days in one seasonal cycle. The subsolar latitude drifts on this much slower
@@ -151,15 +184,17 @@ const MOON_DECL_PHASE = 1.7;
  * which the moon cannot be seen at all, and stay that way for the first few
  * minutes of play.
  *
- * A fifth of a turn is the best a noon spawn allows, and the trade is forced:
- * elongation is what lights the moon, and it is also what drags it toward the
- * horizon at local noon. At 72 degrees the moon is about a third lit and
- * roughly 20 degrees up in the eastern sky -- visible immediately, clearly a
- * crescent rather than a disc, and it waxes to gibbous within the first day
- * because the gap opens by an eighth of a turn per day. East of the sun, so it
- * rides up into the evening sky rather than setting ahead of it.
+ * Tuned against START_ELAPSED, and it had to be retuned when the world moved
+ * from a noon opening to a dawn one -- the two want opposite things. At noon
+ * the sun is overhead, so anything far enough from it to be well lit is also
+ * below the horizon, and the best available was a third-lit crescent low in
+ * the east. At dawn the sun is ON the eastern horizon, which frees the whole
+ * western sky: the moon can be nearly opposite the sun, and therefore nearly
+ * full, and still be well up. So the world now opens the way a good dawn
+ * actually looks -- sun rising ahead of the bow, bright gibbous moon setting
+ * astern.
  */
-const MOON_PHASE_OFFSET = 0.2;
+const MOON_PHASE_OFFSET = 0.517;
 
 /** Floor light, so no part of the world is ever pure black. */
 const AMBIENT_TINT = new THREE.Color('#54637d');

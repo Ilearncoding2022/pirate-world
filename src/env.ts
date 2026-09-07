@@ -1,4 +1,5 @@
 import { Color, Vector3 } from 'three';
+import { START_ELAPSED } from './daynight';
 
 /**
  * Shared, mutable world environment.
@@ -28,7 +29,10 @@ export interface WorldEnv {
    * product rather than from a clock.
    */
   moonIllumination: number;
-  /** Seconds since the world was created. Use for shader animation. */
+  /**
+   * Seconds on the world clock. Starts at `START_ELAPSED` rather than 0, so
+   * the world opens at dawn on the spawn meridian; use for shader animation.
+   */
   elapsed: number;
   /** Progress through one full day, in [0, 1). 0 = sun over lon 0. */
   timeOfDay: number;
@@ -45,7 +49,7 @@ export function createEnv(): WorldEnv {
     sunColor: new Color('#fff2d6'),
     moonDirection: new Vector3(-0.62, 0.42, -0.66).normalize(),
     moonIllumination: 1,
-    elapsed: 0,
+    elapsed: START_ELAPSED,
     timeOfDay: 0,
     dayFactor: 1,
   };

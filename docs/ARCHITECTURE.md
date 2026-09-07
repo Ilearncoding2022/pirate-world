@@ -268,7 +268,7 @@ shader.
 | `waterpatch.ts` | `createWaterPatch(water, quality)`, `WaterPatch` | ship-following grid that actually displaces in the vertex shader, reusing the sphere's already-assembled fragment shader byte for byte; built after the water plugins are woven in |
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
-| `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time |
+| `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS`, `START_ELAPSED` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time |
 | `celestial.ts` | `createCelestial()` | the sun disc and the moon as things you can see; draws only what `daynight.ts` already decided and writes nothing |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
@@ -743,6 +743,28 @@ about two minutes, and full ahead west stretches it a long way without quite
 stopping the sun the way it used to. Only a shorter day, a slower ship or a
 larger `GLOBE_RADIUS` moves that ratio — the last because it slows the ship in
 degrees without slowing the sun.
+
+### Where the day starts
+The world opens at **06:00 local** on the spawn meridian, not at 0 on the world
+clock: `createEnv` seeds `elapsed` from `START_ELAPSED`. The ship spawns on
+heading 090, so a dawn opening puts the sun dead ahead and low, which is the
+only arrangement that shows off the sky the moment the game loads — at the noon
+this used to open on, the sun was overhead and behind the chase camera.
+
+`START_ELAPSED` is **derived**, by inverting `solartime.ts`'s
+`time = fract(0.5 + tod + lon / 2PI)`, rather than written down as a number.
+Local time is the angle between two meridians and never a clock the world
+carries, so the elapsed seconds that land on dawn depend on `DAY_LENGTH` and
+`SPAWN_LON_DEG` — both documented as retunable. Deriving it means changing
+either one moves the opening with it instead of silently landing on the wrong
+hour.
+
+One consequence worth knowing: `MOON_PHASE_OFFSET` is tuned against this hour
+and had to be retuned when it moved. A noon opening can only manage a thin
+crescent low in the east, because at noon anything far enough from the sun to
+be well lit is also below the horizon. A dawn opening frees the whole western
+sky, so the moon now opens nearly opposite the sun — a bright gibbous setting
+astern as the sun rises ahead.
 
 ### The moon
 The moon is placed the same way and on its own period, not opposite the sun. It

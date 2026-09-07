@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { createDayNight, DAY_LENGTH, MOON_MONTH_DAYS } from '../../src/daynight';
+import {
+  createDayNight,
+  DAY_LENGTH,
+  MOON_MONTH_DAYS,
+  START_ELAPSED,
+} from '../../src/daynight';
 import { createEnv } from '../../src/env';
 import type { WorldEnv } from '../../src/env';
+import { Vector3 } from 'three';
+import { solarPhase } from '../../src/solartime';
+import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
+import { latLonToDir } from '../../src/geo';
 
 /**
  * The moon's orbit.
@@ -16,10 +25,20 @@ import type { WorldEnv } from '../../src/env';
  * Nothing here asserts on appearance. The owner judges that by eye.
  */
 
-/** Runs a fresh rig forward to `elapsed` in one step and returns the env. */
+/**
+ * The world at absolute time `elapsed`, counted from zero.
+ *
+ * The clock is zeroed first because `createEnv` does NOT start at zero -- it
+ * starts at `START_ELAPSED`, so the game opens at dawn rather than at noon.
+ * Every case below is about the shape of the orbits over time, which is easier
+ * to read and to check by hand from a zero origin, so the offset is removed
+ * here rather than folded into every expectation. The one case that is about
+ * the opening uses `START_ELAPSED` explicitly.
+ */
 function envAt(elapsed: number): WorldEnv {
   const dayNight = createDayNight();
   const env = createEnv();
+  env.elapsed = 0;
   dayNight.update(elapsed, env);
   return env;
 }
@@ -96,16 +115,59 @@ describe('moon orbit', () => {
 
   it('opens on a moon that can actually be seen', () => {
     /*
-     * The world used to start with both bodies over longitude 0: a new moon,
-     * at noon, next to the sun -- the one arrangement in which there is
-     * nothing to look at. MOON_PHASE_OFFSET exists to prevent exactly that,
-     * so it gets a test rather than a comment alone.
+     * The world once started with both bodies over longitude 0: a new moon,
+     * beside a noon sun -- the one arrangement in which there is nothing to
+     * look at. MOON_PHASE_OFFSET exists to prevent exactly that, so it gets a
+     * test rather than a comment alone.
+     *
+     * Note this runs at START_ELAPSED, not at 0. The offset is tuned against
+     * the hour the world actually opens at, and it had to be retuned once
+     * already when that hour moved from noon to dawn -- so testing t = 0 here
+     * would be pinning a moment no player ever sees.
      */
-    const env = envAt(0);
-    expect(env.moonIllumination).toBeGreaterThan(0.2);
-    // East of the sun, so it rides up into the evening rather than setting
-    // ahead of it. Longitude on geo.ts's convention, sun at 0 when t is 0.
-    expect(lon(env.moonDirection)).toBeGreaterThan(0);
+    const env = createEnv();
+    createDayNight().update(0, env);
+    expect(env.elapsed).toBe(START_ELAPSED);
+
+    // Bright: the dawn opening puts the sun on the eastern horizon, which
+    // leaves the whole western sky free for a nearly-opposite, nearly-full
+    // moon. A noon opening could not do better than a third-lit crescent.
+    expect(env.moonIllumination).toBeGreaterThan(0.6);
+
+    // And up. The spawn is on the equator at longitude 0 (terrain.ts), so a
+    // moon within a quarter turn of that meridian is above the horizon.
+    const moonLon = lon(env.moonDirection);
+    expect(Math.abs(moonLon)).toBeLessThan(Math.PI / 2);
+    // West of the spawn meridian: setting astern as the sun rises ahead.
+    expect(moonLon).toBeLessThan(0);
+  });
+
+  it('opens at 06:00 local, with the sun due east', () => {
+    /*
+     * The world opens at dawn so the sun is in front of a ship that spawns on
+     * heading 090. START_ELAPSED is derived from DAY_LENGTH and the spawn
+     * longitude rather than written down, so what is checked here is that the
+     * derivation lands where it claims.
+     *
+     * Asserted through `solarPhase`, which is what the time dial reads, so
+     * this pins the hour the PLAYER sees rather than a vector that happens to
+     * imply it. Note the sun's own `y` is its declination -- the seasonal
+     * tilt, about 0.39 at this moment -- and not its height in the ship's sky;
+     * those two are easy to confuse and only the second one means dawn.
+     */
+    const env = createEnv();
+    createDayNight().update(0, env);
+
+    const up = latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG, new Vector3());
+    const phase = solarPhase(up, env.sunDirection);
+
+    // 0.25 of the local solar day is 06:00. Within a second of game time.
+    expect(phase.time).toBeCloseTo(0.25, 5);
+    // Sunrise proper: the sun is on the horizon, not merely near it.
+    expect(phase.sinElevation).toBeCloseTo(0, 6);
+    // And it is the EASTERN horizon. Longitude +90 degrees on geo.ts's
+    // convention, where lon 0 is +Z and the spawn sits on it.
+    expect(lon(env.sunDirection)).toBeCloseTo(Math.PI / 2, 6);
   });
 
   it('lets the sun gain exactly one lap on the moon per month', () => {
