@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { buildTerrainGolden, buildWorldGolden } from './generate';
+import {
+  buildTerrainGolden,
+  buildWorldGolden,
+  buildWaterShaderGolden,
+  buildHazardShaderGolden,
+} from './generate';
 
 /**
  * The golden *writer*. Only reachable through `npm run golden:update`
@@ -32,4 +37,24 @@ describe('golden fixture writer', () => {
     writeFileSync(fixturePath('world-golden.json'), JSON.stringify(golden, null, 2) + '\n');
     expect(golden.allDocksNonNull).toBe(true);
   }, 15_000);
+
+  /*
+   * The two shader fixtures. These used to have no writer at all -- the JSON
+   * was produced by hand -- which made a legitimate shader change a manual
+   * copy-and-paste of a 20KB string, and that is not a thing to ask of the
+   * four streams `docs/TEXTURE_PLAN.md` Wave 1 sets going in parallel. Same
+   * rule as the goldens above: run the writer only for a change that
+   * legitimately moves the shader, and itemise what moved in the commit.
+   */
+  it('writes tests/fixtures/water-shader.json', () => {
+    const golden = buildWaterShaderGolden();
+    writeFileSync(fixturePath('water-shader.json'), JSON.stringify(golden, null, 2) + '\n');
+    expect(golden.fragmentShader).toContain('void main()');
+  });
+
+  it('writes tests/fixtures/hazard-shader.json', () => {
+    const golden = buildHazardShaderGolden();
+    writeFileSync(fixturePath('hazard-shader.json'), JSON.stringify(golden, null, 2) + '\n');
+    expect(golden.fragmentShader).toContain('hazardHeight');
+  });
 });

@@ -11,6 +11,7 @@ import { createHud } from './hud';
 import { createRadar } from './radar';
 import { createTimeDial } from './timedial';
 import { createEnv } from './env';
+import { elapsedAtLocalTime } from './daynight';
 import { createEnergy } from './energy';
 import { createWind } from './wind';
 import { createDocks } from './docks';
@@ -101,6 +102,32 @@ async function startGame(): Promise<void> {
   await loading.step(0.12, 'SEEDING THE OCEAN');
 
   const env = createEnv();
+
+  /*
+   * `?clock=<hour>` -- start the world at a fixed local hour on the spawn
+   * meridian instead of at dawn. `?clock=13.5` is half past one in the
+   * afternoon; out-of-range and unparseable values are ignored.
+   *
+   * For looking at shading, not for playing. A day lasts DAY_LENGTH = 1200
+   * seconds, so the sun moves a degree every three and a bit seconds and two
+   * screenshots taken a minute apart are lit differently enough that a real
+   * change to the water or the land cannot be told from the hour having
+   * moved. `docs/TESTING.md` records the query pinned for the terrain, wave
+   * and maelstrom work (`docs/TEXTURE_PLAN.md`).
+   *
+   * Read through URLSearchParams and never through `import.meta.env.MODE`, on
+   * exactly the same terms as `?quality=` and `?hazard=`: `vite preview`
+   * serves a genuine production build and this is meant to be used against
+   * one. An ordinary player's session sets no query, so this never fires.
+   */
+  const clockQuery = new URLSearchParams(window.location.search).get('clock');
+  if (clockQuery !== null) {
+    const hour = Number(clockQuery);
+    if (Number.isFinite(hour) && hour >= 0 && hour < 24) {
+      env.elapsed = elapsedAtLocalTime(hour / 24);
+    }
+  }
+
   const terrain = createTerrain(DEFAULT_SEED);
 
   // The two things that add themselves to the water shader. Both are built
@@ -1011,6 +1038,16 @@ async function startGame(): Promise<void> {
     // below, after the hull has ridden it, so the sea on the GPU and the sea
     // the hull just climbed are one frame's numbers.
     hazards.update(dt, ship.state, energy.state, wind.state);
+    // Republished for `tests/shots.mjs`, which waits on an envelope rather
+    // than on a clock -- see the field's own comment in `quality.ts`. The
+    // hook only exists under `?quality=` or `?debug`, so this is a no-op in
+    // an ordinary session and allocates nothing in one.
+    if (window.__pirateWorld) {
+      window.__pirateWorld.hazards = hazards.state.live.map((h) => ({
+        kind: h.kind,
+        envelope: h.envelope,
+      }));
+    }
     // Raiders sit between the hazards and the ship, and both sides of that are
     // load bearing. After the hazards because a boat is suppressed while a
     // maelstrom has the hull and it needs this frame's phase to know it.

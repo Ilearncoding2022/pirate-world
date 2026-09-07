@@ -14,6 +14,7 @@ import { SWELL_WAVELENGTH, WAVE_WAVELENGTH, CHOP_WAVELENGTH } from './waveconsta
 import {
   WATER_UNIFORMS,
   waterWavefield,
+  waterSurface,
   waterDepth,
   WATER_LIGHTING_HEAD,
   WATER_LIGHTING_TAIL,
@@ -42,11 +43,18 @@ export interface Water {
 }
 
 /**
- * The four points in the fragment shader a plugin may hook into. Documented,
+ * The five points in the fragment shader a plugin may hook into. Documented,
  * with the GLSL variables in scope at each, in `waterglsl.ts` above the chunk
  * that contains the seam.
+ *
+ * `slope` is the one that does not fit the "modify one value" shape of the
+ * other four: it runs before the LOD, and what it raises (`steep`, `steepN`,
+ * `crestLift`, `tiltBoost`) changes how the core shader treats the pixel for
+ * the whole rest of main(). It exists because every gate in this shader that
+ * asks "is this open sea?" asks the smooth sphere normal, and a plugin that
+ * puts a wall of water on the sphere needs to be able to answer differently.
  */
-export type WaterHook = 'normal' | 'foam' | 'reflection' | 'colour';
+export type WaterHook = 'slope' | 'normal' | 'foam' | 'reflection' | 'colour';
 
 /**
  * What Phase 1 streams A (wake), B (offsets only, see `water.offsets` below),
@@ -305,6 +313,8 @@ export function createWater(
     FOG_GLSL,
     ...pluginDeclarations(plugins),
     ...waterWavefield(freq(SWELL_WAVELENGTH), freq(WAVE_WAVELENGTH), freq(CHOP_WAVELENGTH)),
+    ...waterSurface(),
+    ...pluginHooks(plugins, 'slope'),
     ...waterDepth((NORMAL_STEP / GLOBE_RADIUS).toFixed(8)),
     ...pluginHooks(plugins, 'normal'),
     ...WATER_LIGHTING_HEAD,

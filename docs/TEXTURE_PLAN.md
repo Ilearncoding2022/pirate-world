@@ -1,6 +1,7 @@
 # Land, wave face and maelstrom surface detail: implementation plan
 
-Status: **proposed, not started.** Branch: `claude/terrain-wave-maelstrom-texture-kvbh49`.
+Status: **Wave 0 landed. Wave 1 ready to start.** Branch:
+`claude/terrain-wave-maelstrom-texture-kvbh49`.
 
 This is the brief for making three surfaces read as vividly as the open sea
 already does: the land (low-poly, rough), the front face of a great wave
@@ -41,17 +42,17 @@ every term: Fresnel, GGX glint, reflection, backscatter. Concretely:
 Almost none of this is vertex resolution. Every fix below is fragment-side
 unless it says otherwise.
 
-## Decisions to settle with the owner before Wave 1
+## Decisions, settled
 
-| Question | Recommendation | Why it needs a human |
-|---|---|---|
-| Lit foam for the whole sea, or hazards only? | Whole sea. Coastal foam gets the same Lambert + Fresnel treatment. | It visibly changes the bare ocean and the `water-shader.json` golden. |
-| `FACET_BLEND` target | 0.8, exposed as a quality knob. | It softens the "beveled low-poly" look `RENDER_PLAN.md:463-466` asked for. Art direction call. |
-| Maelstrom apex profile | Change `(1-r)^3` to a bowl that is flat at r = 0. | It changes the hull's ride through a maelstrom and re-records parity fixtures. |
-| `patchSegments` 160 to 192 on the high tier | Defer to Wave 3. | Costs every frame on every high-tier machine for one hazard's rim. |
+Settled with the project owner before Wave 0. Do not re-litigate a row. If one
+turns out to be unworkable, say so and stop rather than substituting another.
 
-Do not re-litigate a settled row. If one turns out to be unworkable, stop and
-say so.
+| Question | Decision |
+|---|---|
+| Lit foam for the whole sea, or hazards only? | **Whole sea.** Coastal foam gets the same Lambert + Fresnel treatment. Landed in W0-2. |
+| `FACET_BLEND` target | **0.8, exposed as a quality knob.** Softens the "beveled low-poly" look `RENDER_PLAN.md:463-466` asked for; that is accepted. |
+| Maelstrom apex profile | **Change it.** `(1-r)^3` becomes a bowl that is flat at r = 0. Stream P, with the parity re-record that implies. |
+| `patchSegments` 160 to 192 on the high tier | **Deferred to Wave 3.** Try the shader fixes first and see whether the rim still reads as a polygon. |
 
 ## Shape of the work
 
@@ -75,7 +76,62 @@ end, following the existing "Set the version to X" convention.
 
 ---
 
-## Wave 0: seams (one agent, sequential)
+## Wave 0: seams — **landed**
+
+What actually shipped, against what this section specifies below.
+
+- **W0-1, as written**, with one addition: `tiltBoost` was included from the
+  start rather than left for M to ask for. `waterDepth` split into
+  `waterSurface()` + `waterDepth(eps)` with the `slope` slot between them; the
+  tangent basis moved above the LOD; four gates re-pointed from `n` to `gateN`.
+- **W0-2, as written.**
+- **W0-3, as written.** `hazardcrest.ts` and `hazardfunnel.ts` exist and are
+  spliced by `waterhazard.ts`'s skeleton. The hazard normal moved from the
+  `normal` hook to the `slope` hook, where `steepN` needs it; the `normal` hook
+  now reuses the `hazSlope` computed there, so it is the same three taps used
+  twice rather than a second finite difference.
+- **W0-4, plus three things it did not anticipate:**
+  - `?clock=<hour>` added (`main.ts`, `daynight.ts`'s new `elapsedAtLocalTime`).
+    A day is 1200 s, so without it two screenshots a minute apart are lit
+    differently enough to hide the change being looked at.
+  - `?hazard=` turned out not to be photographable on a timer. The forced
+    hazard rises three SIMULATED seconds in, `dt` is capped at 0.1 s a frame,
+    and the software rasteriser draws about a frame a second — so the
+    simulation runs at a tenth of wall clock and a maelstrom needs over two
+    minutes to reach full envelope. **Nothing was broken**; a fixed sleep was
+    simply photographing empty water. `main.ts` now republishes the live
+    hazards' kind and envelope on the existing `window.__pirateWorld` debug
+    hook, and `shots.mjs` has a `hazard` station that waits on
+    `envelope > 0.85` (per `docs/TESTING.md` rule 2, wait for a condition) and
+    is skipped entirely when the URL asked for no hazard.
+  - `playwright.config.ts` and `tests/shots.mjs` only resolved Chromium under
+    `%LOCALAPPDATA%`, so neither the smoke tier nor the shots ran anywhere but
+    the owner's machine. Both now check `PLAYWRIGHT_CHROMIUM_PATH`, then
+    `PLAYWRIGHT_BROWSERS_PATH`, then `%LOCALAPPDATA%` exactly as before. The
+    Windows path is unchanged.
+- **Fixtures**: `water-shader.json` regenerated with the six intentional
+  changes itemised in `tests/unit/water-shader.test.ts`;
+  `hazard-shader.json` and `tests/unit/hazard-shader.test.ts` added. Both
+  shader fixtures now have a *writer* under `npm run golden:update` — they
+  previously had none and were maintained by hand, which is not a thing to ask
+  of four parallel streams. `terrain-golden.json` and `world-golden.json` are
+  byte-identical.
+- **Verified**: `npm run build` clean, `npx tsc --noEmit` clean, `npm test`
+  137/137, `wave-parity.spec.ts` green (worst pixel diff 1/255 on the wave
+  field, **0/255** on the hazard field — the hull rides the sea it is shown).
+  Two `game.spec.ts` screenshot timeouts in the container are pre-existing:
+  they fail identically on the base commit, and they are the 60 s Playwright
+  timeout against a software rasteriser, not an assertion.
+- **Baselines captured** at `?clock=10&quality=high`, `tests/out/w0-greatwave/`
+  and `tests/out/w0-maelstrom/` (not committed). They confirm the diagnosis
+  rather than merely recording it: the great wave's front is a matte grey slab
+  with visibly polygonal edges standing in real water, and the maelstrom is a
+  set of perfectly circular flat-grey rings sliding across a surface with no
+  funnel visible under them at all.
+
+The specification this was built to follows, unchanged.
+
+### Wave 0 as specified (one agent, sequential)
 
 Owns: `src/waterglsl.ts`, `src/water.ts`, `src/waterhazard.ts`, new
 `src/hazardcrest.ts`, new `src/hazardfunnel.ts`, `tests/fixtures/water-shader.json`,

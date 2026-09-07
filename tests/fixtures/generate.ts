@@ -15,6 +15,7 @@
  * regression."
  */
 import { Vector3 } from 'three';
+import type * as THREE from 'three';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { createHeightMap } from '../../src/heightmap';
 import { cullIslets } from '../../src/islets';
@@ -22,6 +23,11 @@ import { createWaterBodies } from '../../src/waterbodies';
 import { createTowns } from '../../src/towns';
 import { latLonToDir } from '../../src/geo';
 import { createLand, landRadius } from '../../src/land';
+import { createWater } from '../../src/water';
+import { createWaterHazardPlugin } from '../../src/waterhazard';
+import type { HeightMap } from '../../src/heightmap';
+import type { WaterBodies } from '../../src/waterbodies';
+import { createStubTerrain } from '../unit/support/stub-terrain';
 
 /**
  * Eight fixed terrain heights `landRadius` is sampled at for the golden
@@ -71,6 +77,39 @@ export function buildTerrainGolden(): TerrainGolden {
     dirs: dirs.map((d) => [d.x, d.y, d.z]),
     heights,
   };
+}
+
+export interface ShaderGolden {
+  vertexShader: string;
+  fragmentShader: string;
+}
+
+/**
+ * The water material, built the way `water-shader.test.ts` builds it: real
+ * `createWater`, stub terrain, and the two textures faked down to the one
+ * property the material reads. Shared between the writer and the checker for
+ * the same reason `buildTerrainGolden` is -- so a fixture and its test can
+ * never end up describing two different shaders.
+ *
+ * `plugins` is what separates the two shader fixtures: none for
+ * `water-shader.json` (the bare sea), the hazard plugin for
+ * `hazard-shader.json`. Both are captured because `docs/TEXTURE_PLAN.md`
+ * Wave 1 has two streams editing the hazard art in parallel, and a fixture
+ * that only ever saw the unhooked shader would not show either of their
+ * diffs in review.
+ */
+export function buildWaterShaderGolden(plugins: Parameters<typeof createWater>[3] = []): ShaderGolden {
+  const terrain = createStubTerrain();
+  const heightMap = { texture: {} } as unknown as HeightMap;
+  const waterBodies = { texture: {} } as unknown as WaterBodies;
+  const water = createWater(terrain, heightMap, waterBodies, plugins);
+  const material = water.mesh.material as THREE.ShaderMaterial;
+  return { vertexShader: material.vertexShader, fragmentShader: material.fragmentShader };
+}
+
+/** The same material with `waterhazard.ts`'s plugin woven in. */
+export function buildHazardShaderGolden(): ShaderGolden {
+  return buildWaterShaderGolden([createWaterHazardPlugin()]);
 }
 
 export interface WorldGolden {

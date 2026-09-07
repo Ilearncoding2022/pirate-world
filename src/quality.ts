@@ -129,7 +129,24 @@ declare global {
      * production build, and the smoke test's `?quality=low` pass needs this
      * hook to exist under exactly that build.
      */
-    __pirateWorld?: { quality: Quality };
+    __pirateWorld?: {
+      quality: Quality;
+      /**
+       * The live hazards, kind and envelope only, refreshed every frame.
+       * Written by `main.ts` when this hook exists at all, so it appears and
+       * disappears with the hook rather than on a guard of its own.
+       *
+       * It is here for `tests/shots.mjs`, which has to photograph a great wave
+       * and a maelstrom and cannot do it on a timer. `?hazard=` releases one
+       * three SIMULATED seconds in, and `dt` is capped at 0.1 s a frame
+       * (`main.ts`), so on the software rasteriser the browser tier runs --
+       * roughly a frame a second -- those three seconds take thirty of wall
+       * clock, and then the funnel still has to grow. A fixed sleep either
+       * photographs empty water or wastes half a minute on every run. This is
+       * the condition to wait for instead, per docs/TESTING.md rule 2.
+       */
+      hazards?: { kind: string; envelope: number }[];
+    };
   }
 }
 

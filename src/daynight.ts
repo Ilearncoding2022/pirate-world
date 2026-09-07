@@ -72,9 +72,17 @@ const START_LOCAL_TIME = 0.25;
  * documented as retunable. Inverting `solartime.ts`'s own relation
  * (`time = fract(0.5 + tod + lon / 2PI)`) means changing either one moves this
  * with it instead of silently opening at the wrong hour.
+ *
+ * `elapsedAtLocalTime` is that inversion, exported because `?clock=` (see
+ * `main.ts`) needs it for any hour, not only for dawn: a day here lasts 1200
+ * seconds, so two screenshots taken a minute apart are lit differently, and
+ * comparing shading changes by eye is impossible without pinning the sun.
  */
-export const START_ELAPSED =
-  DAY_LENGTH * (((START_LOCAL_TIME - 0.5 - SPAWN_LON_DEG / 360) % 1) + 1) % DAY_LENGTH;
+export function elapsedAtLocalTime(localTime: number): number {
+  return (DAY_LENGTH * (((localTime - 0.5 - SPAWN_LON_DEG / 360) % 1) + 1)) % DAY_LENGTH;
+}
+
+export const START_ELAPSED = elapsedAtLocalTime(START_LOCAL_TIME);
 
 /**
  * Days in one seasonal cycle. The subsolar latitude drifts on this much slower

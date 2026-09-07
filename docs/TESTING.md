@@ -78,6 +78,30 @@ Use it for every visual iteration. It exists because diagnosing one shading bug
 once cost seven full production builds and seven browser launches, when the
 only thing actually needed was a picture.
 
+#### Pinning the sun and the hazard
+
+A day lasts `DAY_LENGTH` = 1200 seconds. Two shots taken a minute apart are lit
+differently enough that a real change to the water or the land cannot be told
+apart from the hour having moved, and a maelstrom is a 1% draw every ten
+seconds, so waiting for one is a vigil rather than a comparison. Both are
+pinned with dev queries, passed through `--query`:
+
+```
+npm run shots -- --label before --query "?clock=10&hazard=greatwave&quality=high"
+npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&quality=high"
+```
+
+- `?clock=<hour>` starts the world at a fixed local hour on the spawn meridian
+  (`?clock=13.5` is 13:30). Out-of-range or unparseable values are ignored.
+  10:00 is the hour `docs/TEXTURE_PLAN.md`'s waves compare at: high enough for
+  a real sun road on the water, low enough that land relief still casts.
+- `?hazard=wave|greatwave|maelstrom` raises one, 25 units dead ahead, three
+  seconds in. Already existed; it is listed here because the two are only
+  useful together.
+- `?quality=low|medium|high` picks the tier. The hazard streams have to be
+  looked at on all three: `low` registers no reflection plugin at all, and the
+  displacement patch drops from 160 segments to 96.
+
 ## Rules
 
 1. **No test asserts on how anything looks.** Screenshots are artefacts for a

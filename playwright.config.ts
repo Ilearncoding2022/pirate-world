@@ -1,5 +1,5 @@
 import { defineConfig } from 'playwright/test';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
@@ -15,12 +15,56 @@ import { join } from 'node:path';
  */
 const CHROMIUM_REVISION = 'chromium-1243';
 
+/**
+ * Where to look, in order. The owner's Windows cache is still the one this
+ * project is tuned for and still the last word on the revision; the two
+ * before it exist because the smoke suite now also has to run somewhere that
+ * is not that machine (a Linux container, CI) and refusing to start at all
+ * there cost more than it protected. Neither changes what runs on Windows:
+ * `%LOCALAPPDATA%` is checked exactly as before once the other two miss.
+ *
+ *  1. `PLAYWRIGHT_CHROMIUM_PATH` -- an explicit executable, for the case
+ *     where none of the guesses below are right.
+ *  2. `PLAYWRIGHT_BROWSERS_PATH` -- Playwright's own cache variable. A
+ *     container that pre-installs browsers sets it, and the build inside it
+ *     will not be `CHROMIUM_REVISION`, so the revision is discovered rather
+ *     than assumed. Headless shell is preferred when both are present: the
+ *     smoke suite never opens a window.
+ *  3. `%LOCALAPPDATA%/ms-playwright/<CHROMIUM_REVISION>/chrome-win64`.
+ */
 function resolveCachedChromium(): string {
+  const explicit = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+  if (explicit) {
+    if (!existsSync(explicit)) {
+      throw new Error(`playwright.config.ts: PLAYWRIGHT_CHROMIUM_PATH is set but there is nothing at ${explicit}.`);
+    }
+    return explicit;
+  }
+
+  const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  if (browsersPath && existsSync(browsersPath)) {
+    const candidates = readdirSync(browsersPath)
+      .filter((entry) => entry.startsWith('chromium'))
+      // `chromium_headless_shell-*` before `chromium-*`: underscore sorts
+      // after the hyphen, so reverse gives the shell first.
+      .sort()
+      .reverse()
+      .flatMap((entry) => [
+        join(browsersPath, entry, 'chrome-linux', 'headless_shell'),
+        join(browsersPath, entry, 'chrome-linux', 'chrome'),
+        join(browsersPath, entry, 'chrome-mac', 'Chromium.app', 'Contents', 'MacOS', 'Chromium'),
+      ]);
+    const found = candidates.find((candidate) => existsSync(candidate));
+    if (found) return found;
+  }
+
   const localAppData = process.env.LOCALAPPDATA;
   if (!localAppData) {
     throw new Error(
-      'playwright.config.ts: %LOCALAPPDATA% is not set, so the cached Chromium ' +
-        `cannot be located. Expected it under <LOCALAPPDATA>/ms-playwright/${CHROMIUM_REVISION}/chrome-win64/chrome.exe.`,
+      'playwright.config.ts: no Chromium found. Set PLAYWRIGHT_CHROMIUM_PATH to an ' +
+        'executable, or PLAYWRIGHT_BROWSERS_PATH to a Playwright browser cache. On ' +
+        'Windows, %LOCALAPPDATA% is read instead and the build is expected under ' +
+        `<LOCALAPPDATA>/ms-playwright/${CHROMIUM_REVISION}/chrome-win64/chrome.exe.`,
     );
   }
   const executablePath = join(localAppData, 'ms-playwright', CHROMIUM_REVISION, 'chrome-win64', 'chrome.exe');

@@ -289,7 +289,9 @@ shader.
 | `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
 | `wakemap.ts` | `createWakeMap(size, ribbonGeometry)`, `WakeMap`, `computeWakeFrame`, `createWakeFrame`, `projectToMapUV`, `WAKE_MAP_EXTENT`, `WAKE_HEIGHT_SCALE`, `WAKE_BREAKUP_GLSL` | renders the wake's foam/height/age into a small top-down render target every frame; see **Shader notes** for the channel layout |
 | `waterwake.ts` | `createWaterWakePlugin(wake)` | the `WaterPlugin` that samples `wakemap.ts`'s texture back into the water shader's `normal`/`foam`/`colour` hooks |
-| `waterhazard.ts` | `createWaterHazardPlugin()` | the `WaterPlugin` that displaces, foams and darkens the sea for a hazard; a `WaterPlugin` plus one `bind(state)`, because it must be CONSTRUCTED before `createGlobe` and can only be HANDED its state after — see **Hazards** |
+| `waterhazard.ts` | `createWaterHazardPlugin()` | the `WaterPlugin` that displaces, foams and darkens the sea for a hazard; a `WaterPlugin` plus one `bind(state)`, because it must be CONSTRUCTED before `createGlobe` and can only be HANDED its state after — see **Hazards**. Owns the uniforms, the slot loop and the shared per-slot locals; the art itself lives in the two files below |
+| `hazardcrest.ts` | `CREST_SLOPE_GLSL`, `CREST_FOAM_GLSL`, `CREST_COLOUR_GLSL` | fragment-side art for a wave's crest, spliced into `waterhazard.ts`'s branch for `kind < 0.5`. Free to use `sin`/`snoise`: no CPU code compares against it |
+| `hazardfunnel.ts` | `FUNNEL_SLOPE_GLSL`, `FUNNEL_FOAM_GLSL`, `FUNNEL_COLOUR_GLSL` | the same for a maelstrom. The height is radially symmetric so the hull can ride it; the spiral is entirely this file's, and must stay that way |
 | `reflection.ts` | `createReflection(quality)`, `Reflection`, `scheduleFaces` | low-res cube camera parked at the ship's waterline, round-robins `quality.reflectionFacesPerFrame` faces per frame; `texture` is `null` and the whole system absent, not idle, when `reflectionSize` is 0 |
 | `waterreflect.ts` | `createWaterReflectPlugin(cubeTexture)` | the `WaterPlugin` that mixes the decoded cube into `skyCol` and paints a fake hull-neon streak, since the hull itself cannot appear in its own reflection camera |
 | `postfx.ts` | `createPostFx(renderer, quality)`, `GpuFrameStats` | composer / bloom; `adopt(root)` for late materials; chains its sRGB self-encode `onBeforeCompile` after a material's own hook (see **Post-processing**); owns the optional GPU/CPU/draw-call timer toggled with Backquote |
@@ -575,15 +577,16 @@ export interface WaterPlugin {
   hooks: Partial<Record<WaterHook, string>>;
   update?(dt: number, env: WorldEnv, ship: ShipState, camera: THREE.Camera): void;
 }
-export type WaterHook = 'normal' | 'foam' | 'reflection' | 'colour';
+export type WaterHook = 'slope' | 'normal' | 'foam' | 'reflection' | 'colour';
 ```
 
-Four hook slots, in shader order, with the GLSL variables in scope at each
+Five hook slots, in shader order, with the GLSL variables in scope at each
 (also documented in `waterglsl.ts` above the chunk that contains the seam):
 
 | Hook | Where | May modify | Also in scope |
 |---|---|---|---|
-| `normal` | after `N` is built, before lighting | `N` (unit) | `n`, `vWorldPos`, `camDist`, `w0`, `motion`, `lakeTime`, `lod`, `nearMid`, `tanU`, `tanV`, `wu`, `wv`, `tilt` |
+| `slope` | after the tangent basis, **before** the LOD and before `N` exists | `steep`, `steepN`, `crestLift`, `tiltBoost` | `n`, `viewDir`, `camDist`, `sunDir`, `tanU`, `tanV`, `inland`, `motion`, `lakeTime`, `vWorldPos` |
+| `normal` | after `N` is built, before lighting | `N` (unit) | `n`, `vWorldPos`, `camDist`, `w0`, `motion`, `lakeTime`, `lod`, `nearMid`, `tanU`, `tanV`, `wu`, `wv`, `tilt`, and the four seam locals |
 | `reflection` | right after `skyCol` is computed | `skyCol` | everything `normal` could read, plus `ndv`, `fres`, `refl`, `skyUp`, `lightAmt` |
 | `foam` | inside the foam section, before `foamLit`/the mix into `col`; **also runs when `fd >= 2.6`** | `foam` (0–1 mask) | `fd`, `depth`, `inland`, `col`, everything above |
 | `colour` | after all lighting and foam, before `applyAerial` and the sRGB encode | `col` | everything above |
@@ -594,6 +597,23 @@ computation that raises `foam` above zero still only runs `if (fd < 2.6)`, and
 the hook runs after that `if` closes but before `foam` is lit and mixed into
 `col`. That is what lets a plugin's own foam (a ship's wake, out in open water)
 appear far from any coastline.
+
+**`slope` is the odd one**, and worth reading before using it. The other four
+each modify one value. This one runs before the LOD and changes how the core
+shader treats the pixel for the whole rest of `main()`, because four separate
+places in the lighting ask the smooth *sphere* normal `n` whether this is open
+sea — the grazing LOD, `lightAmt`, the diffuse blend factor and the sun-road
+gate — and every one of them is wrong for a plugin that has put a wall of
+water on the sphere. A face tilted 64° off `n` was being lit as though tilted
+29°, faded as though it were a grazing pixel, and held at 8% of its specular
+however exactly it pointed at the sun. Raising `steep` (with `steepN` set to
+the plugin's own normal) hands those four gates back to the surface that is
+actually there; `crestLift` adds thickness for the backscatter term to shine
+through, outside the `uWaveIntensity` factor so a rogue wave still glows in a
+calm; `tiltBoost` scales the chop for water being torn apart rather than
+merely lifted. All four are no-ops at their defaults (`0`, `n`, `0`, `1`), and
+every gate is written so that `steep = 0` is arithmetically the expression that
+was there before the seam existed.
 
 Uniform names are prefixed per plugin (`uWake…`, `uRefl…`, …) so two plugins
 sharing one shader can never collide.

@@ -8,7 +8,9 @@
  *   WATER_UNIFORMS
  *   (plugin declarations, noise, height map, fog contract)
  *   waterWavefield(...)
- *   waterDepth(...)                    -- opens main(), builds N
+ *   waterSurface()                     -- opens main(), tangent basis, seam
+ *   [slope hook]                       -- may raise steep/steepN/…; see below
+ *   waterDepth(...)                    -- LOD, builds N, depth ramp
  *   [normal hook]                      -- may rewrite N; see below
  *   WATER_LIGHTING_HEAD                -- through skyCol
  *   [reflection hook]                  -- may rewrite skyCol; see below
@@ -118,21 +120,49 @@ export function waterWavefield(freqSwell: string, freqWave: string, freqChop: st
 }
 
 /**
- * Opens `main()`: view/sun setup, the inland/motion blend, the LOD fades, the
- * tangent basis, the wave-field sample and its finite-difference normal `N`,
- * then the depth colour ramp and the shallow-water caustic ripple.
+ * Opens `main()`: view/sun setup, the inland/motion blend, the tangent basis,
+ * and the four `steep`-seam locals a plugin may raise at the `slope` hook.
  *
- * `eps` is `NORMAL_STEP` (world units) converted to direction-space by
- * `water.ts`, exactly like the frequencies above.
+ * The tangent basis used to be built below the LOD block, with the wave-field
+ * sample. It is built here instead so that the `slope` hook has it: a plugin
+ * that wants to say "this pixel is a wall of water, not open sea" has to be
+ * able to finite-difference its own field, and it has to say so BEFORE the LOD
+ * decides how much detail the pixel is worth. Pure reorder -- `ref`, `tanU`
+ * and `tanV` depend on `n` alone, and `n` has not moved.
  *
- * --- hook: `normal` -------------------------------------------------------
- * Runs immediately after this chunk, before `WATER_LIGHTING_HEAD`.
- * In scope, may be modified: `N` (unit).
- * Read only: `n`, `vWorldPos`, `camDist`, `w0`.
- * (Also still in scope, for a plugin that needs them: `motion`, `lakeTime`,
- * `lod`, `nearMid`, `tanU`, `tanV`, `wu`, `wv`, `tilt`.)
+ * --- hook: `slope` ---------------------------------------------------------
+ * Runs immediately after this chunk, before `waterDepth`.
+ *
+ * In scope, may be raised (each is a no-op at its default, and the shader is
+ * exactly the shader it was when no plugin touches any of them):
+ *
+ *   `steep`     0..1, default 0. How far this pixel's true surface normal
+ *               should replace the smooth sphere normal `n` in the four
+ *               places `n` is used as a "this is open sea" gate: the grazing
+ *               LOD, `lightAmt`, the diffuse blend and the sun road. The
+ *               whole reason the front of a great wave reads as clay is that
+ *               all four of those gates ask the sphere, not the water: a face
+ *               tilted 64 degrees off `n` is lit, faded and de-sparkled as
+ *               though it were flat. Raising `steep` hands those gates back
+ *               to the surface that is actually there.
+ *   `steepN`    unit, default `n`. The normal `steep` blends toward. A plugin
+ *               that raises `steep` must set this to its own field's normal;
+ *               the wave field's own `N` does not exist yet at this point in
+ *               main() (it needs the LOD `steep` is about to change) and is
+ *               deliberately not what this gate is about.
+ *   `crestLift` world units, default 0. Extra thickness of water for the
+ *               backscatter term to shine through, added to the ordinary wave
+ *               field's `w0`. Unlike `w0` it is NOT scaled by `uWaveIntensity`
+ *               -- a rogue wave stands whatever the wind is doing.
+ *   `tiltBoost` multiplier, default 1. Scales the wave field's normal `tilt`,
+ *               i.e. how choppy the surface reads. For water that is being
+ *               torn apart (the wall of a maelstrom) rather than merely
+ *               displaced.
+ *
+ * Read only: `n`, `viewDir`, `camDist`, `sunDir`, `tanU`, `tanV`, `inland`,
+ * `motion`, `lakeTime`, `vWorldPos`.
  */
-export function waterDepth(eps: string): string[] {
+export function waterSurface(): string[] {
   return [
     'void main() {',
     '  vec3 n = normalize(vDir);',
@@ -146,21 +176,60 @@ export function waterDepth(eps: string): string[] {
     '  float motion = mix(1.0, uLakeCalm, inland);',
     '  float lakeTime = uTime * motion;',
     '',
-    '  // Poor-man LOD. A pixel covers more surface both with distance and at',
-    '  // grazing angles, so fade the high octaves out on both counts; without',
-    '  // the grazing term the water near the horizon crawls with moire.',
-    '  float graze = clamp(dot(n, viewDir), 0.0, 1.0);',
-    '  float lod = smoothstep(0.06, 0.38, graze);',
-    '  float nearMid = 1.0 - smoothstep(50.0, 105.0, camDist);',
-    '  float fadeMid = nearMid * mix(0.30, 1.0, lod);',
-    '  float fadeFine = (1.0 - smoothstep(28.0, 80.0, camDist)) * lod;',
-    '',
     '  // Tangent basis for the finite difference. The reconstructed normal is',
     '  // the tangential gradient, which is basis independent, so swapping the',
     '  // reference axis near the poles does not show up as a seam.',
     '  vec3 ref = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), step(0.95, abs(n.y)));',
     '  vec3 tanU = normalize(cross(ref, n));',
     '  vec3 tanV = cross(n, tanU);',
+    '',
+    '  // ---- the steep seam --------------------------------------------------',
+    '  // See the `slope` hook contract in waterglsl.ts. All four are no-ops at',
+    '  // these defaults, and every gate below is written so that steep = 0',
+    '  // reduces to the expression that was there before the seam existed.',
+    '  float steep = 0.0;',
+    '  vec3 steepN = n;',
+    '  float crestLift = 0.0;',
+    '  float tiltBoost = 1.0;',
+  ];
+}
+
+/**
+ * The LOD fades, the wave-field sample and its finite-difference normal `N`,
+ * then the depth colour ramp and the shallow-water caustic ripple.
+ *
+ * `eps` is `NORMAL_STEP` (world units) converted to direction-space by
+ * `water.ts`, exactly like the frequencies above.
+ *
+ * --- hook: `normal` -------------------------------------------------------
+ * Runs immediately after this chunk, before `WATER_LIGHTING_HEAD`.
+ * In scope, may be modified: `N` (unit).
+ * Read only: `n`, `vWorldPos`, `camDist`, `w0`.
+ * (Also still in scope, for a plugin that needs them: `motion`, `lakeTime`,
+ * `lod`, `nearMid`, `tanU`, `tanV`, `wu`, `wv`, `tilt`, and the four seam
+ * locals `steep`, `steepN`, `crestLift`, `tiltBoost`.)
+ */
+export function waterDepth(eps: string): string[] {
+  return [
+    '',
+    '  // The normal the four smooth-normal gates below ask instead of `n`.',
+    '  // At steep = 0 this is `n` to the last bit, so an unhooked shader is',
+    '  // unchanged.',
+    '  vec3 gateN = normalize(mix(n, steepN, steep));',
+    '',
+    '  // Poor-man LOD. A pixel covers more surface both with distance and at',
+    '  // grazing angles, so fade the high octaves out on both counts; without',
+    '  // the grazing term the water near the horizon crawls with moire.',
+    '  //',
+    '  // Gated on `gateN`: a near-vertical wall of water faces the camera even',
+    '  // where the sphere under it is edge-on, and stripping that wall of its',
+    '  // chop -- which is what asking `n` here does -- is half of why it reads',
+    '  // as clay.',
+    '  float graze = clamp(dot(gateN, viewDir), 0.0, 1.0);',
+    '  float lod = smoothstep(0.06, 0.38, graze);',
+    '  float nearMid = 1.0 - smoothstep(50.0, 105.0, camDist);',
+    '  float fadeMid = nearMid * mix(0.30, 1.0, lod);',
+    '  float fadeFine = (1.0 - smoothstep(28.0, 80.0, camDist)) * lod;',
     '',
     `  const float EPS = ${eps};`,
     '  float w0 = waveField(n, motion, fadeMid, fadeFine);',
@@ -172,7 +241,10 @@ export function waterDepth(eps: string): string[] {
     '  // uWaveIntensity is the wind term: it runs as the SQUARE of the wind',
     '  // speed, so a gale is not twice the sea of half a gale but four times',
     '  // it, and the difference between weathers is felt rather than measured.',
-    '  float tilt = uWaveStrength * uWaveIntensity * mix(0.22, 1.0, nearMid) * motion;',
+    '  // `tiltBoost` is 1 unless a plugin raised it at the `slope` hook: water',
+    '  // that is being torn apart carries more chop than water that is merely',
+    '  // being lifted.',
+    '  float tilt = uWaveStrength * uWaveIntensity * mix(0.22, 1.0, nearMid) * motion * tiltBoost;',
     '  vec3 N = normalize(n - (tanU * (wu - w0) + tanV * (wv - w0)) * tilt);',
     '',
     '  // ---- depth colour ----------------------------------------------------',
@@ -204,11 +276,17 @@ export function waterDepth(eps: string): string[] {
 export const WATER_LIGHTING_HEAD: string[] = [
   '',
   '  // ---- lighting --------------------------------------------------------',
-  '  float sunGeo = dot(n, sunDir);',
+  '  float sunGeo = dot(gateN, sunDir);',
   '  float lightAmt = smoothstep(-0.17, 0.22, sunGeo);',
   '  // Diffuse uses a half-strength normal: the full one makes the body',
   '  // colour crawl with the chop. The specular keeps the full normal.',
-  '  vec3 diffN = normalize(mix(n, N, 0.45));',
+  '  //',
+  '  // Half strength is right for chop, which is small and everywhere, and',
+  '  // wrong for a wall, which is large and somewhere: at 0.45 a face tilted',
+  '  // 64 degrees is shaded as though tilted 29, and the tonal step that would',
+  '  // make it read as a wall is more than halved. `steep` opens the blend',
+  '  // toward the true normal exactly where a plugin says there is a wall.',
+  '  vec3 diffN = normalize(mix(n, N, mix(0.45, 0.90, steep)));',
   '  float diff = clamp(dot(diffN, sunDir), 0.0, 1.0);',
   '  vec3 sunTint = mix(vec3(1.0), uSunColor, 0.45);',
   '',
@@ -277,7 +355,13 @@ export const WATER_LIGHTING_TAIL: string[] = [
   '  float ggxD = ggxNorm * ggxNorm;',
   '  // Gate on the SMOOTH normal too, so the sparkle gathers into a sun road',
   '  // around the mirror direction instead of covering the whole ocean.',
-  '  float road = pow(clamp(dot(n, halfVec), 0.0, 1.0), 10.0 / rough);',
+  '  //',
+  '  // `gateN` rather than `n`: off the road this gate leaves only the 0.08',
+  '  // floor, i.e. 8% of the highlight, and it leaves it there no matter how',
+  '  // exactly the surface points at the mirror direction. On open sea that is',
+  '  // the point. On the face of a wave it means the wave cannot catch the sun',
+  '  // at all, which no amount of tuning further down can give back.',
+  '  float road = pow(clamp(dot(gateN, halfVec), 0.0, 1.0), 10.0 / rough);',
   '  float glint = ggxD * lightAmt * (0.30 + 0.70 * fres) * (0.08 + 0.92 * road);',
   '',
   '  // Backscatter: light glowing through a wave crest, seen when sailing',
@@ -288,8 +372,12 @@ export const WATER_LIGHTING_TAIL: string[] = [
   '  // is below the horizon.',
   '  const float SCATTER_POWER = 4.0;',
   '  const float SCATTER_STRENGTH = 0.35;',
+  '  // `crestLift` is the same idea for water a plugin put there rather than',
+  '  // the wave field: thickness to shine through. It is added OUTSIDE the',
+  '  // uWaveIntensity factor on purpose -- `w0` is wind-driven and should fade',
+  '  // with the wind, a rogue wave stands in a calm and should still glow.',
   '  float scatter = pow(clamp(dot(viewDir, -sunDir), 0.0, 1.0), SCATTER_POWER)',
-  '                * max(w0, 0.0) * uWaveIntensity * lightAmt;',
+  '                * (max(w0, 0.0) * uWaveIntensity + crestLift) * lightAmt;',
   '',
   '  vec3 dayCol = base * (0.20 + 0.72 * diff) * sunTint;',
   '  dayCol += skyCol * fres * 0.085;',
@@ -362,9 +450,33 @@ export function waterFoam(
   ];
 }
 
-/** Lights the foam mask and mixes it into `col`. */
+/**
+ * Lights the foam mask and mixes it into `col`.
+ *
+ * This used to be a constant: `uFoamColor` scaled by the day factor and
+ * nothing else. Against the coastal band, where the surf is a thin line on
+ * near-flat water, a constant passes. Against anything with a shape under it
+ * -- the front of a great wave, the wall of a maelstrom, both of which the
+ * hazard plugin foams heavily -- it is the single most damaging term in the
+ * shader: roughly half of the face's colour becomes a flat mid grey that
+ * swamps every lit term underneath, and the face reads as clay rather than as
+ * water. Foam is water, so it takes the water's normal.
+ *
+ * Three terms, all deliberately gentle so the coastline is not re-lit into
+ * something new: a Lambert wrap that keeps foam bright on the shadow side
+ * (real surf is thick and scatters, it does not go black), a Fresnel rim so
+ * froth seen edge-on catches the sky, and a small share of the same `glint`
+ * the water already computes so wet foam sparkles instead of sitting matte.
+ * At noon on a flat coast the three multiply out to within a few percent of
+ * the old constant, which is what keeps this from being a coastline change.
+ */
 export const WATER_FOAM_TAIL: string[] = [
-  '  vec3 foamLit = uFoamColor * mix(0.09, 0.52, lightAmt) * mix(vec3(1.0), uSunColor, 0.30);',
+  '  float foamDiff = clamp(dot(N, sunDir), 0.0, 1.0);',
+  '  vec3 foamLit = uFoamColor * mix(0.09, 0.52, lightAmt)',
+  '               * (0.62 + 0.38 * foamDiff)',
+  '               * (1.0 + 0.55 * fres)',
+  '               * mix(vec3(1.0), uSunColor, 0.30);',
+  '  foamLit += uSunColor * glint * uSpecStrength * 0.35;',
   '  col = mix(col, foamLit, clamp(foam, 0.0, 1.0) * 0.85);',
 ];
 
