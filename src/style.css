@@ -2127,6 +2127,29 @@ kbd {
   background-position: center;
 }
 
+/*
+ * Alongside a berth, the screen wears the harbour instead of the open sea.
+ *
+ * Only the image changes: the two gradients above are the panel's own
+ * legibility wash — they are what keeps the title and the two buttons
+ * readable over whatever is behind them — so they are re-stated here rather
+ * than dropped. `fishcover.ts` puts the class on at the moment the screen
+ * opens; see HARBOUR_CLASS there for why it is decided then and not per
+ * frame.
+ */
+.fishcover--harbour .fishcover__art {
+  background-image:
+    linear-gradient(
+      100deg,
+      rgba(2, 8, 18, 0.94) 0%,
+      rgba(2, 8, 18, 0.82) 26%,
+      rgba(2, 8, 18, 0.28) 52%,
+      rgba(2, 8, 18, 0.05) 72%
+    ),
+    linear-gradient(rgba(2, 8, 18, 0.22), rgba(2, 8, 18, 0.22)),
+    url("../assets/Illustrations/Activity - Fish in harbor - Cover.webp");
+}
+
 /* Top-right, over the art, and given its own dark disc: the corner of the
    picture is a lit sky, and a bare glyph on it would be a guess. */
 .fishcover__close {
@@ -2231,6 +2254,18 @@ kbd {
         rgba(2, 8, 18, 0.93) 78%
       ),
       url("../assets/Illustrations/Activity - Fish - Cover.webp");
+  }
+  /* The narrow layout stacks the art above the text, so it needs its own
+     vertical wash -- and so the harbour plate needs the same override here
+     that it has on the wide layout. */
+  .fishcover--harbour .fishcover__art {
+    background-image:
+      linear-gradient(
+        rgba(2, 8, 18, 0.15) 0%,
+        rgba(2, 8, 18, 0.55) 46%,
+        rgba(2, 8, 18, 0.93) 78%
+      ),
+      url("../assets/Illustrations/Activity - Fish in harbor - Cover.webp");
   }
   .fishcover__title {
     font-size: 17px;

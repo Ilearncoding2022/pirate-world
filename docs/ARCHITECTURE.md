@@ -297,7 +297,7 @@ shader.
 | `fishsim.ts` | `createFishingSim(rng?, extraShots?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
 | `fishrender.ts` | `createFishRenderer(canvas)` | 2D canvas, like `radar.ts`; the only reader of `SpeciesArt` |
 | `fishing.ts` | `createFishing(deps)`, `SESSION_COST` | the overlay: card DOM, input capture, gold and book bookkeeping |
-| `fishcover.ts` | `createFishCover(deps)` | the activity screen [FISH] opens; holds the power gate and nothing else |
+| `fishcover.ts` | `createFishCover(deps)` | the activity screen [FISH] opens; holds the power gate, and picks the harbour or open-water plate off `energy.mode` at the moment it opens |
 | `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
 | `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers |
 | `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CAPACITY` | the bought backup cell; the only charge in the world nothing recharges |
@@ -1438,7 +1438,19 @@ has come off the dock, because a dock carrying a menu is not a set of
 controls.
 
 The screen knows nothing about either destination; `main.ts` hands it two
-callbacks. Three things about the arrangement are deliberate:
+callbacks. Four things about the arrangement are deliberate:
+
+- **The art says where the ship is.** Alongside a berth the screen wears
+  `Activity - Fish in harbor - Cover.webp`; at sea it wears the open-water
+  plate. `fishcover.ts` toggles one class (`fishcover--harbour`) and
+  `style.css` owns everything that follows, the same split the HUD's `.pwr`
+  and `.wnd` rows use. The verdict comes from `energy.mode === 'docked'` —
+  the project's single definition of berthed, shared with the `[SHOP]` key and
+  `wind.ts`'s shelter — and it is read **on open, never in `refresh`**:
+  `refresh` runs every frame the screen is up, the hull is halted but not
+  anchored, and a gust or a hazard's push can still carry it out of the ring.
+  A background that changed under the player mid-read would be the screen
+  redecorating itself for no reason they can see.
 
 - **`[FISH]` is no longer gated on power.** It opens a menu, and a menu must
   not be locked by the price of one thing on it — a player with a flat battery

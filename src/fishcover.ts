@@ -44,6 +44,15 @@ export interface FishCover {
   dispose(): void;
 }
 
+/**
+ * The modifier that swaps the screen's art for the harbour plate.
+ *
+ * One class, and `style.css` owns everything that follows from it — the same
+ * trick the HUD's `.pwr` and `.wnd` rows use. This file decides WHICH scene
+ * the player is in and nothing about what it looks like.
+ */
+const HARBOUR_CLASS = 'fishcover--harbour';
+
 /** "-50% POWER" — the session's price, off the one constant that sets it. */
 function costLabel(): string {
   return `-${Math.round(SESSION_COST * 100)}% POWER`;
@@ -112,6 +121,23 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
     overlay.hidden = !next;
     overlay.setAttribute('aria-hidden', next ? 'false' : 'true');
     if (!next) return;
+    /*
+     * Which picture the screen wears, decided once on the way in.
+     *
+     * Fishing alongside a berth is a different scene from fishing at sea, and
+     * the screen says so: the harbour plate goes up when the ship is moored
+     * and the open-water one otherwise. `energy.mode` is the project's single
+     * definition of docked — the same one the [SHOP] key and `wind.ts`'s
+     * shelter read — so this can never develop a second opinion about where
+     * the ship is.
+     *
+     * Read on OPEN and not in `refresh`, deliberately. `refresh` runs every
+     * frame the screen is up, and a berth can be lost while it is: the ship is
+     * halted, but a hazard's push or a gust can still carry it out of the
+     * ring, and a background that changed under the player mid-read would be
+     * the screen redecorating itself for no reason they can see.
+     */
+    overlay.classList.toggle(HARBOUR_CLASS, deps.energy.state.mode === 'docked');
     lastAffordable = null;
     refresh();
     // The button the player came for, unless they cannot afford it.

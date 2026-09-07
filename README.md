@@ -153,7 +153,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   them, and only after its own ten are gone. Both survive a reload.
 - **Fishing.** Anywhere on the globe, docked or not, day or night: press
   `[FISH]` and the world stops behind a cover screen with two ways in —
-  START FISHING, and the FISHING RECORD.
+  START FISHING, and the FISHING RECORD. The screen knows where you are: tied
+  up at a berth it wears the harbour, and out at sea it wears the open water.
   Start a session and The ship comes to a dead halt, the sea and the
   sky freeze behind a dimmed 9:16 card, and you get thirty seconds and ten
   harpoon shots at five rows of fish. The harpoon swings under the boat and
