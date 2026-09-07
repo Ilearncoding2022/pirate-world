@@ -264,6 +264,7 @@ shader.
 | `fog.ts` | `fogUniforms`, `updateFog(env)` | owns the three uniforms `applyAerial` reads; called from `globe.update` before water and land |
 | `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; exposes `offsets`, the three wave layers' integrated drift (direction-space, read-only), for `wavefield.ts`'s CPU port; see **Shader notes** for the plugin contract |
 | `wavefield.ts` | `snoise`, `sampleWave`, `waveHeight`, `waveNormalBasis`, `WaveOffsets`, `WaveSample` | float32-rounded CPU port of `waterglsl.ts`'s swell+wave `waveField`; `ship.ts` rides this, the player sees the GPU copy — see **The wave field** |
+| `hazardfield.ts` | `HAZARD_GLSL`, `hazardHeight(dir, hazards)`, `MAX_HAZARDS`, the crest/funnel sizes | the SECOND height field, beside `waveField` and never inside it: GLSL for three consumers and a float32 CPU port for the hull. Polynomial plus one `sqrt`, which is what makes its parity free — see **Hazards** |
 | `waterpatch.ts` | `createWaterPatch(water, quality)`, `WaterPatch` | ship-following grid that actually displaces in the vertex shader, reusing the sphere's already-assembled fragment shader byte for byte; built after the water plugins are woven in |
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()` | atmosphere shell + starfield |
@@ -272,22 +273,24 @@ shader.
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
-| `energy.ts` | `createEnergy(towns, battery)` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` |
+| `energy.ts` | `createEnergy(towns, battery)` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState`; `spend(level)` is the overlays' withdrawal and `wreck()` is the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` are untouched |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast |
+| `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards** |
 | `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
 | `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
 | `wakemap.ts` | `createWakeMap(size, ribbonGeometry)`, `WakeMap`, `computeWakeFrame`, `createWakeFrame`, `projectToMapUV`, `WAKE_MAP_EXTENT`, `WAKE_HEIGHT_SCALE`, `WAKE_BREAKUP_GLSL` | renders the wake's foam/height/age into a small top-down render target every frame; see **Shader notes** for the channel layout |
 | `waterwake.ts` | `createWaterWakePlugin(wake)` | the `WaterPlugin` that samples `wakemap.ts`'s texture back into the water shader's `normal`/`foam`/`colour` hooks |
+| `waterhazard.ts` | `createWaterHazardPlugin()` | the `WaterPlugin` that displaces, foams and darkens the sea for a hazard; a `WaterPlugin` plus one `bind(state)`, because it must be CONSTRUCTED before `createGlobe` and can only be HANDED its state after — see **Hazards** |
 | `reflection.ts` | `createReflection(quality)`, `Reflection`, `scheduleFaces` | low-res cube camera parked at the ship's waterline, round-robins `quality.reflectionFacesPerFrame` faces per frame; `texture` is `null` and the whole system absent, not idle, when `reflectionSize` is 0 |
 | `waterreflect.ts` | `createWaterReflectPlugin(cubeTexture)` | the `WaterPlugin` that mixes the decoded cube into `skyCol` and paints a fake hull-neon streak, since the hull itself cannot appear in its own reflection camera |
 | `postfx.ts` | `createPostFx(renderer, quality)`, `GpuFrameStats` | composer / bloom; `adopt(root)` for late materials; chains its sRGB self-encode `onBeforeCompile` after a material's own hook (see **Post-processing**); owns the optional GPU/CPU/draw-call timer toggled with Backquote |
 | `globe.ts` | `createGlobe(terrain, quality, waterPlugins?): { group, heightMap, waterBodies, towns, waveOffsets, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map; builds the displacement patch after the water plugins are woven into the shader |
-| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?, onHullProgress?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** |
+| `ship.ts` | `createShip(terrain, start?, maxAnisotropy?, onHullProgress?)`, `MAX_FORWARD`, `MODEL_SCALE` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** — and its optional sixth is `hazards.state`, a push spent like the wind's plus a drive that takes the helm away entirely; `place(dir, heading)` is the respawn's teleport, `halt()` the overlays' stop |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
-| `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
+| `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
 | `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel |
-| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
+| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards)` — hazards are drawn from the LIVE frame in `--magenta`, like the wind arrow and for the same reason |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
 | `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
@@ -302,6 +305,7 @@ shader.
 | `shop.ts` | `createShop(deps)`, `BATTERY_PRICE`, `HARPOONS_PRICE` | the chandlery panel; the only place gold leaves the purse |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
+| `blackout.ts` | `createBlackout()` | the fade a wreck happens behind; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
 | `loading.ts` | `createLoading()` | drives the splash `index.html` ships visible; the only UI a module does not build |
 | `main.ts` | — | staged bootstrap and frame loop |
 
@@ -410,14 +414,15 @@ Two more things follow from the stack and are easy to undo by accident:
 ```
 energy.update(dt, shipState, env)          // burn / solar / dock, on last frame's speed
 wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
-ship.update(dt, input, energyState, windState, globe.waveOffsets)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws
+hazards.update(dt, shipState, energyState) // rolls, transport, contact, push, spiral; writes HazardState
+ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
 globe.update(dt, env, wind.state, shipState, camera)  // daynight, fog, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
 hud.update(shipState, energyState, windState)
-radar.update(dt, shipState, windState)
+radar.update(dt, shipState, windState, hazards.state)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
@@ -433,9 +438,12 @@ postFx.render(0, scene, camera)       // zero dt: freeze the frame, survive a re
 controls.endFrame()                   // zoomDelta must not accumulate under the card
 ```
 
-Everything else — wind, ship, camera, globe, reflection, docks, wake, radar —
-is skipped. See **Fishing** for why each of those five is in the list and what
-happens to the world while it runs.
+Everything else — wind, hazards, ship, camera, globe, reflection, docks, wake,
+radar — is skipped. See **Fishing** for why each of those five is in the list
+and what happens to the world while it runs. Hazards being skipped means they
+are frozen with the rest of the world, uniforms and all; the `[FISH]` and
+`[SHOP]` buttons carry an extra `hazards.state.phase !== 'free'` guard so no
+overlay can be opened over a hull that is being carried into a funnel.
 
 Power runs **before** the ship, so it charges for a frame of travel the ship has
 already made rather than one it might not be able to afford. `globe.update` is
@@ -469,12 +477,16 @@ every rib/spray value for the frame are final, rather than from an
 `onBeforeRender` callback, so the fill happens at one predictable point in the
 loop instead of at a moment tied to when Three happens to draw the ribbon.
 
-Wind is wedged **between** the two, and the order is load bearing in both
-directions. It runs after energy because a berth is shelter and `energy.ts`
+Wind and hazards are wedged **between** the two, and the order is load bearing
+in both directions. It runs after energy because a berth is shelter and `energy.ts`
 owns the only definition of docked, so the wind has to see this frame's verdict
 rather than last frame's. It runs before the ship because the ship spends the
 push the same frame it is written. Energy therefore still bills last frame's
-speed, exactly as it did before.
+speed, exactly as it did before. `hazards.update` sits immediately after it for
+both of the same reasons — a berth is shelter from rough water too, and the
+hull spends the hazard push and obeys the hazard drive this same frame — and
+the water plugin reads that state later, inside `globe.update`, so the sea on
+the GPU and the sea the hull just climbed are one frame's numbers.
 
 ## TypeScript constraints (tsconfig)
 - `verbatimModuleSyntax`: use `import type { X }` for type-only imports.
@@ -979,7 +991,7 @@ that had stopped moving.
 **The wind never stops.** It alternates forever between a **lull** (3–15 s,
 speed exactly `LULL_SPEED` = 1.0 world units/s, which `hud.ts` prints as 1 kn)
 and an **event** (5–30 s, one fixed bearing drawn uniformly per event). A lull
-was a dead calm once, and two things follow from its no longer being one:
+was a dead calm once, and three things follow from its no longer being one:
 
 - **`hud.ts` has no CALM state.** The WIND row has one appearance, always
   carries a figure, and always points the arrow somewhere real; `.wnd--calm`
@@ -992,6 +1004,9 @@ was a dead calm once, and two things follow from its no longer being one:
   not there. Now the reverse is true: holding it would make every lull a weak
   continuation of the gust before it, and the wind would only ever change
   direction on the way *up*.
+- **`hazards.ts` leans on the floor.** A crest travels with the wind and is
+  raised upwind of the ship, so a wind with no direction would leave a wave
+  with no heading and nowhere to be born. See **Hazards**.
 
 `LULL_SPEED` is applied as a **floor on the finished speed**, not as an offset:
 `Math.max(LULL_SPEED, ramp × gust × cap)`. The top of the range is exactly
@@ -1143,6 +1158,123 @@ under way in a calm streams astern — it used to lean toward the bow, because t
 model was authored around a permanent following wind) and adds the tailwind
 component to the sail's belly. The model only bellies the sail one way, so beam and head winds
 show on the flag and not on the sail.
+
+## Hazards — rough water
+Strong waves that shove the hull and maelstroms that eat it. `hazards.ts` is
+the sim, `hazardfield.ts` the height field, `waterhazard.ts` the plugin that
+draws it. The brief is `docs/HAZARDS_PLAN.md`; this section records the two
+decisions a later reader is most likely to undo by accident.
+
+Three hazards at most, one of each kind, rolled every **5 s at 20% / 10% / 2%**.
+That is four times the original rate and it is two multiplied changes, not one:
+the period was halved *and* every probability doubled. Retuning either alone
+moves the sea by two, not four. A crest is a 20-unit travelling line that
+shoves the hull the way the water went — the push is a velocity, added exactly
+as the wind's is, so the bow holds its heading and the ship is carried off its
+course with the helm still answering. A maelstrom is a 20-unit funnel that
+takes the ship outright: the player loses the helm, `HazardState.drive` goes
+non-null and `ship.ts` runs no physics of its own until `hazards.reset()`.
+
+**A crest travels with the wind, and only with the wind.** `hazards.update`
+therefore takes `WindState`, and the frame loop's existing "hazards after the
+wind" ordering now carries a second reason: a crest raised on last frame's
+weather would be laid across a bearing the sea is no longer running on.
+`crestHeading` projects `wind.direction` onto the tangent plane at the crest's
+own centre rather than using it as it stands — the crest is up to 30 units
+away, where the ship's tangent plane is a fraction of a degree off.
+
+That rule is also why crests spawn **upwind** (`UPWIND_SHARE`, three draws in
+four within 60° of it) rather than ahead of the bow, and why the aim-point
+machinery that used to lead the ship by four seconds is gone. Once the heading
+is the wind's, placement is the only thing left that decides whether a wave is
+ever met: raised upwind it comes down on the hull, raised downwind it leaves at
+6 units/s and is never seen. `force()` is the exception and stays explicitly
+aimed — it is the test and `?hazard=` entry point, and a debug wave that
+wandered off with the weather would be no use for looking at one.
+
+The crest's cross-section is **asymmetric about `v = 0`**: `CREST_FRONT_RATIO`
+(0.8) of a half-width ahead of the crest line, `CREST_BACK_RATIO` (2.4) behind,
+so the face the hull meets is 2 units of run against 2.4 of rise and the water
+lets down over 6 astern. Both are read against the same `halfWidth` the contact
+test uses, so widening the tail never widens what the hull can be hit by. The
+branch on `v > 0` is safe for parity because the two widths agree to O(v²) at
+the crest line itself. A symmetric crest with a flat top and a broad foam wash
+was the first cut, and it read as a slab of ice rather than as a sea running.
+
+**The height field is polynomial, plus one `sqrt`, and that is not a style
+choice.** The sea's displacement is one function pasted into three consumers
+that must agree to the pixel, guarded by `tests/smoke/wave-parity.spec.ts` —
+see **The wave field**. Hazards go *beside* `waveField`, never inside it, as a
+second function with the same three consumers (the patch's vertex shader, the
+fragment shader through the plugin's `declarations`, and the CPU port
+`ship.ts` samples) and the same parity guard. `bump(x) = (1 - x²)²`,
+`crest(x) = (1 - x²)³`, `plateau`, and `(1 - r)³` written as three
+multiplications: no `sin`, `cos`,
+`exp`, `pow` or noise anywhere in the *height*. Those are the transcendentals
+whose last bits differ between a GPU and `Math`, which is what `dev/probe.ts`
+already had to design around. The spin of a maelstrom and the froth on a crest
+are fragment-side art, in the plugin's `foam` and `colour` hooks, where `sin`
+and `snoise` are welcome because nothing on the CPU has to match them.
+
+Local coordinates are dot products, never angles: `u = dot(p, east)`,
+`v = dot(p, north)` against the hazard's own tangent frame, times
+`GLOBE_RADIUS` for world units. That is the small-angle approximation — at 30
+units on a radius of 200 the error is under 0.2%, and both sides make the same
+error.
+
+**The distance fade is what keeps a hazard on the patch.** `waterpatch.ts` is
+80 units square and fades its displacement to zero over its outer 15%, from 34
+units out. A hazard that left the patch would keep tilting the normal and
+foaming on the undisplaced sphere behind it. So every hazard's `envelope` is
+multiplied on the CPU by a fade that is 1 within `FADE_NEAR` (32 units of the
+ship) and 0 beyond `FADE_FAR` (38), and all three consumers read that one
+product — including `radar.ts`, which sets its marks' alpha from it, so a crest
+that has dissolved in the water is not still drawn on the scope. A crest that
+outruns the patch therefore dissolves rather than turning into a painted
+stripe.
+
+**Hazard heights are world units and are not wind-scaled.** The ordinary sea
+peaks at `DISPLACE_AMPLITUDE` (0.3) through `uWaveIntensity`; a strong crest is
+1.6 and a great one 2.4, flat. The wind raises the ordinary sea, a hazard is
+its own weather, and putting one through `waveGain` would make a maelstrom
+shallow in a calm. In `ship.ts` this is the one ordering that matters:
+`hazardHeight` is added to each of the five hull samples **after** the
+`DISPLACE_AMPLITUDE * waveGain` scaling and **inside** the pitch/roll `atan2`
+numerators, which are heights in world units. Add it around them instead and
+the hull rides a crest without ever tipping on it.
+
+**The plugin is built before `createGlobe` and bound after.** A `WaterPlugin`
+can only be woven in while the shader is being assembled (see **The wave
+field**), but `hazards.ts` needs `globe.heightMap`, `globe.waterBodies` and
+`globe.towns`, which exist only after. So `main.ts` constructs the plugin
+empty, passes it into `createGlobe`, then calls `waterHazard.bind(hazards.state)`.
+Unbound it writes `uHazCount = 0` and the sea is the sea.
+
+**`wind.ts` needs no change across a teleport, and must not be given one.** It
+transports its direction by the rotation between the last and current ship
+positions, and a large rotation is still a rotation — the respawn is a single
+enormous step and parallel transport handles it exactly as it handles a
+sixtieth of a second of sailing. See **Frames, and where they stop working**.
+`camera.ts` is the module that *does* need one, and has it: `snap` exists
+because damping is a rate, not a distance.
+
+The wreck itself is three calls in `main.ts`'s `onSunk`, in an order the fade
+is the whole point of: `energy.wreck()` runs immediately (the HUD is behind the
+black sheet, and a power bar halving itself in front of the player would read
+as a second, separate event), and everything that MOVES the ship —
+`ship.place(hazards.pickRespawn(), …)`, `view.snap`, `hazards.reset()` — runs
+inside `blackout.run`'s callback, at the one instant in the game the world may
+be rearranged unseen. `blackout.ts` drives its fades with CSS transitions and
+`transitionend` **plus a timer fallback**, because a throttled or backgrounded
+tab may never fire the event and a screen stuck black is the one failure with
+no way out. Its three durations are written twice — there and as the two
+`transition` rules in `style.css`'s `BLACKOUT` block — so change them together.
+
+`?hazard=wave|greatwave|maelstrom` forces one 25 units dead ahead, three
+seconds after the first frame. It is guarded through `URLSearchParams` and
+never through `import.meta.env.MODE`, on the same terms as `?quality=`: the
+owner uses it against a `vite preview` production build, and a 1%-per-10-s
+event cannot otherwise be seen inside the testing budget.
 
 ## Towns, berths and the dock zones
 `towns.ts` owns settlement placement, which used to live inside `citylights.ts`

@@ -530,6 +530,19 @@
     </div>
     <!-- END SHOP -->
 
+    <!-- ===================== BLACKOUT =====================
+         The fade a wreck happens behind. `blackout.ts` owns it.
+
+         It ships hidden and empty: one flat sheet, no content, no controls.
+         Above every overlay in the project so nothing shows through a
+         shipwreck, and below the loading splash, which outranks everything.
+
+         `pointer-events` is on while it is up, deliberately: a screen the
+         player cannot see is a screen they must not be able to click. -->
+    <!-- BLACKOUT -->
+    <div class="blackout" id="blackout" aria-hidden="true"></div>
+    <!-- END BLACKOUT -->
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
 import { createShip, MAX_FORWARD } from '../../src/ship';
-import type { InputState, EnergyState, WindState } from '../../src/types';
+import type { HazardState, InputState, EnergyState, WindState } from '../../src/types';
 import { createStubTerrain } from './support/stub-terrain';
+import { tangentFrame } from '../../src/geo';
 
 /**
  * Regression tests for `ship.ts`'s dynamics, against a stub terrain whose
@@ -110,5 +111,60 @@ describe('ship-physics', () => {
     // Thrust refused: speed decays toward 0 (no thrust term), never climbs.
     expect(ship.state.speed).toBeLessThan(speedBefore);
     expect(ship.state.speed).toBeGreaterThanOrEqual(0);
+  });
+  it('obeys a hazard drive, and place() sets the hull down stopped on a heading', () => {
+    const ship = createShip(createStubTerrain());
+    const dt = 1 / 60;
+    const canThrust = energy(true);
+
+    // Get real way on first, so the assertions below are about the drive
+    // taking the hull over rather than about a ship that was never moving.
+    for (let i = 0; i < 3 / dt; i++) ship.update(dt, input({ forward: true }), canThrust, NO_WIND);
+    expect(ship.state.speed).toBeGreaterThan(0);
+
+    // A point well clear of both poles: `heading` is read off `forward`
+    // through the tangent frame, which is degenerate at them.
+    const position = new Vector3(1, 0.3, 0.2).normalize();
+    const north = new Vector3();
+    const east = new Vector3();
+    tangentFrame(position, north, east);
+
+    const drive: HazardState = {
+      live: [],
+      along: 0,
+      across: 0,
+      phase: 'spiral',
+      drive: { position, forward: east, sink: 1.2 },
+    };
+
+    // Helm hard over and the throttle wide open: a captured hull answers
+    // neither, so both are held down through the whole step.
+    for (let i = 0; i < 10; i++) {
+      ship.update(dt, input({ forward: true, left: true }), canThrust, NO_WIND, undefined, drive);
+      expect(ship.state.position.distanceTo(position)).toBeLessThan(1e-9);
+      expect(ship.state.speed).toBe(0);
+      expect(ship.state.groundSpeed).toBe(0);
+      expect(ship.state.velocity.length()).toBe(0);
+      expect(ship.state.position.length()).toBeCloseTo(1, 9);
+      // The bow is the drive's, re-orthogonalised against the position rather
+      // than transported: the spiral's own direction of motion.
+      expect(ship.state.forward.dot(east)).toBeCloseTo(1, 9);
+    }
+
+    // The respawn. `place` is the one call in the game allowed to move the
+    // ship without walking it there.
+    const home = new Vector3(0.2, -0.4, 1).normalize();
+    const heading = Math.PI / 2;
+    ship.place(home, heading);
+
+    expect(ship.state.position.distanceTo(home)).toBeLessThan(1e-9);
+    expect(ship.state.heading).toBeCloseTo(heading, 9);
+    expect(ship.state.speed).toBe(0);
+    expect(ship.state.groundSpeed).toBe(0);
+    expect(ship.state.velocity.length()).toBe(0);
+    // Facing east, which is what a heading of PI/2 means: 0 = north,
+    // clockwise positive. See docs/ARCHITECTURE.md "Conventions".
+    tangentFrame(home, north, east);
+    expect(ship.state.forward.dot(east)).toBeCloseTo(1, 9);
   });
 });

@@ -198,6 +198,102 @@ export interface WindState {
   readonly across: number;
 }
 
+/* ------------------------------------------------------------------ */
+/* Hazards — strong waves and maelstroms                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What kind of rough water this is. Three kinds, one live instance of each at
+ * most, drawn on their own odds — see `hazards.ts`.
+ */
+export type HazardKind = 'wave' | 'greatwave' | 'maelstrom';
+
+/**
+ * One piece of rough water on the sea, owned by `hazards.ts` and mutated in
+ * place for as long as it lives.
+ *
+ * It is read by three consumers that must agree about it to the pixel: the
+ * water shader (through `waterhazard.ts`'s uniforms), the displacement patch's
+ * vertex shader, and `hazardfield.ts`'s CPU port that the hull rides. See
+ * docs/HAZARDS_PLAN.md — the whole field is polynomial so those three can
+ * never numerically drift apart.
+ */
+export interface Hazard {
+  readonly kind: HazardKind;
+  /**
+   * Unit direction of the centre. Mutated in place as a crest travels, so
+   * hold the Hazard rather than copying this out.
+   */
+  readonly centre: Vector3;
+  /** Unit tangent ACROSS the travel line — the crest's own long axis. */
+  readonly east: Vector3;
+  /**
+   * Unit tangent ALONG the travel line: the direction a crest is moving, and
+   * therefore the direction it shoves the hull.
+   */
+  readonly north: Vector3;
+  /** Half-length (crest) or radius (maelstrom) at full size, world units. */
+  readonly extent: number;
+  /** Half-width of a crest, world units. 0 for a maelstrom. */
+  readonly halfWidth: number;
+  /**
+   * Signed peak height, world units: positive for a crest, the funnel depth
+   * for a maelstrom. NOT scaled by the wind — the weather raises the ordinary
+   * sea, a hazard is its own weather.
+   */
+  readonly amplitude: number;
+  /**
+   * Rise/hold/fade times the distance fade, 0..1. The one number that reaches
+   * the shader, so a hazard leaving the displacement patch dissolves rather
+   * than painting a stripe on the undisplaced sphere.
+   */
+  readonly envelope: number;
+  /** Size envelope: a maelstrom's radius is `extent * size`. Always 1 for a crest. */
+  readonly size: number;
+  /** Seconds since it rose. */
+  readonly age: number;
+  /** True once the hull has taken this crest's push, so it is dissipating. */
+  readonly consumed: boolean;
+}
+
+/**
+ * Where a captured hull is being carried, and how deep it has gone.
+ *
+ * Non-null exactly while `HazardState.phase !== 'free'`. `ship.ts` obeys it
+ * INSTEAD of its own physics: the helm and the throttle are ignored, and the
+ * hull is placed here.
+ */
+export interface HazardDrive {
+  /** Unit direction the hull is placed at this frame. */
+  readonly position: Vector3;
+  /** Unit tangent the bow is turned to — the direction of the spiral's motion. */
+  readonly forward: Vector3;
+  /** How far the hull is drawn BELOW its waterline, world units. */
+  readonly sink: number;
+}
+
+/**
+ * The rough water, as everything downstream sees it. One object, mutated in
+ * place for the life of the run, exactly as `energy.ts` owns its tank and
+ * `wind.ts` its weather. Holding a copy would leave a reader looking at a sea
+ * that had stopped moving.
+ */
+export interface HazardState {
+  /** Live hazards, at most one of each kind. */
+  readonly live: readonly Hazard[];
+  /**
+   * Eased push along the ship's forward axis, world units/s — the same frame
+   * and the same units as `WindState.along`, and spent the same way.
+   */
+  readonly along: number;
+  /** Push along the ship's starboard axis, world units/s. */
+  readonly across: number;
+  /** `free` until a maelstrom takes the ship; then `spiral`, then `sunk`. */
+  readonly phase: 'free' | 'spiral' | 'sunk';
+  /** Non-null exactly while `phase !== 'free'`. See HazardDrive. */
+  readonly drive: HazardDrive | null;
+}
+
 /** Read-only view of the ship, produced by ship.ts, consumed by camera.ts and hud.ts. */
 export interface ShipState {
   /** Unit vector from globe center to the ship. World position = position * GLOBE_RADIUS. */

@@ -14,7 +14,7 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { BufferGeometry, Material, Object3D } from 'three';
-import type { EnergyState, InputState, ShipState, Terrain, WindState } from './types';
+import type { EnergyState, HazardState, InputState, ShipState, Terrain, WindState } from './types';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
 import { createShipFx } from './shipfx';
 import type { ShipFx } from './shipfx';
@@ -22,6 +22,7 @@ import shipModelUrl from '../assets/pirateship_beginner.glb?url';
 import { sampleWave } from './wavefield';
 import type { WaveOffsets, WaveSample } from './wavefield';
 import { DISPLACE_AMPLITUDE } from './waveconstants';
+import { hazardHeight } from './hazardfield';
 import { OCEAN_CAP } from './wind';
 
 /* ------------------------------------------------------------------ */
@@ -201,6 +202,19 @@ const _waveDir = new Vector3();
 const _waveSample: WaveSample = { h: 0, gu: 0, gv: 0 };
 /** A dead-calm sea has no wind offsets to speak of, but still moves in place. */
 const _zeroWaveOffsets: WaveOffsets = { swell: new Vector3(), wave: new Vector3() };
+/**
+ * No rough water at all, for a caller that does not have a hazard system --
+ * the unit tests, which never build one. Frozen rather than merely shared:
+ * `ship.ts` only ever reads it, and a default that a caller could quietly
+ * mutate would be a very hard bug to find.
+ */
+const NO_HAZARD: HazardState = Object.freeze({
+  live: Object.freeze([]),
+  along: 0,
+  across: 0,
+  phase: 'free',
+  drive: null,
+}) as HazardState;
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -392,8 +406,27 @@ export interface Ship {
    * `waveOffsets` is `globe.waveOffsets` -- the CPU sea the hull heaves,
    * pitches and rolls on; omitted, it defaults to a stationary field (see
    * `tests/unit/ship-physics.test.ts`, which never passes it).
+   * `hazard` is `hazards.state` -- the rough water, doing two unrelated jobs:
+   * a push spent exactly like the wind's, and a drive that takes the hull off
+   * the player entirely. Omitted, it defaults to no rough water at all.
    */
-  update(dt: number, input: InputState, energy: EnergyState, wind: WindState, waveOffsets?: WaveOffsets): void;
+  update(
+    dt: number,
+    input: InputState,
+    energy: EnergyState,
+    wind: WindState,
+    waveOffsets?: WaveOffsets,
+    hazard?: HazardState,
+  ): void;
+  /**
+   * Puts the hull at `dir` on `headingRad`, stopped.
+   *
+   * The one other place a heading is an INPUT rather than a reading — see
+   * `forwardFromHeading`. Only the respawn after a maelstrom calls it: a
+   * teleport is the single event in this game that is allowed to move the ship
+   * without walking it there.
+   */
+  place(dir: Vector3, headingRad: number): void;
   /**
    * Stops the hull dead, where it stands, this instant.
    *
@@ -523,6 +556,16 @@ export function createShip(
 
   let elapsed = 0;
   let bob = 0;
+  /**
+   * How far below its waterline the hull is drawn, world units.
+   *
+   * Non-zero only under a maelstrom's drive, which sinks the ship over the
+   * last seconds of its spiral. Subtracted from the RADIUS in
+   * `applyTransform` rather than from the visual transform, for the same
+   * reason `bob` is added there: anything else leaves the hull sitting on a
+   * surface the sea is no longer at.
+   */
+  let sink = 0;
   let bankRoll = 0;
   /** Low-passed heave/pitch/roll from `sampleWave`, radians for the latter two. */
   let waveHeave = 0;
@@ -674,7 +717,7 @@ export function createShip(
     // (see `update`) -- added to the RADIUS, not just to this visual
     // transform, so the hull never floats above or sinks below the surface
     // the patch actually displaces.
-    object.position.copy(state.position).multiplyScalar(GLOBE_RADIUS + HULL_OFFSET + bob);
+    object.position.copy(state.position).multiplyScalar(GLOBE_RADIUS + HULL_OFFSET + bob - sink);
   }
 
   function update(
@@ -691,128 +734,184 @@ export function createShip(
      * either way -- only the visual radius (`bob`) and orientation do.
      */
     waveOffsets: WaveOffsets = _zeroWaveOffsets,
+    /**
+     * `hazards.state` — the rough water. Two separate jobs, and they do not
+     * overlap: `along`/`across` are a push spent exactly like the wind's, and
+     * `drive` (when non-null) means the hull is no longer the player's to
+     * steer and is being carried into a funnel. Optional and defaulting to
+     * nothing at all, so `tests/unit/ship-physics.test.ts` needs no change.
+     */
+    hazard: HazardState = NO_HAZARD,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
     elapsed += dt;
 
-    // ---- Steering: always allowed, even while beached --------------------
-    let turnInput = 0;
-    if (input.left) turnInput -= 1;
-    if (input.right) turnInput += 1;
+    /*
+     * The hull under a maelstrom's drive: not the player's any more.
+     *
+     * Everything between here and the wave sampling below is the ship the
+     * player steers -- the helm, the throttle, the ground velocity and the
+     * step across the water -- and a captured hull runs none of it. It is
+     * placed where `hazards.ts` says it is, on the heading that module chose,
+     * stopped: a ship being carried down a funnel is not making way, and a
+     * groundSpeed reported off a spiral would have `energy.ts` billing the
+     * engines for it and `wake.ts` laying a ribbon behind it.
+     *
+     * The sea sampling below still runs for both branches, so the hull keeps
+     * heaving on the water -- and tipping into the funnel's own slope -- right
+     * up until it goes under.
+     */
+    const drive = hazard.drive;
+    if (drive === null) {
+      // ---- Steering: always allowed, even while beached --------------------
+      let turnInput = 0;
+      if (input.left) turnInput -= 1;
+      if (input.right) turnInput += 1;
 
-    const speedFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
-    const turnRate = TURN_RATE * (TURN_MIN_SCALE + (1 - TURN_MIN_SCALE) * speedFrac);
-    if (turnInput !== 0) {
-      // The bow turns about the surface normal. Clockwise-positive looking
-      // down from outside, so right/D swings it clockwise from the player's
-      // chase-camera view -- the same sense the old heading counter had, but
-      // applied to the vector itself so it means the same thing at the pole
-      // as it does at the equator. A negative angle because applyAxisAngle is
-      // counter-clockwise about `up`, and `up` points at the camera.
-      state.forward.applyAxisAngle(state.up, -turnInput * turnRate * dt);
-    }
+      const speedFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
+      const turnRate = TURN_RATE * (TURN_MIN_SCALE + (1 - TURN_MIN_SCALE) * speedFrac);
+      if (turnInput !== 0) {
+        // The bow turns about the surface normal. Clockwise-positive looking
+        // down from outside, so right/D swings it clockwise from the player's
+        // chase-camera view -- the same sense the old heading counter had, but
+        // applied to the vector itself so it means the same thing at the pole
+        // as it does at the equator. A negative angle because applyAxisAngle is
+        // counter-clockwise about `up`, and `up` points at the camera.
+        state.forward.applyAxisAngle(state.up, -turnInput * turnRate * dt);
+      }
 
-    // Subtle bank into the turn, damped so it eases in and out.
-    const bankTarget = -turnInput * TURN_BANK * (0.25 + 0.75 * speedFrac);
-    bankRoll += (bankTarget - bankRoll) * (1 - Math.exp(-4 * dt));
+      // Subtle bank into the turn, damped so it eases in and out.
+      const bankTarget = -turnInput * TURN_BANK * (0.25 + 0.75 * speedFrac);
+      bankRoll += (bankTarget - bankRoll) * (1 - Math.exp(-4 * dt));
 
-    // ---- Throttle --------------------------------------------------------
-    // A dry tank cuts thrust in both directions and nothing else. Steering,
-    // drag, the bob and sway, the land probe and the sea all keep running
-    // below, so the ship coasts to a stop and still answers the helm -- being
-    // out of charge is a predicament, never a frozen frame. The player can
-    // always turn the hull, and the panels bring it back.
-    let thrust = 0;
-    if (energy.canThrust) {
-      if (input.forward) thrust += ACCEL;
-      if (input.backward) thrust -= ACCEL;
-    }
+      // ---- Throttle --------------------------------------------------------
+      // A dry tank cuts thrust in both directions and nothing else. Steering,
+      // drag, the bob and sway, the land probe and the sea all keep running
+      // below, so the ship coasts to a stop and still answers the helm -- being
+      // out of charge is a predicament, never a frozen frame. The player can
+      // always turn the hull, and the panels bring it back.
+      let thrust = 0;
+      if (energy.canThrust) {
+        if (input.forward) thrust += ACCEL;
+        if (input.backward) thrust -= ACCEL;
+      }
 
-    // Exact solution of  ds/dt = thrust - DRAG * s  over dt, rather than a
-    // step of each in turn. Two reasons it has to be integrated in closed
-    // form. It makes the top speed exactly thrust / DRAG: stepping thrust and
-    // then drag lands on (ACCEL / DRAG) * (1 - DRAG * dt) instead, which is
-    // 19.8 kn at 60fps and 18.6 at 10 -- a top speed that depends on the frame
-    // rate. And with no throttle it decays cleanly to zero, so releasing the
-    // keys still coasts the ship to a stop.
-    const terminal = thrust / DRAG;
-    state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
-    state.speed = clamp(state.speed, -MAX_REVERSE, MAX_FORWARD);
-    // Snap on the absence of THRUST, not on the absence of input. The two are
-    // the same key press until the tank runs dry, and then they are not: a
-    // player holding W on a dead ship gets thrust 0, and the exponential above
-    // decays toward zero without ever arriving. Testing the keys instead would
-    // leave `speed` at 1e-9 for as long as the key was held -- under way by no
-    // measure a player can see, but never `=== 0`, which is exactly the test
-    // `energy.ts` uses to decide the panels are deployed. The ship would sit
-    // there refusing to charge, and nothing on screen would say why.
-    if (thrust === 0 && Math.abs(state.speed) < STOP_EPSILON) {
-      state.speed = 0;
-    }
+      // Exact solution of  ds/dt = thrust - DRAG * s  over dt, rather than a
+      // step of each in turn. Two reasons it has to be integrated in closed
+      // form. It makes the top speed exactly thrust / DRAG: stepping thrust and
+      // then drag lands on (ACCEL / DRAG) * (1 - DRAG * dt) instead, which is
+      // 19.8 kn at 60fps and 18.6 at 10 -- a top speed that depends on the frame
+      // rate. And with no throttle it decays cleanly to zero, so releasing the
+      // keys still coasts the ship to a stop.
+      const terminal = thrust / DRAG;
+      state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
+      state.speed = clamp(state.speed, -MAX_REVERSE, MAX_FORWARD);
+      // Snap on the absence of THRUST, not on the absence of input. The two are
+      // the same key press until the tank runs dry, and then they are not: a
+      // player holding W on a dead ship gets thrust 0, and the exponential above
+      // decays toward zero without ever arriving. Testing the keys instead would
+      // leave `speed` at 1e-9 for as long as the key was held -- under way by no
+      // measure a player can see, but never `=== 0`, which is exactly the test
+      // `energy.ts` uses to decide the panels are deployed. The ship would sit
+      // there refusing to charge, and nothing on screen would say why.
+      if (thrust === 0 && Math.abs(state.speed) < STOP_EPSILON) {
+        state.speed = 0;
+      }
 
-    // ---- Ground velocity: the engine along the bow, plus the wind ---------
-    // `state.speed` is the engine and only the engine. What the hull does over
-    // the ground is that plus the eased push `wind.ts` resolved this frame,
-    // and adding it as a VELOCITY rather than as a turning force is what gives
-    // a beam wind real leeway: the bow holds its heading and the ship crabs
-    // off its course, which the wake behind it will show.
-    _starboard.crossVectors(state.forward, state.up);
-    if (_starboard.lengthSq() > 1e-12) _starboard.normalize();
-    else _starboard.set(0, 0, 0);
+      // ---- Ground velocity: the engine along the bow, plus the wind ---------
+      // `state.speed` is the engine and only the engine. What the hull does over
+      // the ground is that plus the eased push `wind.ts` resolved this frame,
+      // and adding it as a VELOCITY rather than as a turning force is what gives
+      // a beam wind real leeway: the bow holds its heading and the ship crabs
+      // off its course, which the wake behind it will show.
+      _starboard.crossVectors(state.forward, state.up);
+      if (_starboard.lengthSq() > 1e-12) _starboard.normalize();
+      else _starboard.set(0, 0, 0);
 
-    _velocity
-      .copy(state.forward)
-      .multiplyScalar(state.speed + wind.along)
-      .addScaledVector(_starboard, wind.across);
+      _velocity
+        .copy(state.forward)
+        .multiplyScalar(state.speed + wind.along + hazard.along)
+        .addScaledVector(_starboard, wind.across + hazard.across);
 
-    const groundMag = _velocity.length();
+      const groundMag = _velocity.length();
 
-    // ---- Move along the ground velocity, refusing to enter land ----------
-    // Held before the first attempt, because the bow is carried by where the
-    // hull ENDED UP relative to where it began, and `tryStep` may write the
-    // position more than once below.
-    _prevPosition.copy(state.position);
-    if (groundMag > 1e-9) {
-      _course.copy(_velocity).multiplyScalar(1 / groundMag);
-      if (!tryStep(_course, (groundMag * dt) / GLOBE_RADIUS)) {
-        // Blocked on the combined course. A beam wind pinning the hull against
-        // a coast must not also stop it sailing ALONG that coast, so try the
-        // engine alone before giving up -- otherwise a player with a shore to
-        // leeward loses the helm entirely until the wind drops.
-        let freed = false;
-        if (state.speed !== 0) {
-          _course.copy(state.forward).multiplyScalar(Math.sign(state.speed));
-          freed = tryStep(_course, (Math.abs(state.speed) * dt) / GLOBE_RADIUS);
-        }
-        if (freed) {
-          // Sailing along the coast under engine alone. The leeway was refused
-          // by the land, so it must not survive into what we report.
-          _velocity.copy(state.forward).multiplyScalar(state.speed);
-        } else {
-          // Only now is it truly beached: hold position; steering still works.
-          state.speed = 0;
-          _velocity.set(0, 0, 0);
+      // ---- Move along the ground velocity, refusing to enter land ----------
+      // Held before the first attempt, because the bow is carried by where the
+      // hull ENDED UP relative to where it began, and `tryStep` may write the
+      // position more than once below.
+      _prevPosition.copy(state.position);
+      if (groundMag > 1e-9) {
+        _course.copy(_velocity).multiplyScalar(1 / groundMag);
+        if (!tryStep(_course, (groundMag * dt) / GLOBE_RADIUS)) {
+          // Blocked on the combined course. A beam wind pinning the hull against
+          // a coast must not also stop it sailing ALONG that coast, so try the
+          // engine alone before giving up -- otherwise a player with a shore to
+          // leeward loses the helm entirely until the wind drops.
+          let freed = false;
+          if (state.speed !== 0) {
+            _course.copy(state.forward).multiplyScalar(Math.sign(state.speed));
+            freed = tryStep(_course, (Math.abs(state.speed) * dt) / GLOBE_RADIUS);
+          }
+          if (freed) {
+            // Sailing along the coast under engine alone. The leeway was refused
+            // by the land, so it must not survive into what we report.
+            _velocity.copy(state.forward).multiplyScalar(state.speed);
+          } else {
+            // Only now is it truly beached: hold position; steering still works.
+            state.speed = 0;
+            _velocity.set(0, 0, 0);
+          }
         }
       }
+
+      // Written from what the hull COMMITTED, never from what it attempted. The
+      // land refuses steps after the velocity above is built, and reporting the
+      // attempt would leave a ship hard aground reading a knot and a half on the
+      // HUD -- and would hand that phantom way to `energy.ts`, which decides
+      // whether a berth may connect on this very number.
+      const committed = _velocity.length();
+      state.velocity.copy(_velocity);
+      // Signed by the forward component rather than by Math.sign of it: a ship
+      // making pure leeway has no forward component at all, and calling that
+      // stopped would hand `energy.ts` a berth it had not earned.
+      state.groundSpeed = _velocity.dot(state.forward) >= 0 ? committed : -committed;
+
+      // The bow is carried across whatever the hull actually committed -- one
+      // transport for the whole step, however many attempts `tryStep` made.
+      transportForward(_prevPosition);
+      syncStateGeo();
+    } else {
+      state.position.copy(drive.position).normalize();
+      state.up.copy(state.position);
+      // Taken as given rather than transported: the spiral's own heading is
+      // the direction of its motion, which `hazards.ts` has already worked out
+      // from where the hull was last frame. Re-orthogonalised anyway, because
+      // the step it came off is a chord across a tightening circle.
+      state.forward
+        .copy(drive.forward)
+        .addScaledVector(state.position, -drive.forward.dot(state.position));
+      if (state.forward.lengthSq() > 1e-12) state.forward.normalize();
+      else {
+        tangentFrame(state.position, _north, _east);
+        state.forward.copy(_north);
+      }
+      state.speed = 0;
+      state.groundSpeed = 0;
+      state.velocity.set(0, 0, 0);
+      // The helm's own lean unwinds at the same rate it eases in at above. A
+      // hull nobody is steering is not banking into a turn, and a lean held
+      // frozen through a six-second spiral reads as the model being stuck
+      // rather than as the ship being taken.
+      bankRoll -= bankRoll * (1 - Math.exp(-4 * dt));
+      // The bow's transport baseline, so the frame the drive ENDS on does not
+      // carry `forward` across the whole spiral in one rotation.
+      _prevPosition.copy(state.position);
+      syncStateGeo();
     }
-
-    // Written from what the hull COMMITTED, never from what it attempted. The
-    // land refuses steps after the velocity above is built, and reporting the
-    // attempt would leave a ship hard aground reading a knot and a half on the
-    // HUD -- and would hand that phantom way to `energy.ts`, which decides
-    // whether a berth may connect on this very number.
-    const committed = _velocity.length();
-    state.velocity.copy(_velocity);
-    // Signed by the forward component rather than by Math.sign of it: a ship
-    // making pure leeway has no forward component at all, and calling that
-    // stopped would hand `energy.ts` a berth it had not earned.
-    state.groundSpeed = _velocity.dot(state.forward) >= 0 ? committed : -committed;
-
-    // The bow is carried across whatever the hull actually committed -- one
-    // transport for the whole step, however many attempts `tryStep` made.
-    transportForward(_prevPosition);
-    syncStateGeo();
+    // How far the hull is drawn below its own waterline. Read by
+    // `applyTransform`; zero whenever nothing is driving it.
+    sink = drive !== null ? drive.sink : 0;
 
     // ---- Idle motion --------------------------------------------------
     const driveFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
@@ -833,37 +932,49 @@ export function createShip(
     if (_starboard.lengthSq() > 1e-12) _starboard.normalize();
     else _starboard.set(0, 0, 0);
 
+    /*
+     * The five heights below are in WORLD UNITS, and each is two terms.
+     *
+     * The wave field's own reading is a raw field value, so it is scaled here
+     * by `seaGain` -- the weather. A hazard's height is already absolute world
+     * units and is deliberately NOT wind-scaled: the wind raises the ordinary
+     * sea, a hazard is its own weather, and putting a crest through `waveGain`
+     * would make a maelstrom shallow in a calm and a strong wave a ripple.
+     *
+     * Both terms are added AT THE SAMPLE POINT, before any difference is
+     * taken, which is what puts the hazard inside the pitch and roll numerators
+     * below rather than beside them. The hull therefore climbs a crest, and
+     * tips bow-down into a funnel, on the same arithmetic that already rides
+     * the swell.
+     */
+    const seaGain = DISPLACE_AMPLITUDE * waveGain;
+    const live = hazard.live;
+
     sampleWave(state.position, waveOffsets, 1.0, _waveSample);
-    const centreH = _waveSample.h;
+    const centreH = _waveSample.h * seaGain + hazardHeight(state.position, live);
 
     _waveDir.copy(state.position).addScaledVector(state.forward, halfLength).normalize();
     sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
-    const bowH = _waveSample.h;
+    const bowH = _waveSample.h * seaGain + hazardHeight(_waveDir, live);
 
     _waveDir.copy(state.position).addScaledVector(state.forward, -halfLength).normalize();
     sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
-    const sternH = _waveSample.h;
+    const sternH = _waveSample.h * seaGain + hazardHeight(_waveDir, live);
 
     _waveDir.copy(state.position).addScaledVector(_starboard, halfBeam).normalize();
     sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
-    const starboardH = _waveSample.h;
+    const starboardH = _waveSample.h * seaGain + hazardHeight(_waveDir, live);
 
     _waveDir.copy(state.position).addScaledVector(_starboard, -halfBeam).normalize();
     sampleWave(_waveDir, waveOffsets, 1.0, _waveSample);
-    const portH = _waveSample.h;
+    const portH = _waveSample.h * seaGain + hazardHeight(_waveDir, live);
 
-    const heaveTarget = centreH * DISPLACE_AMPLITUDE * waveGain;
+    const heaveTarget = centreH;
     // atan2 rather than a bare ratio: the run stays fixed (the sample
     // baseline) while the rise is the height difference, exactly the small
     // angle a real deck would tip through.
-    const pitchTarget = Math.atan2(
-      (bowH - sternH) * DISPLACE_AMPLITUDE * waveGain,
-      2 * HULL_SAMPLE_HALF_LENGTH * MODEL_SCALE,
-    );
-    const rollTarget = Math.atan2(
-      (starboardH - portH) * DISPLACE_AMPLITUDE * waveGain,
-      2 * HULL_SAMPLE_HALF_BEAM * MODEL_SCALE,
-    );
+    const pitchTarget = Math.atan2(bowH - sternH, 2 * HULL_SAMPLE_HALF_LENGTH * MODEL_SCALE);
+    const rollTarget = Math.atan2(starboardH - portH, 2 * HULL_SAMPLE_HALF_BEAM * MODEL_SCALE);
 
     // Low-pass so the hull settles onto a new reading of the sea rather than
     // visibly snapping to it every frame.
@@ -911,7 +1022,10 @@ export function createShip(
     fx?.update(
       dt,
       driveFrac,
-      (input.forward ? 1 : 0) - (input.backward ? 1 : 0),
+      // The raw key press, except while the drive has the hull: a ship being
+      // pulled into a funnel is not under power, and firing its thrusters on
+      // the way down would read as the player still having the helm.
+      drive === null ? (input.forward ? 1 : 0) - (input.backward ? 1 : 0) : 0,
       energy.level,
       energy.canThrust,
       energy.dock !== null,
@@ -933,6 +1047,32 @@ export function createShip(
    * `bankRoll` is a private easing term rather than published state, which is
    * why it is unwound here and not by the caller — the caller cannot reach it.
    */
+  /**
+   * See `Ship.place`. The hull is set down at `dir` facing `headingRad`,
+   * stopped, with the bank unwound -- everything `halt` zeroes, plus the two
+   * things it deliberately does not touch, because this IS the teleport.
+   */
+  function place(dir: Vector3, headingRad: number): void {
+    state.position.copy(dir).normalize();
+    state.up.copy(state.position);
+    forwardFromHeading(((headingRad % TWO_PI) + TWO_PI) % TWO_PI);
+    // The bow's own transport baseline, so the frame after a teleport does not
+    // carry `forward` across the entire planet the hull just crossed.
+    _prevPosition.copy(state.position);
+    // The sea is sampled fresh next frame; the low-passed attitude has to go
+    // with the position or the hull arrives still leaning on the wave it left.
+    waveHeave = 0;
+    wavePitch = 0;
+    waveRoll = 0;
+    bob = 0;
+    // The hull that went down the funnel comes back up at its own waterline.
+    // `hazards.reset()` clears the drive a moment later, but this call happens
+    // while it is still holding the hull at full sink.
+    sink = 0;
+    syncStateGeo();
+    halt();
+  }
+
   function halt(): void {
     state.speed = 0;
     state.groundSpeed = 0;
@@ -941,5 +1081,5 @@ export function createShip(
     applyTransform();
   }
 
-  return { object, state: state as ShipState, ready, update, halt };
+  return { object, state: state as ShipState, ready, update, halt, place };
 }

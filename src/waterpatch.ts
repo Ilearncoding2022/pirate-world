@@ -5,6 +5,7 @@ import type { Quality } from './quality';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
 import { NOISE_GLSL } from './noiseglsl';
 import { waterWavefield } from './waterglsl';
+import { HAZARD_GLSL } from './hazardfield';
 import {
   SWELL_WAVELENGTH,
   WAVE_WAVELENGTH,
@@ -94,6 +95,11 @@ export function createWaterPatch(water: Water, quality: Quality): WaterPatch {
     'varying vec3 vWorldPos;',
     NOISE_GLSL,
     ...waterWavefield(freq(SWELL_WAVELENGTH), freq(WAVE_WAVELENGTH), freq(CHOP_WAVELENGTH)),
+    // The same chunk `waterhazard.ts` pastes into the fragment shader and
+    // `hazardfield.ts` ports to the CPU -- see that module's comment. The
+    // uniforms it declares arrive through `...sphereMaterial.uniforms` above,
+    // shared by reference with the plugin that writes them.
+    HAZARD_GLSL,
     `const float PATCH_EXTENT = ${PATCH_EXTENT.toFixed(1)};`,
     `const float SKIRT_START = ${SKIRT_START.toFixed(4)};`,
     `const float GLOBE_R = ${GLOBE_RADIUS.toFixed(1)};`,
@@ -109,7 +115,10 @@ export function createWaterPatch(water: Water, quality: Quality): WaterPatch {
     '  float r = length(position.xy) / (PATCH_EXTENT * 0.5);',
     '  float skirt = 1.0 - smoothstep(SKIRT_START, 1.0, r);',
     '  float amp = DISPLACE_AMPLITUDE * uWaveIntensity * skirt;',
-    '  vec3 displaced = dir * GLOBE_R + uPatchUp * (h * amp);',
+    // The skirt multiplies the hazard too, and has to: a crest still standing
+    // at the patch's edge would hold the rim of the grid off the sphere it
+    // fades into, and the seam that hides would be a metre of open geometry.
+    '  vec3 displaced = dir * GLOBE_R + uPatchUp * (h * amp + hazardHeight(dir) * skirt);',
     '  vDir = normalize(displaced);',
     '  vWorldPos = displaced;',
     '  gl_Position = projectionMatrix * viewMatrix * vec4(displaced, 1.0);',

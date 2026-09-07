@@ -31,6 +31,21 @@ export interface Energy {
    * covering the HUD anyway.
    */
   spend(level: number): boolean;
+  /**
+   * Takes the hull's loss when a maelstrom has eaten it: the main tank keeps
+   * WRECK_KEEP of whatever it held, and nothing else in the world changes.
+   *
+   * The backup cell is untouched on purpose — it was bought with gold and is
+   * the one charge in the game nothing recharges, so sinking it would be
+   * confiscating a purchase rather than costing a mistake. Gold, the fish book
+   * and the harpoon locker are untouched for the same reason.
+   *
+   * `rate` and `mode` are not touched either, exactly as `spend` leaves them:
+   * they describe the plant over the last frame, and this is not the plant. A
+   * tank already at zero stays at zero, and the RESTART_LEVEL hysteresis is
+   * unaffected — a wreck can only ever move the level down.
+   */
+  wreck(): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -221,6 +236,18 @@ const DOCK_DWELL_SECONDS = 2;
  */
 const RESTART_LEVEL = 0.03;
 
+/**
+ * What is left in the main tank after a shipwreck: a quarter of it.
+ *
+ * 80% becomes 20%; a full tank becomes 22 s of running at top speed out of the
+ * 90 s ENDURANCE_SECONDS buys. Written as the fraction KEPT rather than the
+ * fraction lost because that is the reading the player takes off the bar the
+ * moment the screen comes back: three quarters gone is a real setback and a
+ * long sail to the nearest berth, and a total loss on top of a teleport to
+ * somewhere unfamiliar would be a run ended rather than a run damaged.
+ */
+const WRECK_KEEP = 0.25;
+
 /* ------------------------------------------------------------------ */
 /* Energy                                                              */
 /* ------------------------------------------------------------------ */
@@ -378,5 +405,10 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     return true;
   }
 
-  return { state: state as EnergyState, update, spend };
+  /** See `Energy.wreck`. One multiplication, and deliberately nothing else. */
+  function wreck(): void {
+    state.level *= WRECK_KEEP;
+  }
+
+  return { state: state as EnergyState, update, spend, wreck };
 }

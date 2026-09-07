@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { GLOBE_RADIUS } from './geo';
 import type { HeightMap } from './heightmap';
-import type { ShipState, Towns, WindState } from './types';
+import type { HazardState, ShipState, Towns, WindState } from './types';
 import type { WaterBodies } from './waterbodies';
 import { OCEAN_CAP } from './wind';
 
@@ -111,6 +111,47 @@ const WIND_HALF_WIDTH = 0.05;
  * have to begin with working out which mark this is.
  */
 const WIND_FILL = 'rgba(255, 186, 84, 0.9)';
+
+/* ------------------------------------------------------------------ */
+/* Rough water                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hazard marks, in the HUD's warning accent.
+ *
+ * `--magenta` is what this project warns in, and ART-DIRECTION.md §2.4 keeps
+ * it off in-world objects and nowhere else -- the scope is UI, so it is
+ * exactly where the accent belongs. It is own ship's hue too, which is the one
+ * thing to watch: the blip is a filled arrowhead welded to the centre of the
+ * scope and a hazard is a bar or a ring out on the plot, so the two are never
+ * read as the same kind of mark. They are the same colour on purpose. Both
+ * mean "this is about the hull", which is the fastest thing the instrument can
+ * say.
+ */
+const HAZARD_STROKE = 'rgb(255, 79, 216)';
+
+/**
+ * Crest bar and maelstrom ring line widths, device pixels.
+ *
+ * Thicker than the range rings (1) and about the weight of the wind's shaft,
+ * because a hazard is the one mark on the scope worth breaking off a course
+ * for and it has to be found in the half-second the player looks down.
+ */
+const CREST_WIDTH_PX = 2.6;
+const MAELSTROM_WIDTH_PX = 2.2;
+
+/**
+ * The three arcs that ride the maelstrom's ring: how long each is, in radians,
+ * and how fast the set of them turns.
+ *
+ * The height field of a funnel is radially symmetric -- the swirl is fragment
+ * art and there is nothing in the geometry to spin -- so the scope has to say
+ * "this thing is turning" on its own account. Three arcs at 120 degrees, near
+ * a quarter turn a second: fast enough to read as rotation at a glance, slow
+ * enough that it is not a strobe on a 40-pixel circle.
+ */
+const MAELSTROM_ARC = 0.6;
+const MAELSTROM_SPIN = 1.6;
 
 /* ------------------------------------------------------------------ */
 /* The cardinal ring                                                   */
@@ -284,7 +325,7 @@ const COS_RADAR_RANGE = Math.cos(RADAR_RANGE / GLOBE_RADIUS);
 
 export interface Radar {
   /** Redraws the scope. Safe to call before the first terrain raster. */
-  update(dt: number, ship: ShipState, wind: WindState): void;
+  update(dt: number, ship: ShipState, wind: WindState, hazards: HazardState): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -478,8 +519,52 @@ export function createRadar(
     frameValid = true;
   }
 
+  /*
+   * The LIVE ship frame, and the scratch the hazard marks are projected with.
+   *
+   * Deliberately a second frame rather than the raster's `pUp`/`pFwd`/`pStb`.
+   * The held frame exists to weld a town to the coastline drawn under it, and
+   * a hazard has no coastline: it is a moving thing attached to nothing on the
+   * picture, exactly like the wind arrow and the compass, so it is placed from
+   * this instant's attitude. Through a frame a tenth of a second old a crest
+   * would lag the bow through every turn, which on the one mark a player steers
+   * to avoid is worse than being a fraction stale against the plot.
+   */
+  const hUp = new Vector3();
+  const hFwd = new Vector3();
+  const hStb = new Vector3();
+  /** Where a projected hazard point lands, in scope units. Reused; never allocated per mark. */
+  const hazPoint = { x: 0, y: 0 };
+  const hazDir = new Vector3();
+
+  /**
+   * Projects a unit direction into scope units through the live frame.
+   *
+   * The same inversion the town icons use -- `dir . up` is already cos(t) and
+   * the two tangent dots are already sin(t)cos(b) and sin(t)sin(b) -- written
+   * once more against this frame rather than duplicated inline at each mark.
+   * Returns false when the point is outside the scope's angular radius, so a
+   * crest with one end over the horizon is simply not drawn from that end.
+   */
+  function projectLive(d: Vector3): boolean {
+    const c = hUp.x * d.x + hUp.y * d.y + hUp.z * d.z;
+    if (c < COS_RADAR_RANGE) return false;
+    const cc = c > 1 ? 1 : c;
+    const sinT = Math.sqrt(1 - cc * cc);
+    const r = (Math.acos(cc) * GLOBE_RADIUS) / RADAR_RANGE;
+    const k = sinT < 1e-6 ? 0 : r / sinT;
+    const f = hFwd.x * d.x + hFwd.y * d.y + hFwd.z * d.z;
+    const st = hStb.x * d.x + hStb.y * d.y + hStb.z * d.z;
+    hazPoint.x = k * st;
+    // Canvas y runs down while the bow points up the screen.
+    hazPoint.y = -k * f;
+    return true;
+  }
+
   let sinceRaster = Infinity;
   let sweep = 0;
+  /** Turns the maelstrom's arcs. Wrapped so it cannot drift out of float precision on a long run. */
+  let spin = 0;
   let cssSize = 0;
 
   function raster(): void {
@@ -525,7 +610,7 @@ export function createRadar(
     return cssSize;
   }
 
-  function update(dt: number, ship: ShipState, wind: WindState): void {
+  function update(dt: number, ship: ShipState, wind: WindState, hazards: HazardState): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
 
@@ -537,6 +622,7 @@ export function createRadar(
     }
 
     sweep = (sweep + (dt * Math.PI * 2) / SWEEP_PERIOD) % (Math.PI * 2);
+    spin = (spin + dt * MAELSTROM_SPIN) % (Math.PI * 2);
 
     const size = resizeToCss();
     if (size <= 0) return;
@@ -682,6 +768,97 @@ export function createRadar(
         }
       }
       ctx.restore();
+    }
+
+    // ---- Rough water, from the LIVE frame ---------------------------------
+    /*
+     * Crests and funnels, drawn over the plot and under the marks the player
+     * navigates by.
+     *
+     * `hazards.live` is at most three entries, so this loop is free; the
+     * common case is that it is empty and nothing below runs at all.
+     */
+    if (hazards.live.length > 0) {
+      hStb.crossVectors(ship.forward, ship.up);
+      if (hStb.lengthSq() > 1e-12) {
+        hStb.normalize();
+        hUp.copy(ship.up);
+        hFwd.copy(ship.forward);
+
+        // Clipped to the bezel like the towns are: a crest crossing the rim is
+        // drawn cut rather than spilling onto the panel around the scope.
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.strokeStyle = HAZARD_STROKE;
+        ctx.lineCap = 'round';
+
+        for (let i = 0; i < hazards.live.length; i++) {
+          const haz = hazards.live[i];
+          // The same envelope the sea is displaced by, so a hazard fades off
+          // the scope at the moment it fades out of the water -- including the
+          // distance fade, which is what stops a crest that has outrun the
+          // displacement patch from being marked here as if it were still real.
+          ctx.globalAlpha = haz.envelope < 0 ? 0 : haz.envelope > 1 ? 1 : haz.envelope;
+
+          if (haz.kind === 'maelstrom') {
+            if (!projectLive(haz.centre)) continue;
+            const cx = hazPoint.x;
+            const cy = hazPoint.y;
+            // Its drawn radius is the radius it actually has this instant --
+            // `extent * size` -- so the ring grows on the scope over the same
+            // three seconds the funnel opens in the water.
+            const radius = (haz.extent * haz.size) / RADAR_RANGE;
+            if (!(radius > 0)) continue;
+
+            ctx.lineWidth = MAELSTROM_WIDTH_PX / R;
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+            ctx.stroke();
+
+            // Three arcs on the ring, turned by the elapsed time. The geometry
+            // of a funnel is radially symmetric and has no rotation in it at
+            // all, so this is the only thing on the instrument that says the
+            // water in there is going round.
+            ctx.lineWidth = (MAELSTROM_WIDTH_PX * 1.7) / R;
+            for (let k = 0; k < 3; k++) {
+              const a0 = spin + (k * 2 * Math.PI) / 3;
+              ctx.beginPath();
+              ctx.arc(cx, cy, radius * 0.62, a0, a0 + MAELSTROM_ARC);
+              ctx.stroke();
+            }
+            continue;
+          }
+
+          // A crest is its own long axis: the line between its two ends,
+          // `centre +/- extent * east`, each stepped in DIRECTION units and
+          // projected separately. Drawing it from the centre and a heading
+          // instead would be a second projection, and a bar a few degrees off
+          // its own wave reads as a rendering nicety rather than as an error.
+          const half = haz.extent / GLOBE_RADIUS;
+          hazDir.copy(haz.centre).addScaledVector(haz.east, half).normalize();
+          if (!projectLive(hazDir)) continue;
+          const x0 = hazPoint.x;
+          const y0 = hazPoint.y;
+          hazDir.copy(haz.centre).addScaledVector(haz.east, -half).normalize();
+          if (!projectLive(hazDir)) continue;
+
+          // The great wave is drawn heavier than the strong one, off the
+          // amplitude rather than off the kind: the scope then says how big it
+          // is with the one mark it has, and a third strength added later
+          // needs no change here.
+          ctx.lineWidth = (CREST_WIDTH_PX * (haz.amplitude > 2 ? 1.5 : 1)) / R;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(hazPoint.x, hazPoint.y);
+          ctx.stroke();
+        }
+
+        // `restore` puts back the alpha, the line cap and the clip together --
+        // the same contract the town block above relies on.
+        ctx.restore();
+      }
     }
 
     // ---- Wind arrow, on the true bearing, from the LIVE frame -------------

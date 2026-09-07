@@ -97,6 +97,28 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   raises the sea as well as pushing the hull, so the water tells you what the
   weather is doing before the panel does. The weather is seeded, so the same
   world always blows the same way.
+- **Rough water.** Every five seconds the sea rolls for trouble. A strong wave
+  rises a fifth of the time, a great wave a tenth, and a maelstrom one time in
+  fifty — four times the weather this shipped with, and the wait for a
+  maelstrom is down from a thousand seconds of sailing to two hundred and
+  fifty. **Waves run with the wind**, always, which is the whole reason to keep
+  an eye on the arrow: they rise upwind of you and come down on the hull, so
+  the wind tells you where to look and which way you will be thrown. A wave is
+  a crest twenty units long travelling at 6 knots, steep on the face and long
+  in the back: take it on the bow and it shoves you the way the water
+  went — five knots for a strong one, ten for a great one, over the three or
+  five seconds it breaks up against you, which is thirty units of the scope for
+  the big one. You keep the helm the whole time; the crest is spent once it has
+  hit you, and one that misses lives ten seconds and fades. A maelstrom is
+  twenty units of funnel that opens over three seconds and stays for thirty. Go
+  into it and the helm is not yours any more: the hull spirals in for six
+  seconds, sinks, and the screen goes black. You come back stopped, somewhere
+  else entirely, with a quarter of the power you had — the backup cell, the
+  gold and the fish book are untouched. All of it is real water, displaced in
+  the same sea the ship rides, so a wave lifts the hull and the funnel tips it
+  bow-down. A berth is immune to all of it, and the scope marks both in magenta
+  while there is still time to steer around them. The rolls are seeded, so the
+  same world throws up the same weather.
 - **Ship wake** that follows the curve of the planet and fades behind you. It
   is drawn into the water rather than laid on top of it, so it tilts the
   surface and raises its own foam, and the foam sits still in the sea instead

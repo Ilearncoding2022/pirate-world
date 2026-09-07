@@ -60,6 +60,16 @@ function lerp(a: number, b: number, t: number): number {
 export interface FollowCamera {
   camera: PerspectiveCamera;
   update(dt: number, ship: ShipState, input: InputState): void;
+  /**
+   * Puts the camera at this frame's destination immediately, with no damping.
+   *
+   * For the one event that moves the ship without sailing it there: the
+   * respawn after a maelstrom. The damping below is a rate, not a distance, so
+   * a hull teleported across the planet would be chased across it — a second
+   * of the whole world streaking past under a fade that is only just lifting.
+   * The zoom is left alone; it is the player's setting and did not move.
+   */
+  snap(ship: ShipState): void;
   resize(aspect: number): void;
 }
 
@@ -142,11 +152,46 @@ export function createFollowCamera(aspect: number): FollowCamera {
     }
   }
 
+  /**
+   * See `FollowCamera.snap`. Deliberately the same destinations `update`
+   * computes and not a second framing: the two would drift apart the first
+   * time either was retuned, and the symptom — a camera that jumps a little on
+   * every respawn — would be blamed on the teleport rather than on the copy.
+   */
+  function snap(ship: ShipState): void {
+    const up = ship.up.lengthSq() > 1e-8 ? ship.up : ship.position;
+    _shipWorld.copy(ship.position).multiplyScalar(GLOBE_RADIUS + SHIP_ALTITUDE);
+
+    const distance = lerp(NEAR_DISTANCE, FAR_DISTANCE, zoom);
+    const height = lerp(NEAR_HEIGHT, FAR_HEIGHT, zoom);
+    const forward = ship.forward;
+    const hasForward = forward.lengthSq() > 1e-8;
+
+    _desiredPos.copy(_shipWorld).addScaledVector(up, height);
+    if (hasForward) _desiredPos.addScaledVector(forward, -distance);
+    _desiredTarget.copy(_shipWorld).addScaledVector(up, LOOK_UP);
+    if (hasForward) _desiredTarget.addScaledVector(forward, LOOK_AHEAD);
+
+    smoothPos.copy(_desiredPos);
+    smoothTarget.copy(_desiredTarget);
+    smoothUp.copy(up).normalize();
+    // Marked settled, so the next `update` damps from here rather than
+    // snapping a second time -- and so a snap before the first frame is not
+    // undone by `initialized` firing after it.
+    initialized = true;
+
+    camera.position.copy(smoothPos);
+    camera.up.copy(smoothUp);
+    if (camera.position.distanceToSquared(smoothTarget) > 1e-8) {
+      camera.lookAt(smoothTarget);
+    }
+  }
+
   function resize(newAspect: number): void {
     if (!(newAspect > 0) || !Number.isFinite(newAspect)) return;
     camera.aspect = newAspect;
     camera.updateProjectionMatrix();
   }
 
-  return { camera, update, resize };
+  return { camera, update, snap, resize };
 }

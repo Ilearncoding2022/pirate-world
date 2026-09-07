@@ -2462,3 +2462,47 @@ kbd {
 }
 
 /* END SHOP */
+
+/* ============================================================
+   BLACKOUT
+   ============================================================ */
+
+/* BLACKOUT */
+
+/*
+ * One flat sheet over the whole viewport.
+ *
+ * z-index 90: above every overlay in the project -- the fishing card, the
+ * record and the chandlery are all 40 -- and below the loading splash at 100,
+ * which outranks everything because the world behind it is not built yet.
+ * Nothing may show through a shipwreck.
+ *
+ * The transition duration here is the FADE OUT, because the base rule is what
+ * is in force once `blackout--up` is taken off again. The fade in is on the
+ * modifier below. Both are written a second time as FADE_IN / FADE_OUT in
+ * `blackout.ts`, which waits them out -- see that file's timing comment before
+ * changing either number.
+ */
+.blackout {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  /* The project's own void, not a pure black: the splash, the deep sea and
+     this are the same nothing, and a wreck that faded to a different one would
+     read as the page rather than as the game. */
+  background: var(--bg-deep);
+  opacity: 0;
+  /* Down, the sheet is not there at all: it must never eat a click on the HUD
+     underneath it. Up, it eats every one of them -- a screen the player cannot
+     see is a screen they must not be able to press. */
+  pointer-events: none;
+  transition: opacity 1000ms ease-out;
+}
+
+.blackout--up {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 700ms ease-in;
+}
+
+/* END BLACKOUT */

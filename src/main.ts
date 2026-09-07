@@ -24,19 +24,28 @@ import { createLoading } from './loading';
 import { createQuality } from './quality';
 import { createReflection } from './reflection';
 import { createWaterReflectPlugin } from './waterreflect';
-import type { ShipState } from './types';
+import { createHazards } from './hazards';
+import { createWaterHazardPlugin } from './waterhazard';
+import { createBlackout } from './blackout';
+import type { HazardKind, ShipState } from './types';
+import { GLOBE_RADIUS } from './geo';
 
 /*
- * `?probe=wave` (Phase 1 stream B) is the only entry point into
- * `dev/probe.ts`, and this is the one guarded line that reaches it. The
+ * `?probe=wave` and `?probe=hazard` are the only entry points into
+ * `dev/probe.ts`, and this is the one guarded line that reaches either. The
  * import is dynamic and inside this branch specifically so a normal load
  * never fetches the probe module at all -- Vite code-splits it into its own
  * chunk, which an ordinary player's session never requests. Nothing else in
  * `main.ts` or `index.html` may reference a probe; the integration agent
  * greps for exactly that.
+ *
+ * `runProbe()` takes no argument: it reads the query itself and dispatches on
+ * it, so the two harnesses -- the wave field's parity proof and the hazard
+ * field's -- are one module with one entry point rather than two branches
+ * spelled out here.
  */
 const probeQuery = new URLSearchParams(window.location.search).get('probe');
-if (probeQuery === 'wave') {
+if (probeQuery === 'wave' || probeQuery === 'hazard') {
   // The splash ships visible in the markup, so the probe -- which draws its
   // own canvas and has no world to build -- has to take it down itself.
   document.getElementById('loading')?.remove();
@@ -99,7 +108,15 @@ async function startGame(): Promise<void> {
   const wake = createWake(quality.wakeMapSize);
   const reflection = createReflection(quality);
 
-  const waterPlugins = [createWaterWakePlugin(wake)];
+  // The third of them, and the one built with nothing in it. `hazards.ts`
+  // needs `globe.heightMap`, `globe.waterBodies` and `globe.towns`, which do
+  // not exist until `createGlobe` has run -- and a plugin cannot be registered
+  // after that call. So the plugin is constructed empty here, woven into the
+  // shader below, and handed the state it reads with `bind` once the sim
+  // exists. Unbound it simply writes `uHazCount = 0` and the sea is the sea.
+  const waterHazard = createWaterHazardPlugin();
+
+  const waterPlugins = [createWaterWakePlugin(wake), waterHazard];
   if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
 
   // The long synchronous stage: the height map is rasterised, the islets are
@@ -153,6 +170,62 @@ async function startGame(): Promise<void> {
   // Weather. Reads the same height field the radar plots, so the sheltered water
   // on the scope is the sheltered water the ship finds.
   const wind = createWind(terrain, globe.heightMap);
+
+  /*
+   * Rough water: the strong waves that shove the hull and the maelstroms that
+   * eat it. Built here because it needs the world -- the height field it
+   * spawns over, the reachable-water mask that keeps a crest out of a lake,
+   * and the berths it refuses to rise inside -- and all three arrive with
+   * `createGlobe`.
+   *
+   * `onSunk` is declared below and hoisted into here. It is the one callback
+   * in this file that rearranges the world rather than reporting on it, which
+   * is why it is written out as a named function instead of inline.
+   */
+  const hazards = createHazards({
+    terrain,
+    heightMap: globe.heightMap,
+    waterBodies: globe.waterBodies,
+    towns: globe.towns,
+    onSunk,
+  });
+  // The plugin's uniforms now have something to copy from. Everything the
+  // shader draws of a hazard comes through this one call.
+  waterHazard.bind(hazards.state);
+
+  // The sheet a wreck happens behind. It owns nothing but its own element and
+  // the promise that `onBlack` runs when the screen is actually opaque.
+  const blackout = createBlackout();
+
+  /**
+   * A maelstrom has finished eating the hull.
+   *
+   * Fired once, from `hazards.ts`, on the frame the ship vanishes. The order
+   * inside the fade is the whole point of the fade: the tank is docked
+   * immediately, because the HUD is behind the black sheet and a bar that
+   * halves itself in front of the player would read as a second, separate
+   * event -- and everything that MOVES the ship happens inside `onBlack`, at
+   * the one instant in the game the world may be rearranged unseen.
+   *
+   * `view.snap` is not optional. The chase camera damps at a rate, not over a
+   * distance, so a hull teleported across the planet would be chased across it
+   * for a second -- under a fade that is by then already lifting.
+   *
+   * `hazards.reset()` comes last: it is what clears the funnel and the `sunk`
+   * phase, and running it before `place` would hand `ship.ts` a null drive
+   * while the hull was still at the bottom of a hole.
+   */
+  function onSunk(): void {
+    energy.wreck();
+    blackout.run(() => {
+      // The heading is cosmetic -- the ship is stopped and the player will
+      // turn it before doing anything else -- so it is the one number here
+      // that does not come off the sim's own seeded stream.
+      ship.place(hazards.pickRespawn(), Math.random() * Math.PI * 2);
+      view.snap(ship.state);
+      hazards.reset();
+    });
+  }
 
   const docks = createDocks(globe.towns);
   scene.add(docks.object);
@@ -246,6 +319,11 @@ async function startGame(): Promise<void> {
   // account -- a disabled attribute is an affordance, never a lock.
   document.getElementById('btn-fish')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    // Not while a maelstrom has the hull. An overlay freezes the world, and
+    // the hull in a spiral is not the player's to freeze: opening one mid-
+    // capture would halt a ship that is being carried, and the wreck would
+    // resume from wherever the card was closed. The same guard is on [SHOP].
+    if (hazards.state.phase !== 'free') return;
     fishCover.open();
   });
 
@@ -256,6 +334,7 @@ async function startGame(): Promise<void> {
   // construction.
   document.getElementById('btn-shop')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
     if (energy.state.mode !== 'docked') return;
     // The hull is already stopped -- a berth is a two-second dwell -- but the
     // halt is what makes "the world resumes from rest" true of this overlay
@@ -335,6 +414,58 @@ async function startGame(): Promise<void> {
   await loading.step(1, 'READY');
   await loading.done();
 
+  /*
+   * `?hazard=wave|greatwave|maelstrom` -- one forced hazard, 25 units dead
+   * ahead, three seconds after the first frame.
+   *
+   * A maelstrom is a 1% draw every ten seconds. Waiting for one is not a test,
+   * it is a vigil, and this is the only way to see the whole event inside the
+   * budget in docs/TESTING.md.
+   *
+   * Read through URLSearchParams and never through `import.meta.env.MODE`, on
+   * exactly the same terms as `?quality=`: `vite preview` serves a genuine
+   * production build, and this is meant to be used against one. An ordinary
+   * player's session sets no query, so nothing below ever fires for them.
+   */
+  const hazardQuery = new URLSearchParams(window.location.search).get('hazard');
+  let forcedHazard: HazardKind | null =
+    hazardQuery === 'wave' || hazardQuery === 'greatwave' || hazardQuery === 'maelstrom'
+      ? hazardQuery
+      : null;
+  /** Seconds of sailing before the forced hazard rises. Long enough to see the sea it rises out of. */
+  let forceCountdown = 3;
+  /**
+   * How far ahead the forced hazard rises, world units.
+   *
+   * Half the scope's range, and comfortably inside the displacement patch's
+   * fully-displaced middle (its skirt starts at 34), so the thing rises in
+   * real water rather than on the flat sphere and is on the radar from the
+   * first frame of it.
+   */
+  const FORCE_DISTANCE = 25;
+  const _forceAxis = new THREE.Vector3();
+  const _forceCentre = new THREE.Vector3();
+  const _forceNorth = new THREE.Vector3();
+
+  function releaseForcedHazard(kind: HazardKind): void {
+    const pos = ship.state.position;
+    const fwd = ship.state.forward;
+    // A great-circle step along the bow, the same walk `ship.ts` makes: rotate
+    // the position toward `forward` about their cross product.
+    _forceAxis.crossVectors(pos, fwd);
+    if (_forceAxis.lengthSq() < 1e-12) return;
+    _forceAxis.normalize();
+    _forceCentre.copy(pos).applyAxisAngle(_forceAxis, FORCE_DISTANCE / GLOBE_RADIUS).normalize();
+    // `north` is the direction of travel, so pointing it back at the ship is
+    // what makes a forced crest actually arrive: the tangent at the centre
+    // that faces the hull, which is the ship's position with the centre's own
+    // radial component taken out of it.
+    _forceNorth.copy(pos).addScaledVector(_forceCentre, -pos.dot(_forceCentre));
+    if (_forceNorth.lengthSq() < 1e-12) return;
+    _forceNorth.normalize();
+    hazards.force(kind, _forceCentre, _forceNorth);
+  }
+
   const clock = new THREE.Clock();
 
   function frame(): void {
@@ -344,6 +475,11 @@ async function startGame(): Promise<void> {
     // themselves rather than latched at the call sites, because the fish book
     // closes on its own Escape key and its own close button and tells nobody: a
     // flag set where `open()` is called would strand the world stopped.
+    // Hazards are not in the five calls below, deliberately: they are frozen
+    // with the rest of the world, uniforms and all, so a crest bearing down on
+    // the hull is exactly where it was when the card closes. The buttons that
+    // open these overlays refuse to while `phase !== 'free'`, so no card can
+    // be over a hull that is being carried.
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) {
       // The plant keeps running -- a session costs half the tank and the sun is
       // still up, so recharging through one is the point. It bills a resting
@@ -383,7 +519,23 @@ async function startGame(): Promise<void> {
     // Wind sits between the two: it needs this frame's docked verdict to know
     // whether the ship is in shelter, and the ship needs this frame's push.
     wind.update(dt, ship.state, energy.state);
-    ship.update(dt, controls.input, energy.state, wind.state, globe.waveOffsets);
+    // `?hazard=`, once, three seconds in. Null on every ordinary session.
+    if (forcedHazard !== null) {
+      forceCountdown -= dt;
+      if (forceCountdown <= 0) {
+        releaseForcedHazard(forcedHazard);
+        forcedHazard = null;
+      }
+    }
+    // Hazards sit between the wind and the ship, for both of the wind's own
+    // reasons: after the wind because a berth is shelter from rough water too
+    // and `energy.ts` owns the one definition of docked, and before the ship
+    // because the ship spends the push -- and obeys the drive -- this same
+    // frame. The water plugin reads the same state inside `globe.update`
+    // below, after the hull has ridden it, so the sea on the GPU and the sea
+    // the hull just climbed are one frame's numbers.
+    hazards.update(dt, ship.state, energy.state, wind.state);
+    ship.update(dt, controls.input, energy.state, wind.state, globe.waveOffsets, hazards.state);
     view.update(dt, ship.state, controls.input);
     globe.update(dt, env, wind.state, ship.state, view.camera);
     // Before postFx.render: it renders straight into its own cube target and
@@ -393,7 +545,7 @@ async function startGame(): Promise<void> {
     docks.update(dt, env, ship.state, energy.state);
     wake.update(dt, ship.state, env, renderer);
     hud.update(ship.state, energy.state, wind.state);
-    radar.update(dt, ship.state, wind.state);
+    radar.update(dt, ship.state, wind.state, hazards.state);
     // After globe.update, which is what writes `env.sunDirection`. Reading it
     // before would put the dial a frame behind the sky it is describing.
     timeDial?.update(ship.state, env);
