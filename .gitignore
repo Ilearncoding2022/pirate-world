@@ -35,3 +35,20 @@ tools/__pycache__/
 
 # Agent worktrees. Real git worktrees of this same repo, never content.
 .claude/worktrees/
+
+# Art the game does not load.
+#
+# The bundle imports exactly three files out of assets/ -- the .glb and the two
+# .webp illustrations -- and everything else in there is authoring material that
+# belongs on the owner's disk rather than in every clone.
+
+# The authored PNGs the shipped illustrations were made from: 2.5 MB each
+# against the ~130 KB the game actually loads. Keep them locally; they are what
+# a different crop or a larger size would be re-cut from.
+assets/Illustrations/masters/
+
+# Preview renders. tools/build_ship.py writes all three on every run, so they
+# are build output in the same sense dist/ is.
+assets/pirateship_beginner_preview.png
+assets/pirateship_beginner_side.png
+assets/pirateship_beginner_detail.png
