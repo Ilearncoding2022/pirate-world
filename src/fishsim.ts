@@ -43,12 +43,19 @@ export interface FishingSim {
 export const SESSION_SECONDS = 30;
 
 /**
- * Harpoons per session.
+ * Harpoons per session, before anything bought.
  *
  * Deliberately fewer shots than the clock comfortably allows, so the binding
  * constraint is usually the player's patience and not the timer. Whichever
  * runs out first ends the session; ten is the number that makes a wasted shot
  * cost something.
+ *
+ * Spares out of the locker (`harpoons.ts`) are a SECOND budget behind this
+ * one, granted per session by the caller and spent only after these ten are
+ * gone. They are counted separately all the way through the sim rather than
+ * simply raising this number, because the difference is what `fishing.ts`
+ * debits the locker against — a session that could not tell its own ten from
+ * its bought ones would have to guess how many to charge for.
  */
 export const SESSION_SHOTS = 10;
 
@@ -351,6 +358,7 @@ interface MutableHarpoon {
 interface MutableFishingState {
   timeLeft: number;
   shotsLeft: number;
+  extraLeft: number;
   fish: MutableFish[];
   harpoon: MutableHarpoon;
   caught: Species[];
@@ -370,8 +378,17 @@ interface MutableFishingState {
  * species, spawn depth, spawn timing, bob — so a seeded run replays exactly.
  * That is what makes the odds and the struggle testable without a browser;
  * calling `Math.random` anywhere below would quietly take that away.
+ *
+ * `extraShots` is how many spares out of the locker this session may reach.
+ * The sim takes it as a plain number and never asks where it came from: the
+ * ceiling on it, the price of it and the debiting of it all belong to the
+ * caller. Zero — the default — is a session exactly as it was before anything
+ * was for sale.
  */
-export function createFishingSim(rng: () => number = Math.random): FishingSim {
+export function createFishingSim(
+  rng: () => number = Math.random,
+  extraShots = 0,
+): FishingSim {
   const harpoon: MutableHarpoon = {
     phase: 'swinging',
     angle: 0,
@@ -385,6 +402,9 @@ export function createFishingSim(rng: () => number = Math.random): FishingSim {
   const state: MutableFishingState = {
     timeLeft: SESSION_SECONDS,
     shotsLeft: SESSION_SHOTS,
+    // Floored at zero rather than trusted: a negative grant would make the
+    // "both budgets spent" test below never fire and the session never end.
+    extraLeft: extraShots > 0 ? Math.floor(extraShots) : 0,
     fish: [],
     harpoon,
     caught: [],
@@ -578,12 +598,26 @@ export function createFishingSim(rng: () => number = Math.random): FishingSim {
     return x >= 0 && x <= 1 && y <= CARD_HEIGHT;
   }
 
+  /**
+   * Spends one harpoon and launches it.
+   *
+   * The session's own ten go first and go to the last one; a spare is only
+   * ever reached with `shotsLeft` already at zero. That order is the rule the
+   * locker is sold under, and it lives here rather than in the caller so there
+   * is no arrangement of the two budgets in which a bought harpoon is spent
+   * while a free one was still available.
+   */
   function fire(): void {
-    state.shotsLeft--;
+    if (state.shotsLeft > 0) state.shotsLeft--;
+    else state.extraLeft--;
     harpoon.phase = 'flying';
     harpoon.tipX = PIVOT_X;
     harpoon.tipY = PIVOT_Y;
-    state.events.push({ kind: 'fired', shotsLeft: state.shotsLeft });
+    state.events.push({
+      kind: 'fired',
+      shotsLeft: state.shotsLeft,
+      extraLeft: state.extraLeft,
+    });
   }
 
   function hook(f: MutableFish): void {
@@ -640,9 +674,10 @@ export function createFishingSim(rng: () => number = Math.random): FishingSim {
     harpoon.angle = SWING_MAX_ANGLE * Math.sin((Math.PI * 2 * swingClock) / SWING_PERIOD);
     harpoon.tipX = PIVOT_X;
     harpoon.tipY = PIVOT_Y;
-    // Neither budget may be overdrawn. Once either is out the swing carries on
-    // for the frame it takes the session to end, but it cannot be spent.
-    if (press && state.timeLeft > 0 && state.shotsLeft > 0) fire();
+    // Neither budget may be overdrawn. Once the clock or BOTH harpoon counts
+    // are out the swing carries on for the frame it takes the session to end,
+    // but it cannot be spent.
+    if (press && state.timeLeft > 0 && state.shotsLeft + state.extraLeft > 0) fire();
   }
 
   function fly(dt: number): void {
@@ -764,7 +799,9 @@ export function createFishingSim(rng: () => number = Math.random): FishingSim {
 
     if (pendingEnd === null) {
       if (state.timeLeft <= 0) pendingEnd = 'time';
-      else if (state.shotsLeft <= 0) pendingEnd = 'shots';
+      // Both budgets, so a session with spares granted runs on past its tenth
+      // shot instead of ending on it.
+      else if (state.shotsLeft + state.extraLeft <= 0) pendingEnd = 'shots';
     }
 
     // The rope has to be home first. A fish hooked on the buzzer is landed —

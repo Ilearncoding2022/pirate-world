@@ -110,6 +110,39 @@
             <span class="pwr__tag" id="hud-pwr-mode">SOLAR</span>
             <span class="pwr__rate" id="hud-pwr-rate">+0.00 %/s</span>
           </div>
+
+          <!-- The bought backup cell. Deliberately NOT the same instrument as
+               the tank above it: violet rather than the power block's four
+               states, five notches rather than ten, and a hairline rule over
+               it so it reads as a second tank bolted on rather than as more of
+               the first. A cell that looked like the main reserve would be a
+               cell a player expects a berth to refill.
+
+               Ships hidden, because a ship that has never been to a shop has
+               no cell at all and an empty row would only advertise one. hud.ts
+               reveals it the moment there is charge to show and hides it again
+               when the last of it goes. -->
+          <div class="rsv" id="hud-rsv" hidden>
+            <div class="readout rsv__head">
+              <span class="readout__key">BACKUP</span>
+              <span class="readout__val rsv__val" id="hud-rsv-value">0%</span>
+            </div>
+            <div
+              class="rsv__bar"
+              id="hud-rsv-bar"
+              role="meter"
+              aria-label="Backup cell"
+              aria-valuemin="0"
+              aria-valuemax="50"
+              aria-valuenow="0"
+            >
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+            </div>
+          </div>
         </div>
 
         <div class="panel__rule"></div>
@@ -132,12 +165,31 @@
            assuming it, so the first frame writes no attribute at all -- the
            same contract the POWER block's shipped-lit segments keep. -->
       <nav class="dock" aria-label="Ship activities">
-        <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Go fishing">
-          <span class="dock__key">FISH</span>
-        </button>
-        <button id="btn-fishbook" class="dbtn dock__btn" type="button" aria-label="Open the fish book">
-          <span class="dock__key">FISH BOOK</span>
-        </button>
+        <div class="dock__row">
+          <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Go fishing">
+            <span class="dock__key">FISH</span>
+          </button>
+          <button id="btn-fishbook" class="dbtn dock__btn" type="button" aria-label="Open the fish book">
+            <span class="dock__key">FISH BOOK</span>
+          </button>
+        </div>
+        <!-- Under [FISH] rather than beside it, because it is not a thing the
+             ship can do: it is a thing a BERTH can do, and it is dead
+             everywhere else. It ships disabled for that reason -- the world
+             opens at sea -- and hud.ts reads that shipped state back rather
+             than assuming it, the same contract the rest of the panel keeps. -->
+        <div class="dock__row">
+          <button
+            id="btn-shop"
+            class="dbtn dock__btn"
+            type="button"
+            aria-label="Open the shop"
+            disabled
+            title="Only alongside a berth"
+          >
+            <span class="dock__key">SHOP</span>
+          </button>
+        </div>
       </nav>
       <!-- END HUD DOCK -->
 

@@ -496,6 +496,68 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   BACKUP — the bought cell, under the POWER block
+
+   Deliberately a different instrument. The power block above swaps four
+   colour states on one wrapper; this has exactly one colour and never
+   changes it, because the cell has exactly one behaviour — it goes down.
+   Violet rather than any of the plant's colours (cyan, green, amber, red),
+   five notches rather than ten, and a hairline rule above it, so the eye
+   reads a second tank bolted on rather than more of the first.
+
+   The distinction has to survive being glanced at. A player who mistakes the
+   cell for the tank is a player waiting at a berth for a charge that is
+   never coming.
+   ------------------------------------------------------------------- */
+
+.rsv {
+  --rsv-accent: #b05cff;
+  --rsv-glow: rgba(176, 92, 255, 0.45);
+  --rsv-rail: rgba(176, 92, 255, 0.1);
+  --rsv-rail-edge: rgba(176, 92, 255, 0.26);
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px solid rgba(176, 92, 255, 0.18);
+}
+
+/* The row's own padding would push the bar away from its key; the block
+   above already spaces the two apart. */
+.rsv__head {
+  padding: 0;
+}
+
+/* One size down from the tank's figure. The cell is the smaller tank and the
+   panel should say so before the key beside it is read. */
+.rsv__val {
+  font-size: 13px;
+  color: var(--rsv-accent);
+  text-shadow: 0 0 11px var(--rsv-glow);
+}
+
+/* Five notches and a shorter rail than the power bar's seven: same idea,
+   visibly not the same instrument. */
+.rsv__bar {
+  display: flex;
+  gap: 2px;
+  height: 5px;
+  margin: 4px 0 1px;
+}
+
+.rsv__seg {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 1px;
+  background: var(--rsv-rail);
+  box-shadow: inset 0 0 0 1px var(--rsv-rail-edge);
+  transition: background-color 110ms linear;
+}
+
+.rsv__seg.is-lit {
+  background: var(--rsv-accent);
+  box-shadow: inset 0 0 0 1px var(--rsv-accent), 0 0 6px var(--rsv-glow);
+}
+
+/* ---------------------------------------------------------------------
    Radar (top-right) — surface plot, painted by radar.ts
    ------------------------------------------------------------------- */
 
@@ -1171,7 +1233,17 @@ kbd {
   top: calc(var(--hud-pad) + var(--telemetry-h, 232px) + 10px);
   left: var(--hud-pad);
   display: flex;
-  /* The helm pad's gap, so the two controls read as one family of keys. */
+  /* Rows now, because [SHOP] belongs under [FISH] rather than beside it: it
+     is not a third thing the ship can do, it is what a berth adds. Stacking
+     it says so before the disabled attribute is noticed. */
+  flex-direction: column;
+  align-items: flex-start;
+  /* The helm pad's gap, so the keys read as one family in both directions. */
+  gap: 7.875px;
+}
+
+.dock__row {
+  display: flex;
   gap: 7.875px;
 }
 

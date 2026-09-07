@@ -1,5 +1,6 @@
 import type { Dock, EnergyMode, EnergyState, ShipState, Towns } from './types';
 import type { WorldEnv } from './env';
+import type { Battery } from './battery';
 import { MAX_FORWARD } from './ship';
 
 export interface Energy {
@@ -12,10 +13,16 @@ export interface Energy {
    */
   update(dt: number, ship: ShipState, env: WorldEnv): void;
   /**
-   * Takes `level` off the reserve in one go, if it is there to take.
+   * Takes `level` off the plant in one go, if it is there to take.
    *
    * Returns whether it was spent, so a caller cannot half-buy anything: the
    * fishing card charges 50% of the tank and must not open on a refusal.
+   *
+   * It draws the main tank down first and reaches the backup cell only once
+   * the main tank is at zero — the same order the per-frame burn uses, and the
+   * order the cell is sold under. A player on 20% with a full cell can
+   * therefore still buy a session, and pays for it with the last of the tank
+   * plus 30% of the backup.
    *
    * `rate` and `mode` are deliberately NOT touched here. They describe the
    * plant over the last frame and this is not the plant — it is a withdrawal.
@@ -198,7 +205,7 @@ const DOCK_DWELL_SECONDS = 2;
  */
 
 /**
- * Charge the reserve has to climb back to before the thrusters relight, level.
+ * Charge the plant has to climb back to before the thrusters relight, level.
  *
  * The hysteresis is the whole point of the constant. Relighting at the first
  * positive level instead would spend that level on thrust inside the same
@@ -207,6 +214,10 @@ const DOCK_DWELL_SECONDS = 2;
  * would strobe EMPTY/SOLAR along with them. 0.03 is 6 s of noon sun or 1.5 s
  * at a berth: long enough to read as a restart, short enough not to feel like
  * a punishment.
+ *
+ * Tested against main tank PLUS backup cell, so a ship that runs its tank dry
+ * with a cell aboard never stops at all — it changes which tank it is drinking
+ * from, and the HUD says so.
  */
 const RESTART_LEVEL = 0.03;
 
@@ -217,6 +228,7 @@ const RESTART_LEVEL = 0.03;
 /** Internal, mutable mirror of the read-only EnergyState surface. */
 interface MutableEnergyState {
   level: number;
+  reserve: number;
   rate: number;
   mode: EnergyMode;
   dock: Dock | null;
@@ -232,9 +244,10 @@ interface MutableEnergyState {
  * reassigning it -- or handing out a copy -- would leave them reading a tank
  * that had stopped moving.
  */
-export function createEnergy(towns: Towns): Energy {
+export function createEnergy(towns: Towns, battery: Battery): Energy {
   const state: MutableEnergyState = {
     level: 1,
+    reserve: battery.level,
     rate: 0,
     mode: 'drain',
     dock: null,
@@ -296,20 +309,33 @@ export function createEnergy(towns: Towns): Energy {
 
     const before = state.level;
     let level = before + (charge - burn) * dt;
-    if (level < 0) level = 0;
-    else if (level > 1) level = 1;
-    state.level = level;
 
-    // The truth, not the intention. Derived from the level actually committed,
+    // What the main tank could not pay for comes out of the backup cell, and
+    // ONLY then -- which is the whole rule the cell is sold under. Note the
+    // charge side never reaches it: shore power and the panels write `level`,
+    // so a bought cell is spent for good and no berth will put it back.
+    let fromReserve = 0;
+    if (level < 0) {
+      fromReserve = battery.draw(-level);
+      level = 0;
+    } else if (level > 1) level = 1;
+    state.level = level;
+    state.reserve = battery.level;
+
+    // The truth, not the intention. Derived from what was actually committed,
     // so a full tank in the sun reads 0.0 rather than the charge it cannot
     // take, and a tank hitting the floor reads only the part of the burn it
-    // could still pay for. The HUD prints this number.
-    state.rate = (level - before) / dt;
+    // could still pay for. Over the TOTAL of both tanks, so a ship running on
+    // its cell reads the burn it is really paying instead of the +0.00 %/s a
+    // pinned `level` would show. The HUD prints this number.
+    state.rate = (level - before - fromReserve) / dt;
 
     // Hysteresis: dry at 0, no thrust again until RESTART_LEVEL. See that
-    // constant for the per-frame stutter this avoids.
-    if (level <= 0) state.canThrust = false;
-    else if (level >= RESTART_LEVEL) state.canThrust = true;
+    // constant for the per-frame stutter this avoids. Both tanks count, so a
+    // cell aboard is the difference between coasting and carrying on.
+    const available = level + battery.level;
+    if (available <= 0) state.canThrust = false;
+    else if (available >= RESTART_LEVEL) state.canThrust = true;
 
     state.dock = docked ? berth : null;
 
@@ -317,8 +343,15 @@ export function createEnergy(towns: Towns): Energy {
     // trickles back the plant is still refusing thrust, and a tag that flipped
     // to SOLAR the instant the level left zero would be lying about the one
     // thing the player needs to know.
+    //
+    // `reserve` comes next, ahead of both charging states, because it is the
+    // reading that cannot be undone. A ship drifting at night on its cell is
+    // technically doing what a drifting ship always does, and calling that
+    // DRAIN would let a bought battery empty itself without the panel ever
+    // saying which tank was going down.
     if (!state.canThrust) state.mode = 'empty';
     else if (docked) state.mode = 'docked';
+    else if (fromReserve > 0) state.mode = 'reserve';
     else if (state.rate >= 0) state.mode = 'solar';
     else state.mode = 'drain';
   }
@@ -326,14 +359,22 @@ export function createEnergy(towns: Towns): Energy {
   /**
    * See `Energy.spend`. The floor is a hard refusal rather than a partial
    * draw: a session bought with half the power it costs is not a session.
+   *
+   * The affordability test is on both tanks together and the withdrawal is
+   * main-first, so the refusal and the order can never disagree about what was
+   * available.
    */
   function spend(level: number): boolean {
-    if (!(level > 0) || state.level < level) return false;
-    state.level -= level;
+    if (!(level > 0) || state.level + battery.level < level) return false;
+    const fromMain = Math.min(state.level, level);
+    state.level -= fromMain;
     // Clamp the arithmetic, not the rule. The test above already guarantees a
     // non-negative result; this only keeps a float's last bit from printing a
     // tank of -0.0000001 on the HUD.
     if (state.level < 0) state.level = 0;
+    const rest = level - fromMain;
+    if (rest > 0) battery.draw(rest);
+    state.reserve = battery.level;
     return true;
   }
 

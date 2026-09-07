@@ -1,6 +1,7 @@
 import type { EnergyMode, EnergyState, ShipState, WindState } from './types';
 import type { Wallet } from './wallet';
 import type { GpuFrameStats } from './postfx';
+import { BATTERY_CAPACITY } from './battery';
 
 /**
  * hud.ts — formats ShipState into the DOM overlay declared in index.html.
@@ -27,6 +28,19 @@ function transformWriter(el: HTMLElement | null): (value: string) => void {
     if (el === null || value === last) return;
     last = value;
     el.style.transform = value;
+  };
+}
+
+/** Returns a setter that shows or hides an element only when the flag changed. */
+function hiddenWriter(el: HTMLElement | null): (shown: boolean) => void {
+  // Read back off the markup, like every other writer in this file: the backup
+  // row ships hidden because a new ship has no cell, so a first frame that has
+  // not moved off that state touches nothing.
+  let last: boolean | null = el === null ? null : !el.hidden;
+  return (shown: boolean): void => {
+    if (el === null || shown === last) return;
+    last = shown;
+    el.hidden = !shown;
   };
 }
 
@@ -256,6 +270,16 @@ function windArrowDeg(wind: WindState, ship: ShipState): number {
 const PWR_SEGMENTS = 10;
 
 /**
+ * Notches in the backup cell's bar. Five, not ten, on purpose.
+ *
+ * The cell holds half a tank, so five notches beside the tank's ten makes one
+ * notch mean the same 10% on both bars — and the shorter rail is the first
+ * thing that says this is not more of the reserve above it. `index.html` must
+ * ship exactly this many segments.
+ */
+const RSV_SEGMENTS = 5;
+
+/**
  * A quarter tank, under which a *falling* reserve reads LOW and goes amber.
  *
  * `energy.ts` has no such mode — it reports only docked/solar/drain/empty — so
@@ -287,15 +311,21 @@ function powerState(energy: EnergyState): PwrState {
 const PWR_TAG: Partial<Record<PwrState, string>> = {
   solar: 'IDLE - SOLAR CHARGING',
   docked: 'DOCKED - CHARGING',
+  reserve: 'ON BACKUP CELL',
 };
 
 /**
- * Segments to light. Ceil rather than round, so that any charge at all holds
- * one notch lit and a wholly dark bar means exactly one thing: dead.
+ * Segments to light, out of `count`. Ceil rather than round, so that any charge
+ * at all holds one notch lit and a wholly dark bar means exactly one thing:
+ * dead.
+ *
+ * `fraction` is of that bar's OWN capacity, so the caller divides the cell's
+ * charge by `BATTERY_CAPACITY` before it gets here. Passing a tank fraction
+ * would light half a bar for a cell that is completely full.
  */
-function litSegments(level: number): number {
-  const lit = Math.ceil(level * PWR_SEGMENTS);
-  return lit < 0 ? 0 : lit > PWR_SEGMENTS ? PWR_SEGMENTS : lit;
+function litSegments(fraction: number, count: number): number {
+  const lit = Math.ceil(fraction * count);
+  return lit < 0 ? 0 : lit > count ? count : lit;
 }
 
 /**
@@ -426,6 +456,15 @@ export function createHud(wallet: Wallet): {
   const writePwrMode = textWriter(document.getElementById('hud-pwr-mode'));
   const writePwrRate = textWriter(document.getElementById('hud-pwr-rate'));
 
+  // The backup cell. One colour and one behaviour, so it needs no modifier
+  // writer -- the whole block is simply shown or hidden depending on whether
+  // there is a cell aboard at all.
+  const rsvBar = document.getElementById('hud-rsv-bar');
+  const writeRsvShown = hiddenWriter(document.getElementById('hud-rsv'));
+  const writeRsvValue = textWriter(document.getElementById('hud-rsv-value'));
+  const writeRsvSegments = segmentWriter(rsvBar, '.rsv__seg');
+  const writeRsvAria = attrWriter(rsvBar, 'aria-valuenow');
+
   // The purse pushes; it is not pulled. See the note on createHud above.
   const writeGold = textWriter(document.getElementById('hud-gold'));
   wallet.onChange((gold) => writeGold(formatGold(gold)));
@@ -434,6 +473,14 @@ export function createHud(wallet: Wallet): {
   // and refuses on its own account. What this buys is the player learning why
   // the button is dead without having to press it and get nothing.
   const writeFishGate = gateWriter(document.getElementById('btn-fish'), 'Needs 50% power');
+
+  // [SHOP] on the same terms, and for the same reason: `main.ts` re-tests the
+  // berth before it opens anything. A shop key is dead at sea because the shop
+  // is the berth's, not the ship's.
+  const writeShopGate = gateWriter(
+    document.getElementById('btn-shop'),
+    'Only alongside a berth',
+  );
 
   return {
     update(ship: ShipState, energy: EnergyState, wind: WindState): void {
@@ -476,13 +523,37 @@ export function createHud(wallet: Wallet): {
       writePwrState(state);
       writePwrValue(`${percent}%`);
       writePwrAria(percent);
-      writePwrSegments(litSegments(clamped));
+      writePwrSegments(litSegments(clamped, PWR_SEGMENTS));
       writePwrMode(PWR_TAG[state] ?? state.toUpperCase());
       writePwrRate(formatRate(energy.rate));
 
-      // Tested on the raw level rather than the clamped one, so the button
-      // answers to the sim and not to the panel's own presentation of it.
-      writeFishGate(level >= FISH_MIN_LEVEL);
+      // The backup cell. Hidden outright at zero rather than shown empty: a
+      // ship that has never bought one has no cell, and a permanently dark row
+      // would be an advertisement for the shop rather than an instrument.
+      //
+      // Its percentage is of the MAIN tank, matching the figure above it and
+      // the one the shop sells against -- a cell reading 50% is half a tank,
+      // which is what it is worth. Its bar is of its own capacity, so a full
+      // cell is a full bar.
+      const reserve = energy.reserve;
+      writeRsvShown(reserve > 0);
+      if (reserve > 0) {
+        const cellFrac = Math.min(1, reserve / BATTERY_CAPACITY);
+        const cellPercent = String(Math.round(reserve * 100));
+        writeRsvValue(`${cellPercent}%`);
+        writeRsvAria(cellPercent);
+        writeRsvSegments(litSegments(cellFrac, RSV_SEGMENTS));
+      }
+
+      // Tested on the raw levels rather than the clamped one, so the button
+      // answers to the sim and not to the panel's own presentation of it, and
+      // on both tanks because that is what a session may be paid for out of.
+      writeFishGate(level + reserve >= FISH_MIN_LEVEL);
+      // A berth and nothing else. `energy.mode` is the one definition of
+      // docked in the project -- see `wind.ts`, which shelters against the
+      // same test -- so the key cannot disagree with the plant about whether
+      // the ship has arrived.
+      writeShopGate(energy.mode === 'docked');
       // `energy.canThrust` is deliberately not read: `empty` holds for exactly
       // as long as thrust is refused, so a second indicator would say the same
       // thing twice and could only ever contradict the tag.

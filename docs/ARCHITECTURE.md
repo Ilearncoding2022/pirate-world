@@ -272,7 +272,7 @@ shader.
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
-| `energy.ts` | `createEnergy(towns)` | burn / solar / dock charge; owns `EnergyState` |
+| `energy.ts` | `createEnergy(towns, battery)` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE` | calm/event weather; owns `WindState`; probes the shared height map for the coast |
 | `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
 | `wake.ts` | `createWake(wakeMapSize?)`, `Wake`, `WakeDebug` | ship wake and spray; `update(dt, ship, env, renderer?)` fills `wakemap.ts`'s render target last, after every rib/spray value for the frame is final, and before `postFx.render` draws the water that samples it |
@@ -286,16 +286,19 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | compass needle, speed, wind, gold, power, and the dock's two buttons; heading and lat/long live on the radar panel |
+| `hud.ts` | `createHud(wallet)` | compass needle, speed, wind, gold, power, the backup cell, and the dock's three buttons; heading and lat/long live on the radar panel |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
 | `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
-| `fishsim.ts` | `createFishingSim(rng?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
+| `fishsim.ts` | `createFishingSim(rng?, extraShots?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
 | `fishrender.ts` | `createFishRenderer(canvas)` | 2D canvas, like `radar.ts`; the only reader of `SpeciesArt` |
 | `fishing.ts` | `createFishing(deps)`, `SESSION_COST` | the overlay: card DOM, input capture, gold and book bookkeeping |
 | `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
 | `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers |
+| `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CAPACITY` | the bought backup cell; the only charge in the world nothing recharges |
+| `harpoons.ts` | `createHarpoonStore(initial)`, `HARPOON_BUNDLE`, `HARPOON_STORE_MAX`, `HARPOON_PER_SESSION_MAX` | the spare-harpoon locker, and its two different ceilings |
+| `shop.ts` | `createShop(deps)`, `BATTERY_PRICE`, `HARPOONS_PRICE` | the chandlery panel; the only place gold leaves the purse |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `main.ts` | — | bootstrap and frame loop |
@@ -876,12 +879,36 @@ about the *net* result rather than the gross.
 | Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 0.5%/s net at noon (200 s to full), 7.2 min at 30°, negative after dark |
 | Berth | 2.0%/s net (50 s to full), overrides solar rather than stacking |
 | Mooring | 2 s continuously inside the ring — see below |
-| Empty | thrust refused until `RESTART_LEVEL` (3%) |
+| Backup cell | drawn on only once `level` is 0; never charged by anything |
+| Empty | thrust refused until `RESTART_LEVEL` (3%) of **both tanks together** |
 
 `MAX_FORWARD` is exported from `ship.ts` and imported here rather than copied,
 so a change to top speed moves the fuel economy with it instead of silently
 rebalancing the game. The burn is quadratic, which is what makes cruising slowly
 a strategy rather than a slower way to arrive equally empty.
+
+**The backup cell is a second tank that nothing fills.** `battery.ts` owns the
+charge, `energy.ts` owns when it is reached, and the rule is one sentence: the
+main tank is drawn down first, to zero, and only what it could not pay for
+comes out of the cell. That holds for the per-frame burn and for `spend`
+alike, so a player on 20% with a full cell can still buy a fishing session and
+pays for it out of both. Neither the panels nor shore power can touch it —
+both write `level` and the cell is not `level` — which is what makes it a
+consumable wearing a battery's clothes and the reason a player thinks before
+leaning on it.
+
+Three consequences worth holding on to:
+
+- **`rate` is over the total**, main tank plus cell. Once `level` is pinned at
+  zero it stops moving while the ship is still visibly burning, and a HUD
+  reading `+0.00 %/s` under full throttle would simply be wrong.
+- **`canThrust` is over the total too**, so a ship that runs its tank dry with
+  a cell aboard never stops — it changes which tank it is drinking from, and
+  the `reserve` mode says so on the panel.
+- **`EnergyMode` gained `reserve`**, ranked above both charging states. A ship
+  drifting at night on its cell is doing what a drifting ship always does, and
+  calling that `drain` would let a bought battery empty itself without the
+  panel ever naming the tank going down.
 
 **A berth connects on a dwell, not on a speed.** It used to require the ring
 *and* under 3 kn of ground speed, which was a proxy and wrong at both ends:
@@ -1240,9 +1267,24 @@ mean something different on a phone.
 
 ### Persistence
 `save.ts` owns one versioned localStorage key and `createRecords()` is its
-only entry point — it loads the file, builds the wallet and the fish book from
-it, and subscribes both to a writer. Three separate calls would let a caller
-wire two of them and end up with a save that silently stopped updating.
+only entry point — it loads the file, builds the wallet, the fish book, the
+backup cell and the harpoon locker from it, and subscribes all four to a
+writer. Separate calls would let a caller wire three of them and end up with a
+save that silently stopped updating.
+
+**The shop's two fields were added to version 1 rather than bumping it.** A
+version bump means "every field below is of unknown meaning", and that would
+be false of a pre-shop save: it is a perfectly good file whose owner never
+bought anything, which is exactly what absent-means-zero gives back. Both
+fields are also clamped to their ceilings on the way in, because an edited
+file claiming 900 harpoons is the cheapest cheat there is.
+
+**The cell is the only saved thing that moves continuously**, and it is why
+`battery.ts` notifies its subscribers on the *persisted* figure — whole percent
+of a main tank — rather than on every draw. Without that, a ship burning
+through its backup would write `localStorage` sixty times a second for a number
+read back exactly once, at boot. The rounding is downward, so a reload never
+hands back more charge than was aboard.
 
 Gold reaches the HUD by **subscription, not by polling**: `wallet.onChange`
 fires once immediately with the current figure and again only when it moves, so

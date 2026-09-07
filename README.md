@@ -22,6 +22,7 @@ Then open the URL Vite prints (http://localhost:5173 by default).
 | Mouse wheel | Zoom the follow camera |
 | on-screen `[FISH]` | Start a fishing session — costs half the reserve |
 | on-screen `[FISH BOOK]` | Open the record of every species |
+| on-screen `[SHOP]` | Open the chandlery — only alongside a berth |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
 | `Esc` | End a fishing session, or close the fish book |
 
@@ -113,6 +114,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   power runs at two percent of the reserve a second, so fifty seconds alongside
   fills the tank from empty — four times the best the sun ever manages. Berths
   are plotted on the radar, so the scope is also the fuel map.
+- **The chandlery.** Alongside a berth, `[SHOP]` sells the two things gold is
+  for. A **backup cell** at 1000 gold holds half a tank and is only ever drawn
+  on once the main reserve is flat — no berth and no sunrise will put it back,
+  so it is a consumable wearing a battery's clothes. **Five spare harpoons** at
+  500 gold go into a locker that holds a hundred; a session may reach ten of
+  them, and only after its own ten are gone. Both survive a reload.
 - **Fishing.** Anywhere on the globe, docked or not, day or night: press
   `[FISH]` and the world stops. The ship comes to a dead halt, the sea and the
   sky freeze behind a dimmed 9:16 card, and you get thirty seconds and ten

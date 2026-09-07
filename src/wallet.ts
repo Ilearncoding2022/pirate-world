@@ -12,8 +12,17 @@
  */
 export interface Wallet {
   readonly gold: number;
-  /** Adds (never subtracts, for now) and notifies every subscriber. */
+  /** Adds and notifies every subscriber. */
   add(amount: number): void;
+  /**
+   * Takes `amount` if it is there to take, all or nothing.
+   *
+   * Returns whether it was spent, on exactly the terms `energy.spend` returns
+   * them: a shop that could half-charge for a battery would be a shop that can
+   * take a player's gold and hand back nothing. The refusal is the caller's to
+   * act on — this file neither knows nor cares what was being bought.
+   */
+  spend(amount: number): boolean;
   /** Returns an unsubscribe function. Fires immediately with the current gold. */
   onChange(cb: (gold: number) => void): () => void;
 }
@@ -26,6 +35,9 @@ export interface Wallet {
  * HUD prints "NaN", and the next `writeSave` puts it in the file, where
  * `loadSave` will (correctly) throw the player's whole balance away. Cheaper to
  * refuse the bad number here than to repair its consequences there.
+ *
+ * It guards `spend` too, where a rejected amount becomes a refused purchase
+ * rather than a zero price.
  */
 function toGold(value: number): number {
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
@@ -54,6 +66,16 @@ export function createWallet(initialGold = 0): Wallet {
       if (delta === 0) return;
       gold += delta;
       notify();
+    },
+
+    spend(amount: number): boolean {
+      // Through the same guard the credit side uses, so a NaN price is refused
+      // here rather than being subtracted into a permanently NaN purse.
+      const cost = toGold(amount);
+      if (cost === 0 || gold < cost) return false;
+      gold -= cost;
+      notify();
+      return true;
     },
 
     onChange(cb: (gold: number) => void): () => void {

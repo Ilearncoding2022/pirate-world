@@ -46,7 +46,13 @@ afterEach(() => {
 
 describe('save', () => {
   it('round-trips a well-formed save', () => {
-    const data: SaveData = { version: 1, gold: 1565, fishBook: { 'grey-mullet': 3, eel: 1 } };
+    const data: SaveData = {
+      version: 1,
+      gold: 1565,
+      fishBook: { 'grey-mullet': 3, eel: 1 },
+      reserve: 32,
+      harpoons: 15,
+    };
     writeSave(data);
     const loaded = loadSave();
     expect(loaded).toEqual(data);
@@ -98,7 +104,9 @@ describe('save', () => {
     });
     expect(() => loadSave()).not.toThrow();
     expect(loadSave()).toEqual(EMPTY_SAVE);
-    expect(() => writeSave({ version: 1, gold: 1, fishBook: {} })).not.toThrow();
+    expect(() =>
+      writeSave({ version: 1, gold: 1, fishBook: {}, reserve: 0, harpoons: 0 }),
+    ).not.toThrow();
   });
 
   it('createRecords wires the wallet and the fish book to persistence', () => {
@@ -111,5 +119,52 @@ describe('save', () => {
     const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
     expect(persisted.gold).toBe(50);
     expect(persisted.fishBook.cod).toBe(2);
+  });
+
+  /*
+   * The shop's two fields were added to version 1 rather than bumping it, so
+   * the load path has to be tolerant in both directions: a file written before
+   * the shop existed must open with an empty locker and no cell, and an edited
+   * file must not be able to claim more of either than the ceilings allow.
+   */
+  it('treats a pre-shop save as one with nothing bought', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, gold: 40, fishBook: { cod: 2 } }));
+    const loaded = loadSave();
+    expect(loaded.reserve).toBe(0);
+    expect(loaded.harpoons).toBe(0);
+    expect(loaded.gold).toBe(40);
+  });
+
+  it('clamps a backup charge and a harpoon count to their ceilings', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ version: 1, gold: 0, fishBook: {}, reserve: 900, harpoons: 5000 }),
+    );
+    const loaded = loadSave();
+    expect(loaded.reserve).toBe(50);
+    expect(loaded.harpoons).toBe(100);
+  });
+
+  it('keeps the rest of a save whose shop fields are unreadable', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ version: 1, gold: 77, fishBook: { cod: 1 }, reserve: 'full', harpoons: -3 }),
+    );
+    const loaded = loadSave();
+    expect(loaded.gold).toBe(77);
+    expect(loaded.fishBook.cod).toBe(1);
+    expect(loaded.reserve).toBe(0);
+    expect(loaded.harpoons).toBe(0);
+  });
+
+  it('createRecords persists a purchase made through the stores', () => {
+    const records = createRecords();
+    records.battery.charge();
+    records.harpoons.buy();
+
+    const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
+    // Whole percent of a MAIN tank, which is the file's own unit for the cell.
+    expect(persisted.reserve).toBe(50);
+    expect(persisted.harpoons).toBe(5);
   });
 });

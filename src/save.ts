@@ -1,8 +1,12 @@
 import type { SaveData } from './types';
 import type { Wallet } from './wallet';
 import type { FishBookStore } from './fishbook';
+import type { Battery } from './battery';
+import type { HarpoonStore } from './harpoons';
 import { createWallet } from './wallet';
 import { createFishBookStore } from './fishbook';
+import { BATTERY_CAPACITY, createBattery } from './battery';
+import { HARPOON_STORE_MAX, createHarpoonStore } from './harpoons';
 
 /**
  * save.ts — localStorage, versioned, and tolerant of anything it finds there.
@@ -30,6 +34,14 @@ export const SAVE_KEY = 'pirate-world.save';
  * A future version 2 loader keeps this constant and adds a migration; it does
  * NOT widen the accept test, because the whole value of the field is that an
  * unrecognised number is a definite answer rather than a guess.
+ *
+ * The shop's two fields — `reserve` and `harpoons` — were ADDED to version 1
+ * rather than justifying a version 2, and that is the right call under this
+ * file's own rules. A version bump means "every field below is of unknown
+ * meaning", which is a claim about the file that would be false: a v1 save
+ * from a build that predates the shop is a perfectly good save whose owner
+ * simply never bought anything. Both fields are absent-means-zero, which is
+ * exactly what such a player had.
  */
 const SAVE_VERSION = 1;
 
@@ -37,6 +49,8 @@ export const EMPTY_SAVE: SaveData = Object.freeze({
   version: 1,
   gold: 0,
   fishBook: Object.freeze({}),
+  reserve: 0,
+  harpoons: 0,
 });
 
 /* ------------------------------------------------------------------ */
@@ -73,6 +87,21 @@ function toCount(value: unknown): number | null {
   return Math.floor(value);
 }
 
+/**
+ * A whole count in [0, max], or null for anything that is not one.
+ *
+ * The ceiling is enforced on the way IN rather than trusted, because both
+ * capped fields are bought goods: an edited file claiming 900 harpoons is the
+ * cheapest cheat there is, and the stores themselves clamp on construction
+ * anyway. Clamping here as well is what makes the clamp visible in the load
+ * warning instead of silently happening later.
+ */
+function toCapped(value: unknown, max: number): number | null {
+  const count = toCount(value);
+  if (count === null) return null;
+  return count > max ? max : count;
+}
+
 /** True for a plain object — not null, not an array, not a primitive. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -107,6 +136,17 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
   const gold = toCount(parsed.gold);
   if (gold === null) notes.push(`gold ${JSON.stringify(parsed.gold)}`);
 
+  // Absent is not damage for either of these: a save written before the shop
+  // existed has neither field, and a player who never bought anything has
+  // neither either. Only a present-but-unreadable value is worth a note.
+  const reserveMax = Math.round(BATTERY_CAPACITY * 100);
+  const reserve = parsed.reserve === undefined ? 0 : toCapped(parsed.reserve, reserveMax);
+  if (reserve === null) notes.push(`reserve ${JSON.stringify(parsed.reserve)}`);
+
+  const harpoons =
+    parsed.harpoons === undefined ? 0 : toCapped(parsed.harpoons, HARPOON_STORE_MAX);
+  if (harpoons === null) notes.push(`harpoons ${JSON.stringify(parsed.harpoons)}`);
+
   const fishBook: Record<string, number> = {};
   const raw = parsed.fishBook;
   if (!isRecord(raw)) {
@@ -132,7 +172,13 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
     // load that fails to recognise the name.
   }
 
-  return { version: 1, gold: gold ?? 0, fishBook };
+  return {
+    version: 1,
+    gold: gold ?? 0,
+    fishBook,
+    reserve: reserve ?? 0,
+    harpoons: harpoons ?? 0,
+  };
 }
 
 /**
@@ -140,7 +186,8 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
  *
  * Missing storage, a missing key, unparsable JSON, a version this build does
  * not know, a wrong-shaped object, a NaN or negative gold, counts that are
- * strings or negative — every one of those yields a valid `SaveData`.
+ * strings or negative, a backup charge or a harpoon count over its ceiling —
+ * every one of those yields a valid `SaveData`.
  */
 export function loadSave(): SaveData {
   let raw: string | null;
@@ -210,10 +257,10 @@ function reportWriteFailure(reason: string): void {
 /* ------------------------------------------------------------------ */
 
 /**
- * Loads the save and wires a wallet and a Fish Book to it, so that every
- * change to either is persisted without any caller remembering to.
+ * Loads the save and wires everything that survives a reload to it, so that a
+ * change to any of them is persisted without any caller remembering to.
  *
- * One entry point rather than three, because the three are only ever used
+ * One entry point rather than four, because the four are only ever used
  * together and a half-wired set is a save file that silently stops updating —
  * the kind of bug that is invisible until a player reloads and finds an
  * evening gone.
@@ -223,21 +270,42 @@ function reportWriteFailure(reason: string): void {
  * in its clean form, rather than leaving the damage to be re-parsed and
  * re-warned about on every load until the first catch.
  */
-export function createRecords(): { wallet: Wallet; book: FishBookStore } {
+export function createRecords(): {
+  wallet: Wallet;
+  book: FishBookStore;
+  battery: Battery;
+  harpoons: HarpoonStore;
+} {
   const save = loadSave();
   const wallet = createWallet(save.gold);
   // Seeded with the loaded record entire, unknown ids included; `snapshot()`
   // hands them straight back, so the round trip is lossless.
   const book = createFishBookStore(save.fishBook);
+  // The cell takes the file's own unit — whole percent — and owns the
+  // conversion to and from the tank fractions the sim runs in.
+  const battery = createBattery(save.reserve);
+  const harpoons = createHarpoonStore(save.harpoons);
 
   function persist(): void {
-    writeSave({ version: 1, gold: wallet.gold, fishBook: book.snapshot() });
+    writeSave({
+      version: 1,
+      gold: wallet.gold,
+      fishBook: book.snapshot(),
+      reserve: battery.percent,
+      harpoons: harpoons.count,
+    });
   }
 
-  // Both halves of the file, both subscribed, at the one moment where the
-  // caller cannot forget one of them.
+  // Every part of the file, all subscribed, at the one moment where the caller
+  // cannot forget one of them. The cell is the only one of the four that moves
+  // continuously rather than on an event, and it is why `battery.ts` notifies
+  // on its PERSISTED percent rather than on every draw — without that, a ship
+  // burning through its backup would be writing localStorage sixty times a
+  // second for a number that is read back exactly once, at boot.
   wallet.onChange(persist);
   book.onChange(persist);
+  battery.onChange(persist);
+  harpoons.onChange(persist);
 
-  return { wallet, book };
+  return { wallet, book, battery, harpoons };
 }

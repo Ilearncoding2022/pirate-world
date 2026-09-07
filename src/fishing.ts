@@ -1,5 +1,7 @@
 import type { Energy } from './energy';
 import type { FishBookStore } from './fishbook';
+import type { HarpoonStore } from './harpoons';
+import { HARPOON_PER_SESSION_MAX } from './harpoons';
 import { createFishRenderer, speciesGlyph } from './fishrender';
 import type { FishRenderer } from './fishrender';
 import { createFishingSim } from './fishsim';
@@ -28,6 +30,9 @@ export interface FishingDeps {
   readonly energy: Energy;
   readonly wallet: Wallet;
   readonly book: FishBookStore;
+  /** The spare-harpoon locker. Read at the start of every session, debited as
+   *  the spares are actually fired. */
+  readonly harpoons: HarpoonStore;
   /** Called when the card opens, so `main.ts` can freeze the world. */
   readonly onOpen: () => void;
   /** Called when it closes, so `main.ts` can thaw it. */
@@ -157,6 +162,21 @@ export function createFishing(deps: FishingDeps): Fishing {
   const sessionCatches: Species[] = [];
   let sessionGold = 0;
 
+  /*
+   * The spare-harpoon budget for the session in progress, and how much of it
+   * the locker has already been charged for.
+   *
+   * Debited as the shots are fired rather than reserved when the session
+   * starts, which is the difference between a closed tab costing the player
+   * the harpoons they threw and costing them the ones they did not. The sim's
+   * `extraLeft` is the authority on how many have gone; `granted` minus it is
+   * the running total, and `debited` is what has been settled against that, so
+   * a frame in which nothing was fired settles nothing and a frame with a shot
+   * in it settles exactly one.
+   */
+  let extraGranted = 0;
+  let extraDebited = 0;
+
   /* ---- write-through caches, the same pattern as hud.ts ------------ */
   let lastClock = '';
   let lastShots = '';
@@ -181,8 +201,13 @@ export function createFishing(deps: FishingDeps): Fishing {
     const clock = Math.floor(secs / 60) + ':' + String(secs % 60).padStart(2, '0');
     lastClock = write(clockOut, clock, lastClock);
 
-    const shots = state.shotsLeft;
-    lastShots = write(shotsOut, shots + (shots === 1 ? ' SHOT' : ' SHOTS'), lastShots);
+    // The session's own shots while any remain, then the bought ones under
+    // their own word. Two labels rather than one running total, because the
+    // moment the count starts costing gold is a moment the player is entitled
+    // to see arrive.
+    const shots = state.shotsLeft > 0 ? state.shotsLeft : state.extraLeft;
+    const noun = state.shotsLeft > 0 ? ' SHOT' : ' SPARE';
+    lastShots = write(shotsOut, shots + noun + (shots === 1 ? '' : 'S'), lastShots);
 
     // The wallet's running total, with what this session has added to it. Two
     // figures because they answer different questions — how rich am I, and is
@@ -198,9 +223,14 @@ export function createFishing(deps: FishingDeps): Fishing {
    * power plant keeps ticking under the card, so a player who ends a session
    * at 40% and reads the catch list can find themselves able to afford another
    * one without touching anything.
+   *
+   * Both tanks, because `energy.spend` will draw on both — a player with an
+   * empty tank and a bought cell can still fish, and a button that said
+   * otherwise would be hiding the one thing they paid for.
    */
   function refreshAgain(): void {
-    const affordable = deps.energy.state.level >= SESSION_COST;
+    const state = deps.energy.state;
+    const affordable = state.level + state.reserve >= SESSION_COST;
     if (lastAgainDisabled === !affordable) return;
     lastAgainDisabled = !affordable;
     again.disabled = !affordable;
@@ -221,7 +251,14 @@ export function createFishing(deps: FishingDeps): Fishing {
    */
   function startSession(): boolean {
     if (!deps.energy.spend(SESSION_COST)) return false;
-    sim = createFishingSim();
+    // Read AFTER the power has been paid for, so a refused session cannot
+    // have looked at the locker at all, and capped at the per-session ceiling
+    // rather than at whatever is in it: the locker is a hundred harpoons deep
+    // and a session may reach ten of them. See `harpoons.ts` on the two
+    // ceilings.
+    extraGranted = Math.min(HARPOON_PER_SESSION_MAX, deps.harpoons.count);
+    extraDebited = 0;
+    sim = createFishingSim(Math.random, extraGranted);
     sessionCatches.length = 0;
     sessionGold = 0;
     pressed = false;
@@ -240,6 +277,22 @@ export function createFishing(deps: FishingDeps): Fishing {
    * is stepped — the renderer reads the same list for its float-ups, and both
    * of them are reading it in the window between two updates.
    */
+  /**
+   * Charges the locker for the spares fired since the last frame.
+   *
+   * Driven off the sim's own count rather than off the `fired` events, because
+   * this must be idempotent: it runs every frame and most frames have fired
+   * nothing. The difference between what was granted and what is left is the
+   * whole truth about how many bought harpoons have gone, and `debited`
+   * records how much of that truth has been paid for.
+   */
+  function settleHarpoons(state: FishingState): void {
+    const used = extraGranted - state.extraLeft;
+    if (used <= extraDebited) return;
+    deps.harpoons.spend(used - extraDebited);
+    extraDebited = used;
+  }
+
   function bank(state: FishingState): void {
     for (const ev of state.events) {
       if (ev.kind !== 'caught') continue;
@@ -425,6 +478,7 @@ export function createFishing(deps: FishingDeps): Fishing {
 
     sim.update(dt, input);
     bank(sim.state);
+    settleHarpoons(sim.state);
     paintChrome(sim.state);
     renderer.draw(sim.state, dt);
 

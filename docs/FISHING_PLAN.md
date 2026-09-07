@@ -103,6 +103,33 @@ tenth; what each row gave up went back to COMMON and UNCOMMON in the
 proportion they already stood in, so every row still totals 100 and the shape
 of the curve is unchanged — only its ceiling moved.
 
+### Spare harpoons
+
+A session gets **ten harpoons of its own**, and may reach up to ten more out of
+the locker `harpoons.ts` keeps. The two budgets are counted separately all the
+way through the sim: `shotsLeft` is spent first and to the last one, and only
+then does a shot come out of `extraLeft`. That order is the rule the locker is
+sold under, and keeping the counts apart is what `fishing.ts` debits the locker
+against — a session that could not tell its own ten from its bought ones would
+have to guess how many to charge for.
+
+The locker holds a hundred and sells five at a time; a session may draw ten.
+Two different ceilings on purpose: the first is how many can be kept, the
+second is what keeps the mini-game from becoming a matter of how much gold was
+brought to it.
+
+Worth knowing before the per-session ceiling is raised: **the 30 s clock is now
+the binding constraint, not the harpoons.** Firing the instant the rope is home
+and never aiming, 19 shots fit in a session. A player who actually aims will
+spend rather fewer, so the last few spares of a full grant are mostly
+theoretical, and a session with spares granted ends on `time` rather than on
+`shots`. Raising `SESSION_SECONDS` is the knob if the extras are meant to be
+reliably spendable.
+
+Spares are debited **as they are fired**, not reserved when the session starts:
+a tab closed mid-session should cost the player the harpoons they threw and not
+the ones they did not.
+
 ### Row motion
 
 | Row | Direction | Base speed (card widths / s) | Fish alive (min–max) | Min gap |

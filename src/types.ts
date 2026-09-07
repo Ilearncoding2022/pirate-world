@@ -101,25 +101,48 @@ export interface Towns {
 /**
  * What the power plant is doing, for the HUD to label and colour.
  *
- * `empty` outranks the rest: it holds until the reserve has climbed back over
- * the restart threshold, so the tag does not flicker between EMPTY and SOLAR
- * while the panels trickle the first percent back in.
+ * `empty` outranks the rest: it holds until the plant has recovered past the
+ * restart threshold, so the tag does not flicker between EMPTY and SOLAR while
+ * the panels trickle the first percent back in. It now means BOTH tanks are
+ * dry — a ship coasting on its backup cell is very much still under way.
+ *
+ * `reserve` is that state: the main tank is empty and the frame's draw came
+ * out of the bought cell. It sits between `docked` and `solar` in the ranking
+ * because it is the one reading a player must not miss — the charge going down
+ * is the one that no berth and no sunrise will put back.
  */
-export type EnergyMode = 'docked' | 'solar' | 'drain' | 'empty';
+export type EnergyMode = 'docked' | 'solar' | 'drain' | 'empty' | 'reserve';
 
 /** Read-only view of the ship's power, produced by `energy.ts`. */
 export interface EnergyState {
   /** Charge in [0, 1]. The HUD is the only thing that turns this into a percentage. */
   readonly level: number;
-  /** Net change in `level` per second: negative under way, positive on solar or at a dock. */
+  /**
+   * Charge in the bought backup cell, in the SAME main-tank fractions as
+   * `level`, in [0, BATTERY_CAPACITY]. Zero for a ship that has never bought
+   * one, which is every ship until it visits a shop.
+   *
+   * It is a mirror of `battery.ts`, republished here so that everything which
+   * reads the plant reads it from one state object. Nothing writes it through
+   * this surface.
+   */
+  readonly reserve: number;
+  /**
+   * Net change in TOTAL charge per second — main tank plus backup cell.
+   *
+   * The total rather than `level` alone, because once the main tank is on the
+   * floor `level` stops moving while the ship is still visibly burning, and a
+   * rate of +0.00 %/s beside a hull under full throttle is the panel lying.
+   */
   readonly rate: number;
   readonly mode: EnergyMode;
   /** The berth currently charging the ship, or null. */
   readonly dock: Dock | null;
   /**
-   * False once the tank has run dry, until it has recovered past the restart
-   * threshold. `ship.ts` refuses thrust while this is false; steering, drag and
-   * the sea keep working, so the ship coasts and drifts rather than freezing.
+   * False once BOTH tanks have run dry, until the plant has recovered past the
+   * restart threshold. `ship.ts` refuses thrust while this is false; steering,
+   * drag and the sea keep working, so the ship coasts and drifts rather than
+   * freezing.
    */
   readonly canThrust: boolean;
 }
@@ -323,7 +346,7 @@ export interface HarpoonState {
  * floats the "+N" — from the same list, without either knowing about the other.
  */
 export type FishingEvent =
-  | { kind: 'fired'; shotsLeft: number }
+  | { kind: 'fired'; shotsLeft: number; extraLeft: number }
   | { kind: 'hooked'; fish: FishState }
   | { kind: 'caught'; species: Species; gold: number; x: number; y: number }
   | { kind: 'escaped'; species: Species }
@@ -334,8 +357,17 @@ export type FishingEvent =
 export interface FishingState {
   /** Seconds, counting 30 down to 0. */
   readonly timeLeft: number;
-  /** Harpoons left, counting 10 down to 0. */
+  /** Harpoons left off the session's own ten, counting down to 0. */
   readonly shotsLeft: number;
+  /**
+   * Spares left of the ones this session was granted out of the locker,
+   * counting down to 0. Zero for a player who has bought none.
+   *
+   * A strictly second budget: `shotsLeft` is spent first and to the last one,
+   * and only then does a shot come out of here. That order is the whole rule
+   * the locker is sold under — see `harpoons.ts`.
+   */
+  readonly extraLeft: number;
   readonly fish: readonly FishState[];
   readonly harpoon: HarpoonState;
   /** This session's catches, in the order they were landed. */
@@ -374,4 +406,16 @@ export interface SaveData {
   readonly version: 1;
   readonly gold: number;
   readonly fishBook: Readonly<Record<string, number>>;
+  /**
+   * Charge in the backup cell as WHOLE PERCENT of a main tank, 0-50.
+   *
+   * Percent rather than the fraction the sim uses, so the file stays whole
+   * numbers throughout and a cell bleeding away under a burn rewrites the save
+   * about once a second instead of sixty times. `battery.ts` owns the
+   * conversion and the rounding, which is downward — a reload never hands back
+   * more charge than was aboard.
+   */
+  readonly reserve: number;
+  /** Spare harpoons in the locker, 0-100. */
+  readonly harpoons: number;
 }

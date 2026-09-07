@@ -18,6 +18,7 @@ import { createPostFx } from './postfx';
 import { createRecords } from './save';
 import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
+import { createShop } from './shop';
 import { createQuality } from './quality';
 import { createReflection } from './reflection';
 import { createWaterReflectPlugin } from './waterreflect';
@@ -89,9 +90,19 @@ function startGame(): void {
   );
   scene.add(ship.object);
 
-  // Power plant. Built from the world's berths, read by the ship (thrust gate),
-  // the HUD, the model's neon and the dock rings.
-  const energy = createEnergy(globe.towns);
+  // Everything the player keeps across reloads, in one call. `createRecords` is
+  // the single entry point for persistence precisely so that no caller can wire
+  // half of it and end up with a wallet that saves and a fish book that does not.
+  //
+  // It comes before the power plant now, because the plant is built around the
+  // backup cell and the cell's charge is one of the things that survives a
+  // reload.
+  const records = createRecords();
+
+  // Power plant. Built from the world's berths and the bought backup cell,
+  // read by the ship (thrust gate), the HUD, the model's neon and the dock
+  // rings.
+  const energy = createEnergy(globe.towns, records.battery);
 
   // Weather. Reads the same height field the radar plots, so the sheltered water
   // on the scope is the sheltered water the ship finds.
@@ -103,10 +114,6 @@ function startGame(): void {
   const view = createFollowCamera(window.innerWidth / window.innerHeight);
   const controls = createControls();
 
-  // Everything the player keeps across reloads, in one call. `createRecords` is
-  // the single entry point for persistence precisely so that no caller can wire
-  // half of it and end up with a wallet that saves and a fish book that does not.
-  const records = createRecords();
 
   const hud = createHud(records.wallet);
   const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
@@ -121,6 +128,7 @@ function startGame(): void {
     energy,
     wallet: records.wallet,
     book: records.book,
+    harpoons: records.harpoons,
     onOpen: () => {
       // The hull stops before the first frozen frame runs. `open()` flips its
       // own flag and calls this synchronously inside the click, so no frame of
@@ -142,18 +150,40 @@ function startGame(): void {
 
   const fishBook = createFishBook(records.book, records.wallet);
 
+  // The chandlery. It knows what things cost and nothing about where the ship
+  // is; the berth test is below, beside the other two overlays' guards.
+  const shop = createShop({
+    wallet: records.wallet,
+    battery: records.battery,
+    harpoons: records.harpoons,
+  });
   // hud.ts owns whether [FISH] looks pressable; this owns what pressing it does.
   // The overlay test is here and not in the HUD because the HUD does not know
   // the overlays exist, and `fishing.open()` re-tests the tank on its own
   // account -- a disabled attribute is an affordance, never a lock.
   document.getElementById('btn-fish')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) return;
     fishing.open();
   });
 
   document.getElementById('btn-fishbook')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) return;
     fishBook.open();
+  });
+
+  // The berth is re-tested here rather than trusted off the button, on the
+  // same terms as [FISH]: `hud.ts` writes the disabled attribute as an
+  // affordance and a disabled attribute is not a lock. `energy.mode` is the
+  // project's one definition of docked, so this and the key agree by
+  // construction.
+  document.getElementById('btn-shop')?.addEventListener('click', () => {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) return;
+    if (energy.state.mode !== 'docked') return;
+    // The hull is already stopped -- a berth is a two-second dwell -- but the
+    // halt is what makes "the world resumes from rest" true of this overlay
+    // as well as of the fishing card.
+    ship.halt();
+    shop.open();
   });
 
   /*
@@ -212,10 +242,12 @@ function startGame(): void {
     // themselves rather than latched at the call sites, because the fish book
     // closes on its own Escape key and its own close button and tells nobody: a
     // flag set where `open()` is called would strand the world stopped.
-    if (fishing.isOpen || fishBook.isOpen) {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) {
       // The plant keeps running -- a session costs half the tank and the sun is
       // still up, so recharging through one is the point. It bills a resting
-      // hull; see `restingSnapshot`.
+      // hull; see `restingSnapshot`. It also keeps the berth alive under the
+      // shop: a chandlery that disconnected the ship the moment it opened
+      // would make browsing cost the charge the visit was for.
       energy.update(dt, restingSnapshot(), env);
       if (fishing.isOpen) fishing.update(dt);
       hud.update(ship.state, energy.state, wind.state);
