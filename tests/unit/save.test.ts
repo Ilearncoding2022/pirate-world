@@ -141,7 +141,7 @@ describe('save', () => {
       JSON.stringify({ version: 1, gold: 0, fishBook: {}, reserve: 900, harpoons: 5000 }),
     );
     const loaded = loadSave();
-    expect(loaded.reserve).toBe(50);
+    expect(loaded.reserve).toBe(100);
     expect(loaded.harpoons).toBe(100);
   });
 

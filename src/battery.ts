@@ -2,7 +2,8 @@
  * battery.ts — the backup power cell, bought at a berth and never refilled by
  * the world.
  *
- * A second tank sitting behind the main reserve. `energy.ts` owns when it is
+ * A second tank sitting behind the main reserve, holding up to
+ * BATTERY_CELLS_MAX cells bought one at a time. `energy.ts` owns when it is
  * drawn on (only once the main tank has actually run out) and `shop.ts` owns
  * what it costs; this file owns nothing but the charge itself and the promise
  * that it can only ever go down outside a purchase.
@@ -15,7 +16,7 @@
  */
 
 /**
- * How much charge a full cell holds, as a fraction of the MAIN tank.
+ * How much charge ONE cell holds, as a fraction of the MAIN tank.
  *
  * Half a tank. It is deliberately a fraction of the main reserve rather than a
  * unit of its own, because everything that spends power — the quadratic burn,
@@ -25,8 +26,33 @@
  * Half is also what makes the cell worth its price in exactly one currency:
  * it is one fishing session, or about 45 s flat out, or a night and a half
  * hove to. Any of those, once, and then it is gone.
+ *
+ * This is what a purchase BUYS. What the ship can hold is BATTERY_CAPACITY
+ * below, and the two were the same number until the second cell existed.
  */
-export const BATTERY_CAPACITY = 0.5;
+export const BATTERY_CELL = 0.5;
+
+/**
+ * How many cells the ship can stow.
+ *
+ * Two, so a player standing at a berth with 2000 gold can leave with a full
+ * tank's worth of backup instead of half of one. The second cell costs exactly
+ * what the first did (`shop.ts`'s BATTERY_PRICE, one price for one cell), so
+ * this buys no discount and no penalty — only the option of carrying more,
+ * which is the whole of what was asked for. It is the range of a long crossing
+ * that changes, not the price of power.
+ */
+export const BATTERY_CELLS_MAX = 2;
+
+/**
+ * The most charge the cells can hold between them, in main-tank fractions.
+ *
+ * DERIVED, so a third cell or a resized one moves the save file's cap
+ * (`save.ts`), the HUD's bar (`hud.ts`) and the shop's stock line together
+ * instead of leaving three places to remember. Everything outside this file
+ * that asks "how full can the backup get" asks this and not BATTERY_CELL.
+ */
+export const BATTERY_CAPACITY = BATTERY_CELL * BATTERY_CELLS_MAX;
 
 export interface Battery {
   /** Charge held, in main-tank fractions, in [0, BATTERY_CAPACITY]. */
@@ -34,18 +60,25 @@ export interface Battery {
   /** True when a purchase would add nothing. `shop.ts` dims the offer on this. */
   readonly isFull: boolean;
   /**
-   * The charge as the save file holds it: whole percent of a main tank, 0-50.
+   * The charge as the save file holds it: whole percent of a main tank,
+   * 0 to `BATTERY_CAPACITY * 100`.
    *
    * Rounded DOWN, so a reload can never hand back more charge than was
    * actually aboard. The most it can cost is the last percent of a cell.
    */
   readonly percent: number;
   /**
-   * Fills the cell to capacity. Returns false — and changes nothing — when it
-   * was already full, so a caller cannot charge the wallet for nothing.
+   * Adds ONE cell's charge, capped at BATTERY_CAPACITY. Returns false — and
+   * changes nothing — when the store was already full, so a caller cannot
+   * charge the wallet for nothing.
    *
-   * There is no partial charge. The shop sells one full cell at one price, and
-   * a top-up priced the same as a fill would only teach players to buy at 49%.
+   * Adds a fixed amount rather than filling to the top, which is what keeps
+   * the old rule intact now that there is room for two: the shop sells one
+   * cell at one price, so buying at 90% pays a full price for a tenth and
+   * wastes the rest. A `charge()` that topped up to capacity instead would
+   * make the cheapest way to stay full a purchase every time a berth went
+   * past — the same trap the single-cell version was written to avoid, moved
+   * up the bar rather than removed.
    */
   charge(): boolean;
   /**
@@ -113,7 +146,10 @@ export function createBattery(initialPercent = 0): Battery {
 
     charge(): boolean {
       if (level >= BATTERY_CAPACITY - 1e-6) return false;
-      level = BATTERY_CAPACITY;
+      level += BATTERY_CELL;
+      // The overflow a top-up wastes. Clamped rather than refused, because
+      // refusing would mean a cell at 90% could not be topped up at all.
+      if (level > BATTERY_CAPACITY) level = BATTERY_CAPACITY;
       notifyIfPersistedChanged();
       return true;
     },

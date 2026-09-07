@@ -1,7 +1,7 @@
 import type { Battery } from './battery';
 import type { HarpoonStore } from './harpoons';
 import type { Wallet } from './wallet';
-import { BATTERY_CAPACITY } from './battery';
+import { BATTERY_CAPACITY, BATTERY_CELL, BATTERY_CELLS_MAX } from './battery';
 import { HARPOON_BUNDLE, HARPOON_PER_SESSION_MAX, HARPOON_STORE_MAX } from './harpoons';
 
 /**
@@ -19,12 +19,17 @@ import { HARPOON_BUNDLE, HARPOON_PER_SESSION_MAX, HARPOON_STORE_MAX } from './ha
  */
 
 /**
- * Gold for one full backup cell.
+ * Gold for one backup cell.
  *
  * A thousand, against catches worth 4 to 320. That is roughly a good session
  * and a half for half a tank you can only spend once, which is what keeps the
  * cell an insurance policy rather than a fuel supply: a player who buys one
  * every time they pass a berth is fishing to pay for the fishing.
+ *
+ * One price for one cell, and the SECOND cell costs the same as the first.
+ * The ship stows `BATTERY_CELLS_MAX` of them, so a full backup is this price
+ * twice over — no bulk discount, because the point of the second cell is
+ * range on a long crossing and not cheaper power.
  */
 export const BATTERY_PRICE = 1000;
 
@@ -134,8 +139,13 @@ export function createShop(deps: ShopDeps): ShopPanel {
   // harpoons, and the two prices -- are stamped into the markup here rather
   // than typed into index.html, so a retune of any of them moves the words on
   // the buttons with it instead of leaving the panel advertising the old deal.
+  //
+  // BATTERY_CELL and not BATTERY_CAPACITY: this line describes what ONE
+  // purchase hands over, which is half a tank, while the stock line below
+  // describes what the ship can hold, which is now two of them.
   textWriter(document.getElementById('shop-battery-detail'))(
-    `One full charge · ${Math.round(BATTERY_CAPACITY * 100)}% of a tank`,
+    `One full charge · ${Math.round(BATTERY_CELL * 100)}% of a tank · ` +
+      `stows ${BATTERY_CELLS_MAX}`,
   );
   textWriter(document.getElementById('shop-harpoon-detail'))(
     `${HARPOON_BUNDLE} spare harpoons · up to ${HARPOON_PER_SESSION_MAX} a session`,
@@ -162,7 +172,7 @@ export function createShop(deps: ShopDeps): ShopPanel {
 
     const cellPercent = Math.round(deps.battery.level * 100);
     writeBatteryStock(`${cellPercent}% / ${Math.round(BATTERY_CAPACITY * 100)}%`);
-    if (deps.battery.isFull) writeBatteryOffer(false, 'The cell is already full');
+    if (deps.battery.isFull) writeBatteryOffer(false, 'Both cells are already full');
     else writeBatteryOffer(deps.wallet.gold >= BATTERY_PRICE, `Needs ${BATTERY_PRICE} gold`);
 
     writeHarpoonStock(`${deps.harpoons.count} / ${HARPOON_STORE_MAX}`);
