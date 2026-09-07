@@ -196,15 +196,24 @@ const CREST_BACK = bake(CREST_BACK_RATIO);
 
 /**
  * Where the maelstrom's raised lip sits as a fraction of the funnel radius,
- * and the reciprocal of its half-width (0.12 of the radius: 1.2 units on a
+ * and the reciprocal of its half-width (0.18 of the radius: 1.8 units on a
  * 10-unit funnel).
  *
- * Just inside the rim rather than on it. The funnel's own `(1 - r)^3` is
- * already almost nothing that far out, so the lip reads as water thrown up by
- * the spin rather than as a step in the surface.
+ * The two are one number really: 0.82 + 0.18 is exactly 1, so the lip's outer
+ * edge dies precisely where the bowl does and the whole maelstrom has compact
+ * support inside its own radius. Nothing of it, not a thousandth of a unit of
+ * standing water, is left outside `r = 1` for the hull to trip over or for
+ * the patch to shade -- which the 0.9-centred, 0.12-wide lip this shipped
+ * with could not say, since it ran out to 1.02 radii.
+ *
+ * The half-width is 1.5x what it was, and that is the whole reason the centre
+ * moved in. The displacement patch lays a vertex every half world unit, so
+ * 1.2 units of half-width was two and a half vertices a side: the lip drew as
+ * a ragged polygonal ring rather than as a ring of thrown water. 1.8 is
+ * nearer four a side, which is about the least a curve can be drawn with.
  */
-const RIM_CENTRE = bake(0.9);
-const RIM_INV = bake(1 / 0.12);
+const RIM_CENTRE = bake(0.82);
+const RIM_INV = bake(1 / 0.18);
 
 /**
  * The lip's height as a fraction of the funnel's depth.
@@ -214,6 +223,11 @@ const RIM_INV = bake(1 / 0.12);
  * absolute height: that is what makes it grow in with the funnel and leave
  * with it, instead of leaving a 0.35-unit ring of standing water behind a
  * maelstrom that has finished shrinking.
+ *
+ * Since the lip replaces the bowl beneath it rather than riding on top of it
+ * (see `hazardHeight`), this ratio is also the exact maximum of the whole
+ * maelstrom profile, reached exactly at `RIM_CENTRE`: RIM_HEIGHT of water
+ * above the sea, no more, whatever the bowl underneath is doing.
  */
 const RIM_RATIO = bake(RIM_HEIGHT / FUNNEL_DEPTH);
 
@@ -314,7 +328,9 @@ export const HAZARD_GLSL: string = [
   `const float HAZ_RIM_RATIO = ${RIM_RATIO.glsl};`,
   `const float HAZ_MIN_SIZE = ${MIN_SIZE.glsl};`,
   '// (1 - x*x)^2 inside |x| < 1, zero outside. Its own square root is the',
-  '// wider, softer skirt the foam hook rides.',
+  '// wider, softer skirt the foam hook rides, and it is also the maelstrom',
+  '// bowl and the maelstrom lip below: one shape, rounded one way, is one',
+  '// fewer thing for the two ports to disagree about.',
   'float hazBump(float x) {',
   '  float t = max(1.0 - x * x, 0.0);',
   '  return t * t;',
@@ -345,12 +361,32 @@ export const HAZARD_GLSL: string = [
   '      float bw = b * (v > 0.0 ? HAZ_CREST_FRONT : HAZ_CREST_BACK);',
   '      h += sh.w * (hazPlateau(u / a) * hazCrest(v / bw));',
   '    } else {',
-  // (1 - r) cubed as three multiplications. `pow` is transcendental in the
-  // general case and there is no reason to hand a GPU an exp/log pair for a
-  // cube the CPU port would then have to match.
+  // The bowl is `hazBump(r)` -- (1 - r*r)^2 -- and not the (1 - r)^3 this
+  // shipped with. A cube of (1 - r) has a CONE APEX at the centre: it is not
+  // differentiable there, it falls at about 0.9 units of height per unit of
+  // radius at exactly the point one patch vertex lands on, and a point with
+  // no normal is a shading singularity that no art in `hazardfunnel.ts` can
+  // cover. `hazBump` depends on r only through r*r, so it is smooth through
+  // the origin in u and v both, its slope at the centre is exactly zero, and
+  // its steepest wall moves out to r = 0.58 where there are a dozen vertices
+  // to draw it with instead of one. The hull still falls as far as it did:
+  // hazBump(0) is 1, so the centre is FUNNEL_DEPTH * envelope down as before
+  // and only the shape of the descent has moved.
+  //
+  // Still polynomial, and still on the one sqrt the radius already needed --
+  // see this file's module comment for why that is not a stylistic point.
   '      float r = sqrt(u * u + v * v) / a;',
-  '      float s = max(1.0 - r, 0.0);',
-  '      h += sh.w * (HAZ_RIM_RATIO * hazBump((r - HAZ_RIM_C) * HAZ_RIM_INV) - s * s * s);',
+  '      float bowl = hazBump(r);',
+  '      float lip = hazBump((r - HAZ_RIM_C) * HAZ_RIM_INV);',
+  // The lip REPLACES the bowl beneath itself rather than standing on top of
+  // it. On the old cone the funnel was down to three thousandths of its depth
+  // by the rim, so a lip added there stood at RIM_HEIGHT all by itself; a
+  // bowl is still a third of a unit deep under the crown, so adding would
+  // leave the crown short and put the profile's true peak off to one side of
+  // it. Written this way `lip` is at most 1 and the term it scales is never
+  // negative, so the maximum of the whole profile is exactly HAZ_RIM_RATIO,
+  // and it is reached exactly at HAZ_RIM_C.
+  '      h += sh.w * (HAZ_RIM_RATIO * lip - bowl * (1.0 - lip));',
   '    }',
   '  }',
   '  return h;',
@@ -435,10 +471,12 @@ export function hazardHeight(dir: { x: number; y: number; z: number }, hazards: 
       const bw = F(b * (v > 0 ? CREST_FRONT.value : CREST_BACK.value));
       h = F(h + F(w * F(plateauCPU(F(u / a)) * crestCPU(F(v / bw)))));
     } else {
+      // Same three terms in the same order as the GLSL: the radius, the bowl
+      // that radius sits in, the lip that replaces the bowl near the rim.
       const r = F(F(Math.sqrt(F(F(u * u) + F(v * v)))) / a);
-      const s = Math.max(F(1 - r), 0);
-      const rim = bumpCPU(F(F(r - RIM_CENTRE.value) * RIM_INV.value));
-      h = F(h + F(w * F(F(RIM_RATIO.value * rim) - F(F(s * s) * s))));
+      const bowl = bumpCPU(r);
+      const lip = bumpCPU(F(F(r - RIM_CENTRE.value) * RIM_INV.value));
+      h = F(h + F(w * F(F(RIM_RATIO.value * lip) - F(bowl * F(1 - lip)))));
     }
   }
   return h;
