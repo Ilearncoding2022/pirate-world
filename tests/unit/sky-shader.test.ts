@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
-import { createSky } from '../../src/sky';
+import { createSky, skyHorizonColor } from '../../src/sky';
+import { createEnv } from '../../src/env';
 import fixture from '../fixtures/sky-shader.json';
 
 /**
@@ -21,10 +22,14 @@ function normalize(glsl: string): string {
   return glsl.replace(/\s+/g, ' ').trim();
 }
 
-function findAtmosphere(group: THREE.Group): THREE.Mesh {
-  const mesh = group.children.find((child) => child.name === 'atmosphere');
-  if (!mesh) throw new Error('atmosphere mesh not found in sky group');
+function findNamed(group: THREE.Group, name: string): THREE.Mesh {
+  const mesh = group.children.find((child) => child.name === name);
+  if (!mesh) throw new Error(`${name} mesh not found in sky group`);
   return mesh as THREE.Mesh;
+}
+
+function findAtmosphere(group: THREE.Group): THREE.Mesh {
+  return findNamed(group, 'atmosphere');
 }
 
 describe('sky atmosphere shader', () => {
@@ -38,5 +43,60 @@ describe('sky atmosphere shader', () => {
     const sky = createSky();
     const material = findAtmosphere(sky.group).material as THREE.ShaderMaterial;
     expect(normalize(material.fragmentShader)).toBe(normalize(fixture.fragmentShader));
+  });
+});
+
+/**
+ * The sky dome is the second hand-written shader in this file: the graded sky
+ * the player sees from the deck, which thins out to nothing as the camera
+ * climbs toward orbit. Pinned the same way, and for the same reason.
+ */
+describe('sky dome shader', () => {
+  it('vertex shader matches the fixture, modulo whitespace', () => {
+    const material = findNamed(createSky().group, 'sky-dome')
+      .material as THREE.ShaderMaterial;
+    expect(normalize(material.vertexShader)).toBe(normalize(fixture.domeVertexShader));
+  });
+
+  it('fragment shader matches the fixture, modulo whitespace', () => {
+    const material = findNamed(createSky().group, 'sky-dome')
+      .material as THREE.ShaderMaterial;
+    expect(normalize(material.fragmentShader)).toBe(normalize(fixture.domeFragmentShader));
+  });
+
+  it('is drawn over the stars and under the two bodies', () => {
+    // Everything in the sky is centred on the world origin, so Three's
+    // distance sort cannot separate any of it and renderOrder is the only
+    // thing holding the layering up. The moon sits at -5.
+    const group = createSky().group;
+    const stars = group.children.find((child) => child.name === 'starfield-pivot');
+    const dome = findNamed(group, 'sky-dome');
+    expect(dome.renderOrder).toBe(-10);
+    expect(stars?.children[0]?.renderOrder).toBe(-20);
+    expect(dome.renderOrder).toBeLessThan(-5);
+  });
+});
+
+describe('sky horizon colour', () => {
+  it('is the same mix fog.ts fades the sea into', () => {
+    // Not a re-derivation of the shader: `skyHorizonColor` and the dome's
+    // `uDay` uniform are fed from the same `env.dayFactor`, which is what
+    // stops the sea and the sky above it drifting apart at dawn.
+    const env = createEnv();
+    const out = new THREE.Color();
+
+    env.dayFactor = 1;
+    const day = skyHorizonColor(env, out).clone();
+    env.dayFactor = 0;
+    const night = skyHorizonColor(env, out).clone();
+
+    // Day horizon is the pale one, night the deep one. If these ever swap,
+    // the sea fades to the wrong colour at exactly the wrong time of day.
+    expect(day.r + day.g + day.b).toBeGreaterThan(night.r + night.g + night.b);
+
+    env.dayFactor = 0.5;
+    const mid = skyHorizonColor(env, out).clone();
+    expect(mid.b).toBeGreaterThan(night.b);
+    expect(mid.b).toBeLessThan(day.b);
   });
 });

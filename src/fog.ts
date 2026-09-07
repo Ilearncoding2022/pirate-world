@@ -1,6 +1,7 @@
+import { Color } from 'three';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
-import { ATMOSPHERE_COLOR } from './sky';
+import { ATMOSPHERE_COLOR, skyHorizonColor } from './sky';
 
 /**
  * Aerial-perspective density, as a FRACTION OF GLOBE_RADIUS (world-scale).
@@ -32,6 +33,24 @@ const FOG_DENSITY = 2.0 / GLOBE_RADIUS;
  * near the horizon, since `env.sunColor` itself warms there.
  */
 const FOG_DAY_SUN_WEIGHT = 0.35;
+
+/**
+ * How much of the day fog colour is the sky's own horizon, versus the blend of
+ * atmosphere blue and sun tint above.
+ *
+ * There is a real sky now, and the sea has to fade into the colour that sky
+ * actually is at the horizon rather than into a constant that merely used to
+ * resemble it. Without this the two disagree most at dawn -- exactly when the
+ * horizon is the thing the player is looking at -- and the join shows as a
+ * seam. 0.25, and no more: the first attempt used 0.55 and washed the whole
+ * ocean pale at noon, erasing the `uShallow`..`uAbyss` depth ramp that the
+ * comment on FOG_DENSITY above already records losing once before to exactly
+ * this mistake. The sea has to fade toward the sky, not turn into it.
+ */
+const FOG_SKY_WEIGHT = 0.25;
+
+/** Scratch for the horizon colour, so `updateFog` allocates nothing. */
+const _horizon = new Color();
 
 /**
  * Night fog colour, as a fraction of the atmosphere shell's own brightness.
@@ -74,4 +93,8 @@ export const fogUniforms = {
  */
 export function updateFog(env: WorldEnv): void {
   fogUniforms.uFogColorDay.value.copy(ATMOSPHERE_COLOR).lerp(env.sunColor, FOG_DAY_SUN_WEIGHT);
+  // Then pulled most of the way to the sky's own horizon. `skyHorizonColor`
+  // mixes the dome's two horizon constants by `env.dayFactor`, which is the
+  // same number the dome's shader mixes them by, so these cannot drift apart.
+  fogUniforms.uFogColorDay.value.lerp(skyHorizonColor(env, _horizon), FOG_SKY_WEIGHT);
 }
