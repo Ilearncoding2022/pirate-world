@@ -286,7 +286,7 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's three buttons; heading and lat/long live on the radar panel |
+| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
@@ -294,6 +294,7 @@ shader.
 | `fishsim.ts` | `createFishingSim(rng?, extraShots?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
 | `fishrender.ts` | `createFishRenderer(canvas)` | 2D canvas, like `radar.ts`; the only reader of `SpeciesArt` |
 | `fishing.ts` | `createFishing(deps)`, `SESSION_COST` | the overlay: card DOM, input capture, gold and book bookkeeping |
+| `fishcover.ts` | `createFishCover(deps)` | the activity screen [FISH] opens; holds the power gate and nothing else |
 | `fishbook.ts` | `createFishBookStore(record)`, `createFishBook(store, wallet)` | the catch record, and the panel that shows it |
 | `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers |
 | `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CAPACITY` | the bought backup cell; the only charge in the world nothing recharges |
@@ -1276,6 +1277,37 @@ touched: it is a stop, not a teleport.
 
 The power is not refunded on an abort. Escape ends the session and shows the
 summary; it does not undo the purchase.
+
+### The cover screen, and where the power gate lives
+`[FISH]` no longer starts a session. It opens `fishcover.ts` — one piece of
+art and two doors, START FISHING and FISHING RECORD — and the record's own key
+has come off the dock, because a dock carrying a menu is not a set of
+controls.
+
+The screen knows nothing about either destination; `main.ts` hands it two
+callbacks. Three things about the arrangement are deliberate:
+
+- **`[FISH]` is no longer gated on power.** It opens a menu, and a menu must
+  not be locked by the price of one thing on it — a player with a flat battery
+  is exactly the player who wants to look at their record. START FISHING
+  carries the gate instead, which is where the charge is actually made. It is
+  still an affordance and not a lock: `fishing.open()` re-tests the plant and
+  refuses on its own account, and `onStart` hands the answer back so a refusal
+  leaves the cover up rather than closing onto nothing.
+- **FISHING RECORD does not close the cover.** The record's overlay is
+  `z-index` 40 and the cover is 20, so it opens on top and closing it comes
+  back to the cover with no coordination between the two modules at all. The
+  fishing card is 30, between them, and START FISHING closes the cover first —
+  a session replaces the activity screen rather than sitting on it.
+- **The screen is redrawn every frame it is up.** The world is frozen but the
+  power plant is not, so a player who opens it at a berth on 40% watches START
+  FISHING come alive without touching anything — the same reason FISH AGAIN on
+  the summary is re-read rather than set once.
+
+The art is a CSS `background-image` on an element that ships `display: none`,
+so the 2.6 MB file is not fetched until the screen is first opened. The
+element carries the painting's own deep navy as a `background-color`
+underneath, which is what that first beat looks like.
 
 ### Card units
 The simulation runs in **card units** and knows nothing about pixels: x in

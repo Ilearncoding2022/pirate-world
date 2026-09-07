@@ -20,11 +20,10 @@ Then open the URL Vite prints (http://localhost:5173 by default).
 | `A` / `←` / on-screen ◀ | Turn to port |
 | `D` / `→` / on-screen ▶ | Turn to starboard |
 | Mouse wheel | Zoom the follow camera |
-| on-screen `[FISH]` | Start a fishing session — costs half the reserve |
-| on-screen `[FISH BOOK]` | Open the record of every species |
+| on-screen `[FISH]` | Open the fishing screen — start a session, or read the record |
 | on-screen `[SHOP]` | Open the chandlery — only alongside a berth |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
-| `Esc` | End a fishing session, or close the fish book |
+| `Esc` | End a fishing session, or close any panel |
 
 The ship cannot sail onto land. Running at a coastline stops the ship; turn away to get free.
 
@@ -121,7 +120,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   500 gold go into a locker that holds a hundred; a session may reach ten of
   them, and only after its own ten are gone. Both survive a reload.
 - **Fishing.** Anywhere on the globe, docked or not, day or night: press
-  `[FISH]` and the world stops. The ship comes to a dead halt, the sea and the
+  `[FISH]` and the world stops behind a cover screen with two ways in —
+  START FISHING, and the FISHING RECORD.
+  Start a session and The ship comes to a dead halt, the sea and the
   sky freeze behind a dimmed 9:16 card, and you get thirty seconds and ten
   harpoon shots at five rows of fish. The harpoon swings under the boat and
   fires straight along whatever angle it is at, so the whole game is timing.
@@ -132,9 +133,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   one. The shallow water is thick — row 1 keeps a dozen fish alive and row 2
   eight — and the top of the table is deliberately thin: a legendary is 2% of
   even the deepest row's spawns, an epic 9%. Gold and the book survive a reload.
-  The session costs **half the reserve**, taken the moment it starts, and the
-  button is dead below that — but the panels keep charging while you fish, at
-  the elevation the sun was frozen at. There is no refund for quitting early.
+  The session costs **half the reserve**, taken the moment it starts, and
+  START FISHING is dead below that — though the record beside it never is,
+  because a flat battery is exactly when you want to read it. The panels keep
+  charging while you fish, at the elevation the sun was frozen at. There is no refund for quitting early.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the
   world is built from. Under it, a dial shows where the ship stands in its own

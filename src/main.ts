@@ -18,6 +18,7 @@ import { createPostFx } from './postfx';
 import { createRecords } from './save';
 import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
+import { createFishCover } from './fishcover';
 import { createShop } from './shop';
 import { createQuality } from './quality';
 import { createReflection } from './reflection';
@@ -150,6 +151,32 @@ function startGame(): void {
 
   const fishBook = createFishBook(records.book, records.wallet);
 
+  /*
+   * The activity's cover screen, and the only thing [FISH] opens now.
+   *
+   * Both callbacks are one line and both are deliberately here rather than
+   * inside `fishcover.ts`: the cover knows it has two doors and nothing about
+   * where either leads, which is what keeps it a screen instead of a second
+   * place the overlays are coordinated.
+   *
+   * `onStart` hands back whether a session actually began. `fishing.open()`
+   * re-tests the plant and can still refuse -- a disabled attribute is an
+   * affordance, never a lock -- and the cover uses the answer to decide
+   * whether to close, so a refusal leaves the player looking at the screen
+   * they pressed rather than at the sea.
+   *
+   * `onRecord` does NOT close the cover. The record's overlay outranks it in
+   * the stacking order, so it opens on top and closing it comes back here.
+   */
+  const fishCover = createFishCover({
+    energy,
+    onStart: () => fishing.open(),
+    onRecord: () => fishBook.open(),
+    // Same halt, and the same reason, as the fishing card's own: the hull
+    // stops before the first frozen frame runs, so the world resumes from
+    // rest rather than leaping forward on the frame the screen closes.
+    onOpen: () => ship.halt(),
+  });
   // The chandlery. It knows what things cost and nothing about where the ship
   // is; the berth test is below, beside the other two overlays' guards.
   const shop = createShop({
@@ -157,18 +184,14 @@ function startGame(): void {
     battery: records.battery,
     harpoons: records.harpoons,
   });
+
   // hud.ts owns whether [FISH] looks pressable; this owns what pressing it does.
   // The overlay test is here and not in the HUD because the HUD does not know
   // the overlays exist, and `fishing.open()` re-tests the tank on its own
   // account -- a disabled attribute is an affordance, never a lock.
   document.getElementById('btn-fish')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) return;
-    fishing.open();
-  });
-
-  document.getElementById('btn-fishbook')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) return;
-    fishBook.open();
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    fishCover.open();
   });
 
   // The berth is re-tested here rather than trusted off the button, on the
@@ -177,7 +200,7 @@ function startGame(): void {
   // project's one definition of docked, so this and the key agree by
   // construction.
   document.getElementById('btn-shop')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
     if (energy.state.mode !== 'docked') return;
     // The hull is already stopped -- a berth is a two-second dwell -- but the
     // halt is what makes "the world resumes from rest" true of this overlay
@@ -242,7 +265,7 @@ function startGame(): void {
     // themselves rather than latched at the call sites, because the fish book
     // closes on its own Escape key and its own close button and tells nobody: a
     // flag set where `open()` is called would strand the world stopped.
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen) {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) {
       // The plant keeps running -- a session costs half the tank and the sun is
       // still up, so recharging through one is the point. It bills a resting
       // hull; see `restingSnapshot`. It also keeps the berth alive under the
@@ -250,6 +273,10 @@ function startGame(): void {
       // would make browsing cost the charge the visit was for.
       energy.update(dt, restingSnapshot(), env);
       if (fishing.isOpen) fishing.update(dt);
+      // The plant is still running under the cover screen, so START FISHING
+      // has to be re-read against it: a player who opens this at a berth on
+      // 40% watches the button come alive without touching anything.
+      if (fishCover.isOpen) fishCover.update();
       hud.update(ship.state, energy.state, wind.state);
       // Redrawn but not advanced: `env` is frozen with the rest of the world,
       // so this repaints the same reading. It has to run at all because the

@@ -210,18 +210,6 @@ function formatGold(gold: number): string {
   return digits.replace(/\B(?=(\d{3})+$)/g, THIN_SPACE);
 }
 
-/**
- * The tank a fishing session costs, and therefore the level under which the
- * [FISH] button is dead.
- *
- * It is deliberately NOT imported from `fishing.ts`'s `SESSION_COST`. The two
- * numbers happen to be equal and are not the same claim: one is what the
- * overlay charges, the other is what the panel promises before it is charged.
- * `fishing.open()` re-tests the tank itself and refuses on its own account, so
- * this is an affordance, never the gate — the HUD cannot spend anything.
- */
-const FISH_MIN_LEVEL = 0.5;
-
 /* ------------------------------------------------------------------ */
 /* Wind                                                                */
 /* ------------------------------------------------------------------ */
@@ -470,14 +458,17 @@ export function createHud(wallet: Wallet): {
   const writeGold = textWriter(document.getElementById('hud-gold'));
   wallet.onChange((gold) => writeGold(formatGold(gold)));
 
-  // [FISH] is an affordance, not a lock: `fishing.open()` re-tests the tank
-  // and refuses on its own account. What this buys is the player learning why
-  // the button is dead without having to press it and get nothing.
-  const writeFishGate = gateWriter(document.getElementById('btn-fish'), 'Needs 50% power');
-
-  // [SHOP] on the same terms, and for the same reason: `main.ts` re-tests the
-  // berth before it opens anything. A shop key is dead at sea because the shop
-  // is the berth's, not the ship's.
+  // [SHOP] is an affordance, not a lock: `main.ts` re-tests the berth before
+  // it opens anything. A shop key is dead at sea because the shop is the
+  // berth's, not the ship's.
+  //
+  // [FISH] used to be gated here too, against half a tank. It is not any more,
+  // and the reason is worth keeping: it opens the activity's cover screen
+  // rather than a session, and the record is one of the two doors on that
+  // screen. A player with a flat battery is exactly the player who wants to
+  // look at their record, and a key locked by the price of the OTHER thing on
+  // the menu would have shut them out of it. `fishcover.ts` holds the power
+  // gate now, on the button that actually spends.
   const writeShopGate = gateWriter(
     document.getElementById('btn-shop'),
     'Only alongside a berth',
@@ -545,10 +536,6 @@ export function createHud(wallet: Wallet): {
         writeRsvSegments(litSegments(cellFrac, RSV_SEGMENTS));
       }
 
-      // Tested on the raw levels rather than the clamped one, so the button
-      // answers to the sim and not to the panel's own presentation of it, and
-      // on both tanks because that is what a session may be paid for out of.
-      writeFishGate(level + reserve >= FISH_MIN_LEVEL);
       // A berth and nothing else. `energy.mode` is the one definition of
       // docked in the project -- see `wind.ts`, which shelters against the
       // same test -- so the key cannot disagree with the plant about whether

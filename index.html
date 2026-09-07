@@ -160,17 +160,15 @@
            that can be pressed looks like a key, so anything that looks like a
            key can be pressed.
 
-           [FISH] ships ARMED, with no title, because the sim starts on a full
-           tank. hud.ts reads that state back off the markup rather than
-           assuming it, so the first frame writes no attribute at all -- the
-           same contract the POWER block's shipped-lit segments keep. -->
+           [FISH] opens the activity's cover screen, and the two ways into the
+           activity -- a session and the record -- are buttons on that. It
+           carries no power gate any more: it opens a menu, and a menu must not
+           be locked by the price of one thing on it. START FISHING over there
+           holds that gate, which is where the charge is actually made. -->
       <nav class="dock" aria-label="Ship activities">
         <div class="dock__row">
-          <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Go fishing">
+          <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Fishing">
             <span class="dock__key">FISH</span>
-          </button>
-          <button id="btn-fishbook" class="dbtn dock__btn" type="button" aria-label="Open the fish book">
-            <span class="dock__key">FISH BOOK</span>
           </button>
         </div>
         <!-- Under [FISH] rather than beside it, because it is not a thing the
@@ -353,7 +351,7 @@
       >
         <header class="fishbook__head">
           <span class="panel__dot"></span>
-          <h2 class="fishbook__title" id="fishbook-title">FISH BOOK</h2>
+          <h2 class="fishbook__title" id="fishbook-title">FISHING RECORD</h2>
           <button class="fishbook__close" id="fishbook-close" type="button" aria-label="Close">
             &#10005;
           </button>
@@ -366,6 +364,131 @@
     </div>
 
     <!-- END FISH BOOK -->
+
+    <!-- ===================== FISHING COVER =====================
+         What [FISH] opens. Outside .hud for the same reason the other
+         overlays are: .hud is pointer-events:none and this needs the pointer.
+
+         It sits BELOW the fishing card and the record in the stacking order,
+         on purpose. FISHING RECORD leaves this screen up and opens on top of
+         it, so closing the record comes back here rather than dumping the
+         player into the world; START FISHING closes it first, because a
+         session replaces the cover rather than sitting on it.
+
+         The price on the button ships EMPTY and is written by fishcover.ts
+         from `SESSION_COST`. A figure typed here would go stale the first time
+         the session's cost is retuned, and the screen would advertise a price
+         the game does not charge. -->
+    <!-- FISHING COVER -->
+    <div class="fishcover" id="fishcover" hidden aria-hidden="true">
+      <div class="fishcover__backdrop" id="fishcover-backdrop"></div>
+
+      <section
+        class="fishcover__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="fishcover-title"
+      >
+        <!-- The art is a background rather than an <img>, so the panel's own
+             aspect ratio decides the crop and the picture can never push the
+             buttons off the bottom of a short window. -->
+        <div class="fishcover__art" aria-hidden="true"></div>
+
+        <button class="fishcover__close" id="fishcover-close" type="button" aria-label="Close">
+          &#10005;
+        </button>
+
+        <div class="fishcover__body">
+          <h2 class="fishcover__title" id="fishcover-title">FISHING</h2>
+          <p class="fishcover__blurb">
+            Thirty seconds, ten harpoons, and whatever the deep water sends up.
+          </p>
+
+          <div class="fishcover__actions">
+            <button class="fbtn fbtn--go fishcover__btn" id="fishcover-start" type="button">
+              Start fishing <span class="fbtn__cost" id="fishcover-cost"></span>
+            </button>
+            <button class="fbtn fishcover__btn" id="fishcover-record" type="button">
+              Fishing record
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <!-- END FISHING COVER -->
+
+    <!-- ===================== SHOP =====================
+         The chandlery. Outside .hud for the same reason the other two
+         overlays are: .hud is pointer-events:none and this needs the pointer.
+         Ships hidden, and only ever opened alongside a berth.
+
+         Every figure in it -- the two prices, the cell's size, the bundle's
+         size -- ships EMPTY and is written by shop.ts from the constants in
+         `shop.ts` and `harpoons.ts`. A price typed into this file would be a
+         price that goes stale the first time the balance is touched, and the
+         shop would advertise a deal it does not honour. -->
+    <!-- SHOP -->
+    <div class="shop" id="shop" hidden aria-hidden="true">
+      <div class="shop__backdrop" id="shop-backdrop"></div>
+
+      <section
+        class="shop__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="shop-title"
+      >
+        <header class="shop__head">
+          <span class="panel__dot"></span>
+          <h2 class="shop__title" id="shop-title">CHANDLERY</h2>
+          <button class="shop__close" id="shop-close" type="button" aria-label="Close">
+            &#10005;
+          </button>
+        </header>
+
+        <div class="shop__body">
+          <!-- Backup cell -->
+          <article class="offer offer--cell">
+            <div class="offer__text">
+              <h3 class="offer__name">BACKUP CELL</h3>
+              <p class="offer__detail" id="shop-battery-detail"></p>
+              <p class="offer__warn">
+                Spent only once the main tank is dry. No berth and no sun will
+                put it back.
+              </p>
+            </div>
+            <div class="offer__side">
+              <span class="offer__stock" id="shop-battery-stock"></span>
+              <button class="fbtn offer__buy" id="shop-battery-buy" type="button">
+                Buy <span class="fbtn__cost" id="shop-battery-price"></span>
+              </button>
+            </div>
+          </article>
+
+          <!-- Spare harpoons -->
+          <article class="offer offer--harpoon">
+            <div class="offer__text">
+              <h3 class="offer__name">SPARE HARPOONS</h3>
+              <p class="offer__detail" id="shop-harpoon-detail"></p>
+              <p class="offer__warn">
+                Fired only after a session's own ten are gone.
+              </p>
+            </div>
+            <div class="offer__side">
+              <span class="offer__stock" id="shop-harpoon-stock"></span>
+              <button class="fbtn offer__buy" id="shop-harpoon-buy" type="button">
+                Buy <span class="fbtn__cost" id="shop-harpoon-price"></span>
+              </button>
+            </div>
+          </article>
+        </div>
+
+        <footer class="shop__foot">
+          <span class="shop__foot-key">PURSE</span>
+          <span class="shop__purse" id="shop-purse">0</span>
+        </footer>
+      </section>
+    </div>
+    <!-- END SHOP -->
 
     <script type="module" src="/src/main.ts"></script>
   </body>

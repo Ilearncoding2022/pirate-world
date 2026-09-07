@@ -1899,3 +1899,445 @@ kbd {
 }
 
 /* END FISH BOOK */
+
+/* =====================================================================
+   FISHING COVER — the activity screen [FISH] opens.
+
+   One picture and two doors. It is the only full-bleed art in the game, and
+   everything here exists to keep the buttons readable over it without
+   covering it up: a scrim rather than a panel, text stacked into the dark
+   corner the painting already has, and the game's own button style laid over
+   the top so a player never has to learn a second kind of press.
+   ===================================================================== */
+/* FISHING COVER */
+
+/*
+ * z-index 20: UNDER the fishing card (30) and the record (40), and that
+ * ordering is load-bearing rather than incidental. FISHING RECORD leaves this
+ * screen up and opens on top of it, so closing the record comes back here
+ * with no coordination between the two modules at all.
+ */
+.fishcover {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--hud-pad);
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat. Same guard every other overlay carries. */
+.fishcover[hidden] {
+  display: none;
+}
+
+.fishcover__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 5, 11, 0.78);
+  backdrop-filter: blur(3px);
+}
+
+/*
+ * The panel is the picture. 16:9 rather than the art's own 7:4 because the
+ * crop is barely a sliver either side and a shape the whole HUD already
+ * agrees on is worth more than the last 40 pixels of sea.
+ *
+ * Capped in height as well as width, so a wide short window gets a smaller
+ * picture rather than one whose buttons have gone below the fold.
+ */
+.fishcover__panel {
+  position: relative;
+  width: min(92vw, 880px);
+  max-height: min(86vh, 560px);
+  aspect-ratio: 16 / 9;
+  /* 35% off, picture and buttons together. Scaled rather than re-typed for
+     the same reason the instrument panels, the legend and the dock keys are:
+     the screen is a width, a height cap, four font sizes, a padding, two gaps
+     and a close button, each with a second value in the narrow-viewport block
+     below, and trimming a dozen numbers by hand is a dozen chances to round
+     one the wrong way.
+
+     No `transform-origin`: the default centre is what keeps the panel centred
+     in the viewport as it shrinks, which is where the flex parent put it. */
+  transform: scale(0.65);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: var(--panel-glow);
+  overflow: hidden;
+  /* The clipped corner every panel in the world carries. */
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+}
+
+/*
+ * The art, and the scrim that makes it legible.
+ *
+ * Two gradients over one image in a single declaration, so the picture is
+ * fetched once and nothing sits between it and the text. The first is a wash
+ * from the bottom-left corner, which is where the painting is already darkest
+ * and therefore where the words cost the least; the second is a light overall
+ * darkening so the neon in the picture does not out-glow the buttons.
+ *
+ * `background-color` under the lot is the art's own deep navy. The image is
+ * only fetched when this screen is first shown -- it ships display:none -- so
+ * on that first open there is a beat where the panel has no picture, and a
+ * bare panel in roughly the right colour is a far better beat than a white
+ * one.
+ */
+.fishcover__art {
+  position: absolute;
+  inset: 0;
+  background-color: #071426;
+  background-image:
+    linear-gradient(
+      100deg,
+      rgba(2, 8, 18, 0.94) 0%,
+      rgba(2, 8, 18, 0.82) 26%,
+      rgba(2, 8, 18, 0.28) 52%,
+      rgba(2, 8, 18, 0.05) 72%
+    ),
+    linear-gradient(rgba(2, 8, 18, 0.22), rgba(2, 8, 18, 0.22)),
+    url("../assets/Illustrations/Activity - Fish - Cover.png");
+  background-size: cover;
+  background-position: center;
+}
+
+/* Top-right, over the art, and given its own dark disc: the corner of the
+   picture is a lit sky, and a bare glyph on it would be a guess. */
+.fishcover__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+  background: rgba(2, 8, 18, 0.6);
+  border: 1px solid rgba(63, 224, 255, 0.28);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms linear, border-color 120ms linear, background-color 120ms linear;
+}
+
+.fishcover__close:hover {
+  color: var(--cyan);
+  background: rgba(2, 8, 18, 0.85);
+  border-color: rgba(63, 224, 255, 0.6);
+}
+
+/*
+ * Everything readable, stacked into the left third.
+ *
+ * `justify-content: flex-end` puts the block on the floor of the panel rather
+ * than centred in it: the ship in the painting occupies the lower left, and
+ * text over a hull reads better than text over the open water and stars above
+ * it.
+ */
+.fishcover__body {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  width: min(100%, 380px);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 20px 22px;
+  /* The buttons inside size themselves with `cqi`, which needs a container to
+     measure. Without this they fall back to the viewport and a narrow window
+     draws them at a different size than a wide one for no reason. */
+  container-type: inline-size;
+}
+
+.fishcover__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+  text-shadow: 0 0 18px rgba(63, 224, 255, 0.5);
+}
+
+.fishcover__blurb {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: var(--ink-mute);
+}
+
+/* A column, not the fishing summary's row: these two are a first choice and a
+   second one, and side by side they would read as equals. */
+.fishcover__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Rides on .fbtn so the press is the game's press. `.fbtn` carries
+   `flex: 1 1 0` for the summary row it was authored in; in a column that
+   basis would collapse its height, so it is sized by its own content here --
+   the same correction `.offer__buy` makes in the shop. */
+.fishcover__btn {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+@media (max-width: 560px) {
+  /* The art stops being the point at this size -- there is no room for a
+     picture AND a legible column over it -- so the panel goes tall and the
+     text block takes the whole width, with the painting behind all of it. */
+  .fishcover__panel {
+    aspect-ratio: 3 / 4;
+    max-height: 86vh;
+  }
+  .fishcover__body {
+    width: 100%;
+  }
+  .fishcover__art {
+    background-image:
+      linear-gradient(
+        rgba(2, 8, 18, 0.15) 0%,
+        rgba(2, 8, 18, 0.55) 46%,
+        rgba(2, 8, 18, 0.93) 78%
+      ),
+      url("../assets/Illustrations/Activity - Fish - Cover.png");
+  }
+  .fishcover__title {
+    font-size: 17px;
+  }
+}
+
+/* END FISHING COVER */
+
+/* =====================================================================
+   SHOP — the chandlery, open only alongside a berth.
+
+   Built on the Fish Book's shell on purpose: same backdrop, same panel, same
+   notch, same head and foot. The two are the game's only full-screen reading
+   panels and a player who has opened one has learned how to leave the other.
+   What differs is the body, because a list of offers is not a list of fish.
+   ===================================================================== */
+/* SHOP */
+
+.shop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat. Same guard the fishing card carries. */
+.shop[hidden] {
+  display: none;
+}
+
+.shop__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 5, 11, 0.82);
+  backdrop-filter: blur(3px);
+}
+
+.shop__panel {
+  position: relative;
+  width: min(520px, 100%);
+  padding: 16px 18px 14px;
+  background: linear-gradient(180deg, rgba(10, 20, 31, 0.97), rgba(4, 9, 16, 0.97));
+  border: 1px solid rgba(63, 224, 255, 0.22);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.7), inset 0 0 60px rgba(63, 224, 255, 0.04);
+  /* The clipped corner every panel in the world carries. */
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+
+.shop__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(63, 224, 255, 0.14);
+}
+
+.shop__title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.28em;
+  color: var(--cyan);
+  text-shadow: 0 0 12px rgba(63, 224, 255, 0.4);
+}
+
+.shop__close {
+  padding: 2px 6px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-mute);
+  background: none;
+  border: 1px solid rgba(63, 224, 255, 0.18);
+  cursor: pointer;
+}
+
+.shop__close:hover {
+  color: var(--cyan);
+  border-color: rgba(63, 224, 255, 0.45);
+}
+
+.shop__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 0;
+}
+
+/* ---- one offer ------------------------------------------------------ */
+
+/*
+ * Text on the left, stock and price on the right. The two halves are given
+ * their space by `gap` rather than by a width on either, so a long detail
+ * line wraps instead of squeezing the button it is competing with.
+ *
+ * `--offer` is the goods' own colour, set per offer below. It tints the rule
+ * and the stock figure and nothing else: the buy button stays the cyan every
+ * other pressable thing in the world is, because the one thing a player must
+ * not have to learn twice is what a button looks like.
+ */
+.offer {
+  --offer: var(--cyan);
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  background: rgba(63, 224, 255, 0.03);
+  border-left: 2px solid var(--offer);
+}
+
+/* Violet, the backup cell's colour on the HUD, so the thing being bought and
+   the readout it will show up on are recognisably the same object. */
+.offer--cell {
+  --offer: #b05cff;
+}
+
+/* Brass, as the harpoon count in the fishing card's chrome reads. */
+.offer--harpoon {
+  --offer: var(--gold);
+}
+
+.offer__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.offer__name {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--offer);
+}
+
+.offer__detail {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+/* The small print, and it is genuinely small print: both offers have one
+   rule that is easy to miss and expensive to learn by discovering it. */
+.offer__warn {
+  margin: 5px 0 0;
+  font-size: 9.5px;
+  line-height: 1.5;
+  letter-spacing: 0.03em;
+  color: var(--ink-mute);
+}
+
+.offer__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* What is already aboard, against its ceiling. Tabular so a locker ticking
+   95 -> 100 does not shuffle the digits beside it. */
+.offer__stock {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--offer);
+  white-space: nowrap;
+}
+
+/* Rides on .fbtn, the fishing card's button, so the two panels press the
+   same. `.fbtn` is authored to share a row of the fishing card's summary and
+   carries `flex: 1 1 0` for it; here it is the only thing in a COLUMN, where
+   a basis of zero would collapse its height. Sized by its own content
+   instead, with a floor so BUY and its price do not reflow as the purse
+   crosses a power of ten. */
+.offer__buy {
+  flex: 0 0 auto;
+  min-width: 116px;
+  text-align: center;
+}
+
+/* ---- foot ----------------------------------------------------------- */
+
+.shop__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(63, 224, 255, 0.14);
+}
+
+.shop__foot-key {
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  color: var(--ink-mute);
+}
+
+/* The same brass the HUD's GOLD row and the Fish Book's footer print, because
+   it is the same purse. */
+.shop__purse {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: var(--gold);
+  text-shadow: 0 0 12px rgba(255, 196, 77, 0.35);
+}
+
+@media (max-width: 560px) {
+  /* The two halves stop competing and stack, which is the only way the buy
+     button keeps its full width on a phone. */
+  .offer {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .offer__side {
+    align-items: stretch;
+    width: 100%;
+  }
+  .offer__stock {
+    text-align: right;
+  }
+}
+
+/* END SHOP */
