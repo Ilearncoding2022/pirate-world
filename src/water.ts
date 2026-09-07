@@ -371,8 +371,22 @@ export function createWater(
       // Integrate, never multiply by elapsed time: see uOffsetSwell. `dir`
       // holds its last bearing through a calm, so the residual swell keeps
       // running the way the wind that raised it was going.
+      //
+      // The step is NEGATIVE, and that sign is the whole of which way the sea
+      // runs. `waveField` in `waterglsl.ts` samples the noise at `p + offset`,
+      // so marching the offset one way slides the pattern the OTHER way: to
+      // make the crests travel downwind -- the way a wind-driven sea actually
+      // moves, and the way `WindState.direction` points -- the offset has to
+      // march upwind. It was added rather than subtracted until now, which put
+      // the whole sea running into the weather that raised it.
+      //
+      // All three layers take the same sign, so they still travel together and
+      // the ratios between SWELL/WAVE/CHOP_SPEED are untouched. Nothing else
+      // needs a matching edit: `ship.ts` and `wavefield.ts` read these very
+      // Vector3s (see `Water.offsets`), so the hull and the CPU port of the
+      // field turn round with the shader rather than against it.
       const flow = CALM_DRIFT + (1 - CALM_DRIFT) * strength;
-      const step = (dt * flow) / GLOBE_RADIUS;
+      const step = -(dt * flow) / GLOBE_RADIUS;
       const dir = wind.direction;
       uniforms.uOffsetSwell.value.addScaledVector(dir, SWELL_SPEED * step);
       uniforms.uOffsetWave.value.addScaledVector(dir, WAVE_SPEED * step);
