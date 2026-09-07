@@ -33,6 +33,7 @@ import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
 import { createBattleUi } from './battleui';
 import { createBattleCover } from './battlecover';
+import { createMenu } from './menu';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
 import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, ShipState } from './types';
 import { GLOBE_RADIUS } from './geo';
@@ -315,6 +316,32 @@ async function startGame(): Promise<void> {
   const battleCover = createBattleCover({ onReady: onCoverReady });
 
   /*
+   * The Escape menu, and the controls guide inside it.
+   *
+   * `menu.ts` owns the Escape key outright -- opening as well as closing --
+   * so the two halves of one keypress can never be split across two listeners
+   * whose order decides what the player sees. What this file owns is whether
+   * opening is ALLOWED, and that is the same question the [FISH] and [SHOP]
+   * keys ask: nothing else may own the screen, no fight may be running or
+   * about to, and the hull must not be in a funnel. The overlays are left out
+   * of `canOpen` on purpose -- they close on their OWN Escape, and this menu
+   * must not open behind the card the same press just dismissed.
+   */
+  const menu = createMenu({
+    canOpen: () =>
+      !fishing.isOpen &&
+      !fishBook.isOpen &&
+      !shop.isOpen &&
+      !fishCover.isOpen &&
+      !battleUi.isOpen &&
+      !battleCover.isOpen &&
+      hazards.state.phase === 'free',
+    // The halt every overlay makes, for the fishing card's reason: it is what
+    // makes "the world resumes from rest" true of this screen too.
+    onOpen: () => ship.halt(),
+  });
+
+  /*
    * The fight in progress. Replaced wholesale at every contact rather than
    * reset, which is why `battle.ts` has no reset to call: one sim is built per
    * battle and thrown away with it, exactly as `fishing.ts` builds one sim per
@@ -574,6 +601,7 @@ async function startGame(): Promise<void> {
   // account -- a disabled attribute is an affordance, never a lock.
   document.getElementById('btn-fish')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (menu.isOpen) return;
     // Nor during a cannon fight. docs/BATTLE_PLAN.md argues this guard is not
     // needed, on the grounds that a fight opens synchronously from `onContact`
     // and no contact can happen under an overlay -- both true, and both about
@@ -603,6 +631,7 @@ async function startGame(): Promise<void> {
   // construction.
   document.getElementById('btn-shop')?.addEventListener('click', () => {
     if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (menu.isOpen) return;
     if (battleUi.isOpen || battleCover.isOpen) return;
     if (hazards.state.phase !== 'free') return;
     if (energy.state.mode !== 'docked') return;
@@ -893,7 +922,8 @@ async function startGame(): Promise<void> {
       fishBook.isOpen ||
       shop.isOpen ||
       fishCover.isOpen ||
-      battleCover.isOpen
+      battleCover.isOpen ||
+      menu.isOpen
     ) {
       // The plant keeps running -- a session costs half the tank and the sun is
       // still up, so recharging through one is the point. It bills a resting

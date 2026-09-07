@@ -297,7 +297,8 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Also publishes `--telemetry-h` / `--telemetry-w`, the panel's rendered box, which the dock and the legend are positioned off |
+| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
+| `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?)`; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
@@ -840,23 +841,27 @@ up to 34.8°. Before the fix every one of those runs ended pinned at 89.97° N �
 the ship reached the pole and stayed there, spinning. It now sails over the top
 and down the far side.
 
-### Three boxes hang off the telemetry panel
+### The dock hangs off the telemetry panel
 Every box on the HUD is absolutely positioned, so none of them is in flow with
 any other and no selector can see where a neighbour's edge falls. The telemetry
-panel is also content-sized in both directions — it grew a row the day GOLD
-landed in it, and its width is set by its longest power tag. So the two boxes
-that must sit against it are positioned off custom properties `hud.ts`
-publishes from a `ResizeObserver`: `--telemetry-h` for the dock hanging under
-its bottom edge, `--telemetry-w` for the CONTROLS legend beside its right one.
-Both are the RENDERED box, measured after `scale(var(--panel-scale))`, so CSS
-uses them as offsets without scaling them again. Both carry a stylesheet
-fallback, only ever seen on a browser with no `ResizeObserver` at all.
+panel is also content-sized — it grew a row the day GOLD landed in it — so the
+dock beneath it is positioned off `--telemetry-h`, a custom property `hud.ts`
+publishes from a `ResizeObserver`. It is the RENDERED height, measured after
+`scale(var(--panel-scale))`, so CSS uses it as an offset without scaling it
+again, and it carries a stylesheet fallback only ever seen on a browser with no
+`ResizeObserver` at all.
 
-The corners they leave are deliberate. The legend moved out of the bottom-left
-so the **helm** could have it: a corner is a thumb's reach on a phone without
-the hand leaving the edge, and the centre of the bottom edge — where the pad
-used to sit — is the water directly ahead of the bow, which is the one part of
-the screen a player steering is actually looking at.
+A `--telemetry-w` existed for one commit, for a CONTROLS card hung off the
+panel's right edge. The card is a pane of the Escape menu now — it was half
+size to afford the corner it stood in and `display: none` below 560px of
+viewport height, which is the wrong place for the one thing explaining the
+on-screen keys — and the property went with it. See `menu.ts`.
+
+The bottom-left corner is the **helm's**, and that is deliberate: a corner is a
+thumb's reach on a phone without the hand leaving the edge, and the centre of
+the bottom edge — where the pad used to sit — is the water directly ahead of
+the bow, which is the one part of the screen a player steering is actually
+looking at.
 
 The pad itself is a T, not a cross: `up` alone on row 1 column 2, and `left`,
 `down`, `right` abreast on row 2. Row 1's outer columns are left empty rather
@@ -1165,25 +1170,6 @@ units per second at `OCEAN_CAP`, and wave height runs as `strength²`, where
 length by, so a full-length arrow and a full sea arrive together. Height square,
 drift linear: a freshening wind lengthens the swell noticeably before it starts
 throwing it about.
-
-**The trap: the drift offsets are positions, not velocities.** The shader used
-`p + DRIFT * uTime`, which encodes where the field has *always* been — so
-changing the drift rewrites its whole history and every shift of wind would
-teleport the ocean by minutes of travel. They are now integrated on the CPU
-each frame, so a change of wind changes only where the sea goes next. Measured:
-a 90° shift moves the field by one frame's travel, 0.025 world units. The lake
-clock still works because `motion` is constant in time, so scaling an
-integrated offset is the same as integrating a scaled rate.
-
-Two floors, both deliberate departures from strict proportionality. Lulls run
-3–15 s, and a sea whose height and drift both go to zero is a mirror — which
-reads as a bug, not as weather. `CALM_DRIFT` (0.2) and `CALM_INTENSITY` (0.16)
-keep the swell running through one, which is roughly what real swell does.
-They are named for a state the wind no longer has, and they still earn their
-place: at `LULL_SPEED` the wind's own contribution is a hundredth of the
-height, so these two are still what the sea is made of between gusts. Between those floors and a full gale the law is exact:
-half the wind gives 25.0% of the height. Coastal foam keeps its own fixed
-drift — surf runs onto the beach, not downwind.
 
 ### The two speeds
 
@@ -1659,7 +1645,7 @@ anything across a reload.
 ```ts
 if (
   fishing.isOpen || fishBook.isOpen || shop.isOpen ||
-  fishCover.isOpen || battleCover.isOpen
+  fishCover.isOpen || battleCover.isOpen || menu.isOpen
 ) { /* frozen frame */ return; }
 ```
 
@@ -1690,6 +1676,29 @@ sun's elevation" the brief promises.
 `InputState` while paused, but key *releases* are still tracked, so a W held
 across a session does not stick to the throttle when it ends. `fishing.ts` adds
 its own `window` keydown for Space and Escape.
+
+### One owner for the Escape key
+`menu.ts` opens AND closes on Escape, in a single `window` listener, and that
+is not tidiness. Split across two — `main.ts` opening, `menu.ts` closing — one
+press would reach both handlers and the menu would open and shut on the same
+event, with the registration order of two listeners deciding whether the player
+saw anything at all. So the key has one owner.
+
+What `main.ts` keeps is the *permission*, as the `canOpen` callback, because
+the answer is "nothing else owns the screen" and `menu.ts` cannot see a fight,
+a cover card or a hazard phase. A callback rather than a flag, for the pause
+contract's reason: a value read once at construction is a lie by the second
+frame.
+
+The other overlays are deliberately **not** in `canOpen`. Each closes on its
+own Escape, guarded on its own `open`, so a press that dismisses the fishing
+card would otherwise open the menu behind it on the very same event. Leaving
+them out means Escape closes what is in front of you, and opens the menu only
+when nothing is.
+
+`battleui.ts` still does not handle Escape at all, and the menu inherits that:
+`canOpen` is false for the whole of a fight and its cover. A fight the player
+can pause is a fight with no stake in it.
 
 ### The resting snapshot
 Energy is billed against a snapshot of the ship with the engine pinned at zero,

@@ -30,7 +30,7 @@ the first frame you are handed does not stutter.
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. One a second, ten rounds |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
-| `Esc` | End a fishing session, or close any panel. It will not get you out of a battle |
+| `Esc` | Open the menu — and the controls guide inside it. Also ends a fishing session or closes any panel; it will not get you out of a battle |
 
 The ship cannot sail onto land. Running at a coastline stops the ship; turn away to get free.
 
@@ -235,8 +235,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the middle of the helm pad is gone — at hub size its graduations fell below a
   pixel — and the scope's rim carries the direction instead. The purse rides
   the telemetry panel in brass, the one warm figure on a cold instrument.
-  The CONTROLS card sits beside the telemetry panel, and the helm keys have the
-  bottom-left corner to themselves: a corner is a thumb's reach on a phone
+  The controls guide is behind `Esc` now, as a page of the menu, rather than a
+  half-size card pinned to a corner of the HUD — it was too small to read where
+  it stood, and below 560 pixels of window height it was not drawn at all. The
+  helm keys have the bottom-left corner to themselves: a corner is a thumb's reach on a phone
   without the hand leaving the edge, and it hands the middle of the bottom edge
   back to the water you are steering over. The pad is a T rather than a cross —
   THRUST alone above PORT, REVERSE and STARBOARD — with thrust and reverse

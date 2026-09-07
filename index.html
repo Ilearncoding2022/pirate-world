@@ -313,23 +313,6 @@
         </button>
       </nav>
 
-      <!-- ===================== LEGEND =====================
-           Beside the telemetry panel rather than in the bottom-left corner,
-           which is the helm's now. It is hung off the panel's right edge by
-           `--telemetry-w`, which `hud.ts` publishes for the same reason it
-           publishes the height the dock hangs off. -->
-      <details class="legend" open>
-        <summary class="legend__summary">
-          <span class="legend__chev">&#9656;</span>
-          <span>CONTROLS</span>
-        </summary>
-        <ul class="legend__list">
-          <li><kbd>W</kbd><kbd>S</kbd><span>Thrust / Reverse</span></li>
-          <li><kbd>A</kbd><kbd>D</kbd><span>Port / Starboard</span></li>
-          <li><kbd>&#8593;</kbd><kbd>&#8595;</kbd><kbd>&#8592;</kbd><kbd>&#8594;</kbd><span>Same as WASD</span></li>
-          <li><kbd>Scroll</kbd><span>Zoom camera</span></li>
-        </ul>
-      </details>
     </div>
 
     <!-- ===================== FISHING CARD =====================
@@ -507,6 +490,55 @@
       </section>
     </div>
     <!-- END BATTLE COVER -->
+
+    <!-- ===================== MENU =====================
+         Escape opens this. It is the controls guide's home now: the guide was
+         a card pinned to the HUD, always on screen, half size to afford the
+         corner it stood in, and hidden outright below 560px of viewport
+         height -- so on the small screens where the on-screen keys matter
+         most, the thing explaining them was not there. Behind a key it can be
+         read at a size that is legible, and the corner went to the helm.
+
+         Two panes in one dialog, swapped by a class from menu.ts: the root,
+         and the controls list. The list below is the old .legend markup,
+         unchanged apart from losing its <details> wrapper -- it does not need
+         to collapse any more, because it is not taking up room it has to
+         apologise for. -->
+    <!-- MENU -->
+    <div class="menu" id="menu" hidden aria-hidden="true">
+      <div class="menu__backdrop" id="menu-backdrop"></div>
+
+      <section class="menu__panel" role="dialog" aria-modal="true" aria-labelledby="menu-title">
+        <button class="menu__close" id="menu-close" type="button" aria-label="Close">&#10005;</button>
+
+        <!-- The root pane. -->
+        <div class="menu__pane menu__pane--root">
+          <h2 class="menu__title" id="menu-title">MENU</h2>
+          <div class="menu__actions">
+            <button class="fbtn fbtn--go menu__btn" id="menu-controls" type="button">Controls</button>
+          </div>
+          <p class="menu__hint">Esc closes</p>
+        </div>
+
+        <!-- The controls pane. -->
+        <div class="menu__pane menu__pane--controls">
+          <h2 class="menu__title">CONTROLS</h2>
+          <ul class="legend__list">
+            <li><kbd>W</kbd><kbd>S</kbd><span>Thrust / Reverse</span></li>
+            <li><kbd>A</kbd><kbd>D</kbd><span>Port / Starboard</span></li>
+            <li><kbd>&#8593;</kbd><kbd>&#8595;</kbd><kbd>&#8592;</kbd><kbd>&#8594;</kbd><span>Same as WASD</span></li>
+            <li><kbd>Scroll</kbd><span>Zoom camera</span></li>
+            <li><kbd>Space</kbd><span>Harpoon / Fire a broadside</span></li>
+            <li><kbd>Esc</kbd><span>This menu, and closes any panel</span></li>
+          </ul>
+          <div class="menu__actions">
+            <button class="fbtn menu__btn" id="menu-back" type="button">Back</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <!-- END MENU -->
+
 
     <!-- ===================== SHOP =====================
          The chandlery. Outside .hud for the same reason the other two

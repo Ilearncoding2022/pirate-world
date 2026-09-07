@@ -1107,80 +1107,13 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   Legend (beside the telemetry panel) — collapsible, no JS required
+   Controls list — now a pane of the Escape menu, not a card on the HUD.
+
+   Only the list survives the move. The box that used to hold it -- the pinned
+   corner, the 0.5 scale, the backdrop blur, the collapsed <details> and the
+   two media queries that shrank and then hid it -- is gone with the card;
+   see the MENU block below for where the list lives now and why.
    ------------------------------------------------------------------- */
-
-/*
- * Half size, text and all.
- *
- * Scaled rather than re-typed at smaller numbers, for the same reason the two
- * instrument panels are: this box is four font sizes, a chevron, a grid gap
- * and seven key caps with their own min-width and height, and halving all of
- * it by hand is a dozen chances to round one figure wrong. It is also the one
- * thing on the HUD a player reads once and then never again, which is exactly
- * what should give up its space first.
- *
- * Anchored at its own top-left, so it shrinks toward the corner it is pinned
- * to and the `--hud-pad` gap survives. The transform scales the hit area with
- * the paint, so the `<details>` still opens and closes on the box the player
- * can actually see.
- *
- * It sits beside the telemetry panel rather than in the bottom-left corner it
- * used to hold, which is now the helm's. `--telemetry-w` is the panel's
- * rendered width, published by `hud.ts` for the same reason `--telemetry-h`
- * is: the two boxes are both absolutely positioned, so nothing in CSS can see
- * where the panel's right edge falls, and the panel is content-sized. The
- * `10px` is the dock's gap, so the three boxes hung off that panel are hung
- * off it by the same amount.
- */
-.legend {
-  position: absolute;
-  top: var(--hud-pad);
-  left: calc(var(--hud-pad) + var(--telemetry-w, 172px) + 10px);
-  transform: scale(0.5);
-  transform-origin: top left;
-  pointer-events: auto;
-  max-width: 240px;
-  background: rgba(6, 14, 24, 0.5);
-  border: 1px solid rgba(63, 224, 255, 0.18);
-  border-radius: 4px;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  padding: 7px 10px;
-  opacity: 0.7;
-  transition: opacity 160ms ease, border-color 160ms ease;
-}
-
-.legend:hover {
-  opacity: 1;
-  border-color: rgba(63, 224, 255, 0.4);
-}
-
-.legend__summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  list-style: none;
-  font-size: 9px;
-  letter-spacing: 0.24em;
-  color: var(--cyan-dim);
-}
-
-.legend__summary::-webkit-details-marker {
-  display: none;
-}
-
-.legend__chev {
-  display: inline-block;
-  font-size: 8px;
-  transition: transform 150ms ease;
-}
-
-.legend[open] .legend__chev {
-  transform: rotate(90deg);
-}
-
 .legend__list {
   list-style: none;
   margin: 8px 0 2px;
@@ -1280,15 +1213,6 @@ kbd {
   .wnd__arrow {
     width: 11px;
     height: 11px;
-  }
-  .legend {
-    max-width: 46vw;
-  }
-}
-
-@media (max-height: 560px) {
-  .legend {
-    display: none;
   }
 }
 
@@ -2558,6 +2482,170 @@ kbd {
 /* END BATTLE COVER */
 
 /* =====================================================================
+   MENU — Escape, and the controls guide that lives in it.
+
+   The plainest overlay in the project on purpose: no art, no clock, no
+   stakes. It borrows the fishing cover's backdrop and the shop's panel
+   voice, because a player who has opened either has learned how to leave
+   this one, and it is the one screen here whose whole job is to be
+   unremarkable.
+
+   z-index 45: above the fight's own overlay at 40, below the battle cover
+   at 50 and the blackout at 90. In practice it can never be up with any of
+   them -- `main.ts` refuses to open it over a fight, a cover or a card --
+   so the rank is a statement about what would win rather than a case that
+   happens.
+   ===================================================================== */
+/* MENU */
+
+.menu {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+}
+
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat. Same guard every other overlay carries. */
+.menu[hidden] {
+  display: none;
+}
+
+.menu__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 5, 11, 0.78);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+/*
+ * Content-sized, not a fixed card.
+ *
+ * The two panes are different heights -- one button against six rows of
+ * keys -- and a fixed box would either crop the list or leave the root
+ * floating in an empty rectangle. It is capped rather than sized, so the
+ * panel is as big as whichever pane is showing and no bigger.
+ */
+.menu__panel {
+  position: relative;
+  min-width: min(86vw, 300px);
+  max-width: min(92vw, 420px);
+  max-height: 86vh;
+  overflow-y: auto;
+  padding: 20px 22px 18px;
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  background: rgba(4, 10, 18, 0.92);
+  box-shadow: var(--panel-glow);
+  /* The clipped corner every panel in the world carries. */
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+}
+
+/* The fishing cover's close button, to the pixel: same corner, same disc,
+   same hover. It is the same gesture on the same kind of screen. */
+.menu__close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+  background: rgba(2, 8, 18, 0.6);
+  border: 1px solid rgba(63, 224, 255, 0.28);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms linear, border-color 120ms linear, background-color 120ms linear;
+}
+
+.menu__close:hover {
+  color: var(--cyan);
+  background: rgba(2, 8, 18, 0.85);
+  border-color: rgba(63, 224, 255, 0.6);
+}
+
+/*
+ * The two panes, swapped by `menu--controls` from menu.ts.
+ *
+ * Toggled with `display` rather than opacity or a transform: a hidden pane
+ * must not be reachable by Tab, and the panel is content-sized, so a pane
+ * that was merely invisible would still be setting the box's height.
+ */
+.menu__pane {
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.menu:not(.menu--controls) .menu__pane--root,
+.menu--controls .menu__pane--controls {
+  display: flex;
+}
+
+.menu__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+  text-shadow: 0 0 18px rgba(63, 224, 255, 0.5);
+}
+
+/* A column, like the fishing cover's: these are destinations, not a row of
+   equals. */
+.menu__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+/* Rides on .fbtn so the press is the game's press. `.fbtn` carries
+   `flex: 1 1 0` for the summary row it was authored in; in a column that
+   basis would collapse its height, so it is sized by its own content here --
+   the same correction `.fishcover__btn` and `.offer__buy` make. */
+.menu__btn {
+  flex: 0 0 auto;
+  text-align: center;
+}
+
+/* The one line telling a player how to leave, in the panel's quietest voice.
+   It is on the root pane only: by the time anyone is reading the controls
+   list they have already found the key. */
+.menu__hint {
+  margin: 2px 0 0;
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--ink-mute);
+}
+
+/*
+ * The controls list, at full size at last.
+ *
+ * `.legend__list` still owns the rows -- the markup moved out of the HUD
+ * unchanged -- and this only undoes the cramping the old half-scale card
+ * needed. Nothing here is a new design; it is the same list, readable.
+ */
+.menu__pane--controls .legend__list {
+  margin: 4px 0 2px;
+  gap: 8px;
+}
+
+.menu__pane--controls .legend__list li {
+  font-size: 11px;
+}
+
+/* END MENU */
+
+/* =====================================================================
    SHOP — the chandlery, open only alongside a berth.
 
    Built on the Fish Book's shell on purpose: same backdrop, same panel, same
@@ -3177,8 +3265,7 @@ kbd {
  */
 body.in-battle .panel--telemetry,
 body.in-battle .panel--radar,
-body.in-battle .dock,
-body.in-battle .legend {
+body.in-battle .dock {
   display: none;
 }
 
