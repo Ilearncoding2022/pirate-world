@@ -331,34 +331,48 @@ function formatRate(rate: number): string {
 }
 
 /**
- * Publishes the telemetry panel's height as `--telemetry-h` on the HUD root.
+ * Publishes the telemetry panel's size as `--telemetry-h` and `--telemetry-w`
+ * on the HUD root.
  *
- * The dock hangs under that panel, and nothing in CSS can see where its bottom
- * edge falls: both boxes are absolutely positioned, so they are not in flow
- * with each other and no selector relates their geometry. The panel is also
- * content-sized — it grew a row the day GOLD landed in it — so a hard offset
- * in the stylesheet would be a number that goes stale the next time somebody
- * adds an instrument and never opens style.css.
+ * Two boxes hang off that panel and neither is in flow with it: the dock sits
+ * under its bottom edge and the legend beside its right one. Every box on this
+ * HUD is absolutely positioned, so no selector relates their geometry, and the
+ * panel is content-sized in both directions — it grew a row the day GOLD
+ * landed in it, and its width is its longest power tag — so a hard offset in
+ * the stylesheet would be a number that goes stale the next time somebody adds
+ * an instrument and never opens style.css.
  *
- * Same write-through discipline as everything else in this file: the property
- * is set only when the measured height actually changes, which after startup
- * is a window resize and nothing else.
+ * Both figures are the RENDERED box: `getBoundingClientRect` is measured after
+ * the panel's `scale(var(--panel-scale))`, which is what makes them directly
+ * usable as offsets rather than something CSS has to scale again.
+ *
+ * Same write-through discipline as everything else in this file: a property is
+ * set only when its measurement actually changes, which after startup is a
+ * window resize and nothing else.
  */
-function trackTelemetryHeight(): void {
+function trackTelemetrySize(): void {
   const panel = document.querySelector<HTMLElement>('.panel--telemetry');
   const hud = document.querySelector<HTMLElement>('.hud');
   if (panel === null || hud === null) return;
 
-  let last = -1;
+  let lastH = -1;
+  let lastW = -1;
   const publish = (): void => {
-    const height = Math.round(panel.getBoundingClientRect().height);
-    if (height === last) return;
-    last = height;
-    hud.style.setProperty('--telemetry-h', `${height}px`);
+    const rect = panel.getBoundingClientRect();
+    const height = Math.round(rect.height);
+    const width = Math.round(rect.width);
+    if (height !== lastH) {
+      lastH = height;
+      hud.style.setProperty('--telemetry-h', `${height}px`);
+    }
+    if (width !== lastW) {
+      lastW = width;
+      hud.style.setProperty('--telemetry-w', `${width}px`);
+    }
   };
 
   publish();
-  // Fires after layout and before paint, so the CSS fallback is only ever
+  // Fires after layout and before paint, so the CSS fallbacks are only ever
   // seen on a browser without the observer at all.
   new ResizeObserver(publish).observe(panel);
 }
@@ -413,7 +427,7 @@ export function createHud(wallet: Wallet): {
   /** Feeds this frame's rolling means to the dev line. A no-op while it is hidden costs nothing worth guarding. */
   updateDevTiming(stats: GpuFrameStats): void;
 } {
-  trackTelemetryHeight();
+  trackTelemetrySize();
   const devReadout = createDevReadout();
 
   // Looked up once; every writer tolerates a missing element.

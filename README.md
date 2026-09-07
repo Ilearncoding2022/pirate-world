@@ -127,8 +127,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   bow-down. A berth is immune to all of it, and the scope marks both in magenta
   while there is still time to steer around them. The rolls are seeded, so the
   same world throws up the same weather.
-- **Raiders.** You are not alone out here. Every ten seconds the sea rolls for
-  a boat, and there are two kinds. A **red** one spawns forty to sixty units
+- **Raiders.** You are not alone out here, and not by a small margin. Every ten
+  seconds the sea rolls for a boat — 16% for a red one and 24% for an orange —
+  so meeting one is the normal condition of being at sea rather than an event.
+  Only one of each colour is ever on the water, which is the real brake on it:
+  what the odds actually buy is that the next one is up almost as soon as the
+  last one has gone. There are two kinds. A **red** one spawns forty to sixty units
   off on any bearing, runs at twice your top speed and comes straight for you,
   and it has five to eight seconds to get there. It turns wide, so it can be
   shaken: put the helm hard over across its bow and it will overshoot, and when
@@ -231,6 +235,13 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the middle of the helm pad is gone — at hub size its graduations fell below a
   pixel — and the scope's rim carries the direction instead. The purse rides
   the telemetry panel in brass, the one warm figure on a cold instrument.
+  The CONTROLS card sits beside the telemetry panel, and the helm keys have the
+  bottom-left corner to themselves: a corner is a thumb's reach on a phone
+  without the hand leaving the edge, and it hands the middle of the bottom edge
+  back to the water you are steering over. The pad is a T rather than a cross —
+  THRUST alone above PORT, REVERSE and STARBOARD — with thrust and reverse
+  close enough to rock a thumb between, because they are the two ends of one
+  axis rather than two directions.
 
 ## Structure
 

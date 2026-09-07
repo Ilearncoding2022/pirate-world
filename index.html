@@ -280,7 +280,20 @@
         </div>
       </section>
 
-      <!-- ===================== D-PAD ===================== -->
+      <!-- ===================== D-PAD =====================
+           The helm, in the bottom-left corner. It sat on the centre line for
+           as long as it was the only thing along the bottom of the screen;
+           the corner is a thumb's reach on a phone without the hand leaving
+           the edge, and it hands the middle of the bottom edge back to the
+           water the player is steering over.
+
+           The shape is a T rather than a cross: THRUST alone on the top row,
+           and PORT / REVERSE / STARBOARD abreast under it. The hub that used
+           to hold the two apart -- an empty cell left over from a compass
+           rose that was removed as illegible at that size -- is gone with it,
+           because thrust and reverse are the two ends of ONE axis and belong
+           near enough to rock a thumb between. style.css owns the geometry;
+           the order here is the reading order of the pad. -->
       <nav class="dpad" aria-label="Helm controls">
         <button id="btn-up" class="dbtn dbtn--up" type="button" aria-label="Thrust">
           <span class="dbtn__glyph">&#9650;</span>
@@ -290,32 +303,21 @@
           <span class="dbtn__glyph">&#9664;</span>
           <span class="dbtn__label">Port</span>
         </button>
-        <!-- The hole in the middle of the pad.
-
-             It held a compass rose and needle for several revisions and now
-             holds nothing. At hub size the rose was about 50px across: its
-             graduations were sub-pixel, three of its four cardinal letters
-             were already hidden as unreadable, and the needle it carried
-             reported the same heading the radar panel prints as a number and
-             draws as a rotating plot. An instrument that has to be shrunk
-             past legibility to fit is not a small instrument, it is a
-             decoration in the way of the helm keys.
-
-             The cell stays, empty. It is what gives the D-pad its cross
-             shape, and the clear air in the middle is now the only thing
-             between four keys the player is pressing in a hurry. -->
-        <div class="dpad__hub" aria-hidden="true"></div>
-        <button id="btn-right" class="dbtn dbtn--right" type="button" aria-label="Turn to starboard">
-          <span class="dbtn__glyph">&#9654;</span>
-          <span class="dbtn__label">Starboard</span>
-        </button>
         <button id="btn-down" class="dbtn dbtn--down" type="button" aria-label="Reverse">
           <span class="dbtn__glyph">&#9660;</span>
           <span class="dbtn__label">Reverse</span>
         </button>
+        <button id="btn-right" class="dbtn dbtn--right" type="button" aria-label="Turn to starboard">
+          <span class="dbtn__glyph">&#9654;</span>
+          <span class="dbtn__label">Starboard</span>
+        </button>
       </nav>
 
-      <!-- ===================== LEGEND ===================== -->
+      <!-- ===================== LEGEND =====================
+           Beside the telemetry panel rather than in the bottom-left corner,
+           which is the helm's now. It is hung off the panel's right edge by
+           `--telemetry-w`, which `hud.ts` publishes for the same reason it
+           publishes the height the dock hangs off. -->
       <details class="legend" open>
         <summary class="legend__summary">
           <span class="legend__chev">&#9656;</span>

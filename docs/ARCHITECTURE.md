@@ -297,7 +297,7 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel |
+| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Also publishes `--telemetry-h` / `--telemetry-w`, the panel's rendered box, which the dock and the legend are positioned off |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?)`; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
@@ -839,6 +839,35 @@ The wind's angle to the bow within one event holds to 0.00° where it swung by
 up to 34.8°. Before the fix every one of those runs ended pinned at 89.97° N —
 the ship reached the pole and stayed there, spinning. It now sails over the top
 and down the far side.
+
+### Three boxes hang off the telemetry panel
+Every box on the HUD is absolutely positioned, so none of them is in flow with
+any other and no selector can see where a neighbour's edge falls. The telemetry
+panel is also content-sized in both directions — it grew a row the day GOLD
+landed in it, and its width is set by its longest power tag. So the two boxes
+that must sit against it are positioned off custom properties `hud.ts`
+publishes from a `ResizeObserver`: `--telemetry-h` for the dock hanging under
+its bottom edge, `--telemetry-w` for the CONTROLS legend beside its right one.
+Both are the RENDERED box, measured after `scale(var(--panel-scale))`, so CSS
+uses them as offsets without scaling them again. Both carry a stylesheet
+fallback, only ever seen on a browser with no `ResizeObserver` at all.
+
+The corners they leave are deliberate. The legend moved out of the bottom-left
+so the **helm** could have it: a corner is a thumb's reach on a phone without
+the hand leaving the edge, and the centre of the bottom edge — where the pad
+used to sit — is the water directly ahead of the bow, which is the one part of
+the screen a player steering is actually looking at.
+
+The pad itself is a T, not a cross: `up` alone on row 1 column 2, and `left`,
+`down`, `right` abreast on row 2. Row 1's outer columns are left empty rather
+than collapsed, because they are what keeps THRUST over REVERSE instead of over
+PORT. `--stack-gap` (3px) separates the two rows and the columns keep the old
+7.875px: thrust and reverse are the two ends of ONE axis and are spaced to be
+rocked between, while port and starboard are separate aims where a mis-hit
+costs a heading. The old cross put a whole key height and two gaps — about
+70px — between W and S, which is a reach rather than a rock. The empty `.dpad__hub`
+that used to hold that cross open is gone with it.
+
 
 ## HUD text sizing
 Browsers carry a **minimum font size** preference (Chrome: Settings →

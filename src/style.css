@@ -923,24 +923,42 @@ body {
    D-pad (bottom center) — the only pointer-interactive HUD region
    ------------------------------------------------------------------- */
 
+/*
+ * The helm, in the bottom-left corner the legend used to hold.
+ *
+ * Off the centre line, which is where it sat for as long as it was the only
+ * thing along the bottom of the screen. The corner is the better home for it:
+ * a thumb reaches a corner without the hand leaving the edge of a phone, and
+ * the middle of the bottom edge is the one part of the sea directly ahead of
+ * the bow that the player is actually steering by.
+ *
+ * Two rows now, not three. `up` sits directly over `down` with `left` and
+ * `right` on the bottom row beside it, and the pair are separated by
+ * `--stack-gap` rather than by a whole empty key: the throttle is one axis and
+ * reads as one control when its two ends are close enough to rock a thumb
+ * between. The old cross put a full key height and two gaps -- some 70px --
+ * between W and S, which is a reach rather than a rock.
+ */
 .dpad {
   position: absolute;
   bottom: calc(var(--hud-pad) + 4px);
-  left: 50%;
-  transform: translateX(-50%);
+  left: var(--hud-pad);
   display: grid;
   /* Key size is the original scaled by 0.75, so the whole control shrinks as
-     one piece. The gap is that 0.75 scale plus half again; it was widened to
-     open the middle cell up far enough to seat a compass in it, and it stays
-     widened now that the cell is empty, because the clear air between four
-     keys pressed in a hurry is worth as much as the instrument was.
+     one piece.
 
      One source of truth: the label size below is derived from --key-size, so
      the longest word cannot outgrow its key at any viewport width. */
   --key-size: clamp(42px, 4.5vw, 55.5px);
+  /* The throttle's own gap, and the whole of "much closer": thrust and reverse
+     are the two ends of one axis, so they are spaced to be rocked between
+     rather than aimed at separately. The columns keep the wider gap, because
+     port and starboard ARE separate aims and a mis-hit there costs a heading. */
+  --stack-gap: 3px;
   grid-template-columns: repeat(3, var(--key-size));
-  grid-template-rows: repeat(3, var(--key-size));
-  gap: 7.875px;
+  grid-template-rows: repeat(2, var(--key-size));
+  column-gap: 7.875px;
+  row-gap: var(--stack-gap);
   place-items: stretch;
 }
 
@@ -1064,6 +1082,13 @@ body {
   color: rgba(4, 20, 28, 0.8);
 }
 
+/*
+ * Up alone on the top row, the other three abreast under it.
+ *
+ * Row 1 columns 1 and 3 are deliberately left empty rather than filled or
+ * collapsed: they are what keeps THRUST over REVERSE instead of over PORT, so
+ * the throttle still reads as a vertical pair at a glance.
+ */
 .dbtn--up {
   grid-column: 2;
   grid-row: 1;
@@ -1072,32 +1097,17 @@ body {
   grid-column: 1;
   grid-row: 2;
 }
+.dbtn--down {
+  grid-column: 2;
+  grid-row: 2;
+}
 .dbtn--right {
   grid-column: 3;
   grid-row: 2;
 }
-.dbtn--down {
-  grid-column: 2;
-  grid-row: 3;
-}
-
-/*
- * The middle cell of the D-pad, now empty.
- *
- * It is kept rather than deleted because it is what holds the cross open: the
- * grid is three columns by three rows and the four keys sit on the arms, so
- * removing this would let the middle collapse and the keys close on each
- * other. It stays transparent to the pointer, as it always was -- the hole in
- * a helm pad must not be a fifth thing to press.
- */
-.dpad__hub {
-  grid-column: 2;
-  grid-row: 2;
-  pointer-events: none;
-}
 
 /* ---------------------------------------------------------------------
-   Legend (bottom-left) — collapsible, no JS required
+   Legend (beside the telemetry panel) — collapsible, no JS required
    ------------------------------------------------------------------- */
 
 /*
@@ -1110,17 +1120,25 @@ body {
  * thing on the HUD a player reads once and then never again, which is exactly
  * what should give up its space first.
  *
- * Anchored at its own bottom-left, so it shrinks toward the corner it is
- * pinned to and the `--hud-pad` gap survives. The transform scales the hit
- * area with the paint, so the `<details>` still opens and closes on the box
- * the player can actually see.
+ * Anchored at its own top-left, so it shrinks toward the corner it is pinned
+ * to and the `--hud-pad` gap survives. The transform scales the hit area with
+ * the paint, so the `<details>` still opens and closes on the box the player
+ * can actually see.
+ *
+ * It sits beside the telemetry panel rather than in the bottom-left corner it
+ * used to hold, which is now the helm's. `--telemetry-w` is the panel's
+ * rendered width, published by `hud.ts` for the same reason `--telemetry-h`
+ * is: the two boxes are both absolutely positioned, so nothing in CSS can see
+ * where the panel's right edge falls, and the panel is content-sized. The
+ * `10px` is the dock's gap, so the three boxes hung off that panel are hung
+ * off it by the same amount.
  */
 .legend {
   position: absolute;
-  bottom: var(--hud-pad);
-  left: var(--hud-pad);
+  top: var(--hud-pad);
+  left: calc(var(--hud-pad) + var(--telemetry-w, 172px) + 10px);
   transform: scale(0.5);
-  transform-origin: bottom left;
+  transform-origin: top left;
   pointer-events: auto;
   max-width: 240px;
   background: rgba(6, 14, 24, 0.5);
