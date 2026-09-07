@@ -99,11 +99,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   raises the sea as well as pushing the hull, so the water tells you what the
   weather is doing before the panel does. The weather is seeded, so the same
   world always blows the same way.
-- **Rough water.** Every five seconds the sea rolls for trouble. A strong wave
-  rises a fifth of the time, a great wave a tenth, and a maelstrom one time in
-  fifty — four times the weather this shipped with, and the wait for a
-  maelstrom is down from a thousand seconds of sailing to two hundred and
-  fifty. **Waves run with the wind**, always, which is the whole reason to keep
+- **Rough water.** Every second the sea rolls for trouble. A strong wave rises
+  a fifth of the time, a great wave a tenth, and a maelstrom one time in fifty.
+  Only one of each is ever on the water at once, so what a roll a second buys
+  is that the next one is up almost as soon as the last one has gone: the sea
+  is nearly always running something, and the wait for a maelstrom is under a
+  minute. **Waves run with the wind**, always, which is the whole reason to keep
   an eye on the arrow: they rise upwind of you and come down on the hull, so
   the wind tells you where to look and which way you will be thrown. A wave is
   a crest twenty units long travelling at 6 knots, steep on the face and long
@@ -111,7 +112,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   went — five knots for a strong one, ten for a great one, over the three or
   five seconds it breaks up against you, which is thirty units of the scope for
   the big one. You keep the helm the whole time; the crest is spent once it has
-  hit you, and one that misses lives ten seconds and fades. A maelstrom is
+  hit you, and one that misses lives ten seconds and fades. **A wave breaks on
+  the shore the instant it reaches it** — and only the part of it that got
+  there: run a twenty-unit front onto a headland and the arm over the rock is
+  gone at once while the rest keeps coming, shortening as it goes, until there
+  is nothing of it left. Land is cover, and a wave you put an island between
+  yourself and is a wave that arrives half as wide. A maelstrom is
   twenty units of funnel that opens over three seconds and stays for thirty. Go
   into it and the helm is not yours any more: the hull spirals in for six
   seconds, sinks, and the screen goes black. You come back stopped, somewhere

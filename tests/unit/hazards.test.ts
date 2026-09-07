@@ -8,7 +8,9 @@ import { createWaterBodies } from '../../src/waterbodies';
 import { createTowns } from '../../src/towns';
 import { LULL_SPEED, OCEAN_CAP } from '../../src/wind';
 import { GLOBE_RADIUS, latLonToDir, headingToForward } from '../../src/geo';
-import type { EnergyState, HazardKind, ShipState, WindState } from '../../src/types';
+import type { EnergyState, Hazard, HazardKind, ShipState, Towns, WindState } from '../../src/types';
+import type { WaterBodies } from '../../src/waterbodies';
+import { createStubTerrain } from './support/stub-terrain';
 
 /**
  * `hazards.ts`'s rule set, against the real world it will run in: the roll's
@@ -261,5 +263,132 @@ describe('hazards — pickRespawn', () => {
         expect(arcDistance(p, dock.dir)).toBeGreaterThanOrEqual(2 * widest);
       }
     }
+  });
+});
+
+/**
+ * The coast clip, against a world made for it: one straight north-south
+ * shoreline, so what a crest should keep is arithmetic rather than a reading
+ * off the real generator's coastline.
+ *
+ * Land east of `COAST_LON_DEG`, ocean everywhere west of it. The height map
+ * is finer than the shared 256x128 one above because these tests measure
+ * WHERE the wave was cut, and a coarse map's bilinear ramp is several world
+ * units wide.
+ */
+const COAST_LON_DEG = 1;
+/** World units per degree of longitude at the equator, this globe. */
+const DEG = (GLOBE_RADIUS * Math.PI) / 180;
+
+const coastTerrain = createStubTerrain((dir) => {
+  const lonDeg = (Math.atan2(dir.x, dir.z) * 180) / Math.PI;
+  return lonDeg > COAST_LON_DEG && lonDeg < 90 ? 1 : -1;
+});
+const coastMap = createHeightMap(coastTerrain, 1024, 512);
+const openSea = { sample: () => 0 } as unknown as WaterBodies;
+const noTowns: Towns = { all: [], docks: [], dockAt: () => null };
+
+function coastHazards() {
+  return createHazards({
+    terrain: coastTerrain,
+    heightMap: coastMap,
+    waterBodies: openSea,
+    towns: noTowns,
+    onSunk: () => {},
+  });
+}
+
+/** The hull at the equator on the prime meridian, well clear of the shore. */
+function coastShip(): ShipState {
+  const position = latLonToDir(0, 0);
+  const up = position.clone();
+  const forward = headingToForward(up, 0);
+  return {
+    position,
+    up,
+    forward,
+    heading: 0,
+    headingDeg: 0,
+    speed: 0,
+    groundSpeed: 0,
+    velocity: new Vector3(),
+    latDeg: 0,
+    lonDeg: 0,
+  };
+}
+
+/** A crest's end, `extent` world units along `east` from its centre. */
+function crestEnd(h: Hazard, sign: number): Vector3 {
+  return step(h.centre, h.east.clone().multiplyScalar(sign), h.extent);
+}
+
+describe('hazards — a crest breaks on the shore', () => {
+  it('keeps the stretch still over water and loses the part that met land', () => {
+    const hazards = coastHazards();
+    const ship = coastShip();
+    const energy = energyState('drain');
+    const dt = 0.05;
+
+    // Fifteen units due north of the hull, running north: far enough that the
+    // contact test never fires, so nothing here is the push rule in disguise.
+    // `north` due north makes `east` due east, so the 20-unit front lies along
+    // the equator and runs COAST_HALF_LENGTH past the shoreline at 1 degree.
+    const north = headingToForward(latLonToDir(0, 0), 0);
+    const centre = step(latLonToDir(0, 0), north, 15);
+    hazards.force('wave', centre, north);
+    const crest = hazards.state.live.find((h) => h.kind === 'wave');
+    expect(crest).toBeDefined();
+    if (crest === undefined) return;
+    const full = crest.extent;
+
+    hazards.update(dt, ship, energy, wind);
+
+    // Still on the water: the wave lost an end, not itself.
+    expect(hazards.state.live).toContain(crest);
+    // The shore is COAST_LON_DEG east of the centre, so about that much of
+    // the eastern arm is gone and the whole western arm is untouched.
+    const survived = (full + COAST_LON_DEG * DEG) / 2;
+    expect(crest.extent).toBeCloseTo(survived, 0);
+    expect(crest.extent).toBeLessThan(full - 1);
+    expect(crest.extent).toBeGreaterThan(1);
+
+    // Both ends of what is left are over open water, and the frame is still a
+    // frame: `centre` slid west onto the middle of the surviving stretch
+    // rather than staying put with an offset nothing downstream can read.
+    for (const sign of [1, -1]) {
+      expect(coastMap.sample(crestEnd(crest, sign))).toBeLessThan(coastTerrain.seaLevel);
+    }
+    expect(crest.centre.length()).toBeCloseTo(1, 6);
+    expect(crest.east.dot(crest.centre)).toBeCloseTo(0, 6);
+    expect(crest.north.dot(crest.centre)).toBeCloseTo(0, 6);
+    expect(crest.east.dot(crest.north)).toBeCloseTo(0, 6);
+
+    // And it only ever shrinks: the wave runs north up a shore that never
+    // moves, so the clip has to hold rather than breathe frame to frame.
+    let last = crest.extent;
+    for (let i = 0; i < 40; i++) {
+      hazards.update(dt, ship, energy, wind);
+      if (!hazards.state.live.includes(crest)) break;
+      expect(crest.extent).toBeLessThanOrEqual(last + 1e-9);
+      expect(crest.extent).toBeGreaterThan(0);
+      last = crest.extent;
+    }
+  });
+
+  it('drops a crest with no open water left under it, on the frame it has none', () => {
+    const hazards = coastHazards();
+    const ship = coastShip();
+    const energy = energyState('drain');
+
+    // Well inland: every probe along the front is dry.
+    const inland = latLonToDir(0, 45);
+    hazards.force('wave', inland, headingToForward(inland, 0));
+    const crest = hazards.state.live.find((h) => h.kind === 'wave');
+    expect(crest).toBeDefined();
+
+    hazards.update(0.05, ship, energy, wind);
+    // Gone outright rather than left to dissipate: land takes the part of a
+    // wave it meets immediately, and here that is all of it.
+    expect(hazards.state.live).not.toContain(crest);
   });
 });
