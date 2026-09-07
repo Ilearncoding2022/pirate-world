@@ -219,19 +219,34 @@ const ROW_SPEEDS: readonly number[] = [0.22, 0.16, 0.13, 0.1, 0.08];
  * legendary in it is an event. The minimum is a floor the row refills as fast
  * as spacing allows; the maximum is what the drip-feed timer below tops it up
  * to when there is nothing urgent to do.
+ *
+ * Rows 1 and 2 carry three times and twice their first-pass populations. That
+ * is the shallow traffic getting much heavier, which is exactly the cost the
+ * risk curve is built on: a shot at the deep rows now has three ranks of
+ * common fish to thread instead of one, and the shallow water is close enough
+ * to a wall that volume fishing barely needs aiming.
  */
-const ROW_MIN: readonly number[] = [2, 2, 2, 2, 1];
-const ROW_MAX: readonly number[] = [4, 4, 3, 3, 3];
+const ROW_MIN: readonly number[] = [6, 4, 2, 2, 1];
+const ROW_MAX: readonly number[] = [12, 8, 3, 3, 3];
 
 /**
  * Closest two fish on one row may ever be, card units between centres.
  *
- * 0.18 is three average fish lengths. It exists so a row cannot present a
- * solid wall the player could not miss — every shot has to be aimed at a fish
- * rather than merely at a row — and so a spawn never appears inside the fish
- * already standing at the edge.
+ * 0.18 — three average fish lengths — is the figure the rules were authored
+ * around: a row cannot present a solid wall the player could not miss, and a
+ * spawn never appears inside the fish already standing at the edge.
+ *
+ * It has to be per-row now, because it is also a hard cap on population. The
+ * card is one unit wide, so at 0.18 no row can ever hold more than six fish
+ * however high ROW_MAX is set — a row asked for twelve would simply spawn,
+ * fail `hasRoom`, and retry forever while sitting at six. Rows 1 and 2 divide
+ * the gap by the same 3x and 2x their populations were multiplied by, so the
+ * water gets denser in exactly the proportion asked for rather than jamming
+ * against a constant that was never part of the request. Row 1's 0.06 is one
+ * average fish length between centres: shoulder to shoulder, still not
+ * overlapping.
  */
-const SPAWN_MIN_GAP = 0.18;
+const SPAWN_MIN_GAP: readonly number[] = [0.06, 0.09, 0.18, 0.18, 0.18];
 
 /**
  * Seconds between top-up spawns while a row is between its min and max.
@@ -251,8 +266,13 @@ const SPAWN_INTERVAL_MAX = 3.5;
  * for the first four seconds has been charged for water. Placements are drawn
  * uniformly across the card and rejected against SPAWN_MIN_GAP, so a row ends
  * up somewhere between its min and its max depending on how the draw fell.
+ *
+ * 24 rather than the original 12 because row 1 now seeds twelve fish into a
+ * card that fits at most sixteen at its gap. The last few placements are
+ * drawing into water that is nearly full, and at twelve tries the row would
+ * routinely open several fish short of a shoal it can perfectly well hold.
  */
-const SEED_TRIES = 12;
+const SEED_TRIES = 24;
 
 /* ------------------------------------------------------------------ */
 /* Reeling and the struggle                                            */
@@ -430,7 +450,7 @@ export function createFishingSim(rng: () => number = Math.random): FishingSim {
   function hasRoom(row: number, x: number): boolean {
     for (const f of state.fish) {
       if (f.row !== row || f.hooked) continue;
-      if (Math.abs(f.x - x) < SPAWN_MIN_GAP) return false;
+      if (Math.abs(f.x - x) < SPAWN_MIN_GAP[row]) return false;
     }
     return true;
   }

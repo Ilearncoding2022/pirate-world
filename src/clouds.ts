@@ -72,12 +72,12 @@ const SLICE_OPACITY = 1 - Math.pow(1 - STACK_OPACITY, 1 / SHELL_COUNT);
 /**
  * Speed the layer drifts, in world units per second at the shell.
  *
- * About an eighth of the ship flat out -- `MAX_FORWARD` in `ship.ts` is 15,
- * which the HUD reads out as 15.0 kn -- so the weather crawls past at 2.0 kn at
+ * About a fifth of the ship flat out -- `MAX_FORWARD` in `ship.ts` is 10,
+ * which the HUD reads out as 10.0 kn -- so the weather crawls past at 2.0 kn at
  * the shell, 1.9 measured against the ground the ship actually covers. It was
- * a clean tenth while the ship made 20; the deck was left where it was when top
- * speed came down, because the number that matters is that you outrun it, and
- * at 15 kn against 2.0 you still comfortably do. Fast enough
+ * a clean tenth while the ship made 20 and an eighth at 15; the deck has been
+ * left where it was through both cuts, because the number that matters is that
+ * you outrun it, and at 10 kn against 2.0 you still comfortably do. Fast enough
  * that a bank visibly moves over a minute of sailing, slow enough that you
  * always outrun it.
  */

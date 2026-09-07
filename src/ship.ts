@@ -76,7 +76,7 @@ export const MODEL_SCALE = 0.65;
 const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y * MODEL_SCALE;
 
 /**
- * Top speed, world units per second, which `hud.ts` reads out as 15.0 kn.
+ * Top speed, world units per second, which `hud.ts` reads out as 10.0 kn.
  *
  * Drag, not the clamp below, is what actually decides this. Thrust and drag
  * balance at ACCEL / DRAG, so that ratio *is* the top speed and the clamp only
@@ -85,12 +85,21 @@ const MODEL_MOUNT_Y = -HULL_OFFSET - MODEL_WATERLINE_Y * MODEL_SCALE;
  * ACCEL 12 and DRAG 0.7 the ship topped out at 17.1 however high the clamp was
  * set, and the number in this constant was simply never reached.
  *
+ * Ten rather than the fifteen this was authored at. Because ACCEL is derived,
+ * the drop takes the thrust down with it and leaves DRAG -- and therefore the
+ * 2.9 s time constant, the coast and the stopping distance -- exactly where
+ * they were: the ship reaches its cruise in the same time, that cruise is
+ * simply two thirds of what it was. Reverse is untouched at 7, so ahead and
+ * astern are now much closer together than the old 15/7 split.
+ *
  * Exported because `energy.ts` divides the burn by it: the draw is quadratic in
- * (speed / MAX_FORWARD), so a copy of the 15 over there would mean a top-speed
+ * (speed / MAX_FORWARD), so a copy of the 10 over there would mean a top-speed
  * change quietly retuning the whole fuel economy instead of moving with it.
- * `wake.ts` imports it for the same reason.
+ * `wake.ts` imports it for the same reason -- and a slower top speed means the
+ * whole hull's worth of speed-driven effects, wake and spray included, now
+ * reach full strength at 10 kn rather than 15.
  */
-export const MAX_FORWARD = 15;
+export const MAX_FORWARD = 10;
 /**
  * Linear drag coefficient, 1/s. Also sets how long the ship coasts.
  *
@@ -111,7 +120,7 @@ export const MAX_FORWARD = 15;
  * drag. Plan the approach to a berth earlier.
  */
 const DRAG = 0.35;
-/** Thrust while a throttle key is held, world units / s^2. Now 5.25. */
+/** Thrust while a throttle key is held, world units / s^2. Now 3.5. */
 const ACCEL = MAX_FORWARD * DRAG;
 
 const MAX_REVERSE = 7; // world units / s (magnitude); clamp-limited, not drag-limited

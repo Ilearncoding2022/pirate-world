@@ -22,17 +22,23 @@ export interface Wind {
 
 /**
  * Wind speed caps at the shore and in the open sea, world units/s, which
- * `hud.ts` reads out as 8.0 and 16.0 kn.
+ * `hud.ts` reads out as 5.2 and 10.4 kn.
  *
- * Exactly double, and that ratio matters more than either number: the open
- * ocean is where the wind is worth having and the coast is where it stays
- * survivable. At 16 kn the push is 0.35 x 16 = 5.6 kn, better than a third of
- * MAX_FORWARD, so crossing an ocean downwind is still a different journey from
- * crossing it upwind -- which is the whole reason for the system -- without the
- * weather ever being the larger half of how fast the ship is going.
+ * Both are 35% off the 8 and 16 this was authored at, taken together rather
+ * than singly so the exact-double ratio survives -- that ratio matters more
+ * than either number: the open ocean is where the wind is worth having and the
+ * coast is where it stays survivable.
+ *
+ * The cut lands on a hull that lost a third of its own top speed at the same
+ * time, so the balance the system was tuned for is roughly intact: the ocean
+ * push is 0.35 x 10.4 = 3.6 kn against a MAX_FORWARD of 10, still better than
+ * a third of the engine. Crossing an ocean downwind remains a different
+ * journey from crossing it upwind -- which is the whole reason for the system
+ * -- without the weather ever being the larger half of how fast the ship is
+ * going.
  */
-export const COAST_CAP = 8;
-export const OCEAN_CAP = 16;
+export const COAST_CAP = 5.2;
+export const OCEAN_CAP = 10.4;
 
 /**
  * Distance offshore, world units, at which the cap reaches OCEAN_CAP.
@@ -64,8 +70,8 @@ const FADE = 2;
 /**
  * Floor of the gust envelope, as a fraction of the cap.
  *
- * The gust noise varies the strength *within* an event, so that a steady 16 kn
- * does not read as a switch being held down. It must not be free to reach
+ * The gust noise varies the strength *within* an event, so that a steady 10.4
+ * kn does not read as a switch being held down. It must not be free to reach
  * zero: a wind that dies in the middle of its own event and then comes back is
  * a bug report, not weather. 0.55 keeps the quiet part of a gust clearly a
  * wind.
@@ -88,7 +94,7 @@ const GUST_RATE = 0.25;
  * a hull is not a leaf, and still enough that the wind is worth planning a
  * crossing around.
  *
- * Flat out downwind under the ocean cap the ship makes 15 + 0.35 x 16 = 20.6
+ * Flat out downwind under the ocean cap the ship makes 10 + 0.35 x 10.4 = 13.6
  * kn over the ground, so the weather is worth a third again on top of the
  * engine at its very best and rather less than that in the ordinary case. The
  * engine stays the thing the player is steering; the wind is a hand on it.
@@ -100,8 +106,8 @@ const WIND_GRIP = 0.35;
  *
  * The sector table below is deliberately coarse, and coarse means the target
  * push jumps the moment the ship's heading crosses a boundary. Adjacent
- * entries are 0.765 apart, so at the ocean cap that is 0.35 x 16 x 0.765 =
- * 4.3 kn of velocity appearing within one frame, and the hull visibly snaps.
+ * entries are 0.765 apart, so at the ocean cap that is 0.35 x 10.4 x 0.765 =
+ * 2.8 kn of velocity appearing within one frame, and the hull visibly snaps.
  * Easing spreads it over about a third of a second. The
  * accepted consequence is that mid-transition the push is briefly not exactly
  * one of the eight table values; nothing downstream assumes it is.

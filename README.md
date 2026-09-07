@@ -37,7 +37,7 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   irregular coastlines rather than blobby edges. A quarter of the sphere is
   land and three quarters is water. The spawn point is guaranteed open ocean.
   The globe is 200 units across the radius against a 3-unit hull, so a full
-  circumnavigation at the ship's 15-knot maximum takes about 84 seconds.
+  circumnavigation at the ship's 10-knot maximum takes about two minutes.
 - **No islands you cannot see.** Anything smaller than a disc 5.6 units across
   — a little under two ship lengths — is sunk before the world is handed over.
   The sea used to be full of specks a fraction of the hull wide, too small to
@@ -72,7 +72,7 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 - **Settlements** light up on the night side, clustered along coasts and
   lowlands, and fade out through dawn.
 - **Weather.** A cloud deck that forms and dissipates over time, covering about
-  a quarter of the sky and crawling past at a tenth of the ship's top speed. It
+  a quarter of the sky and crawling past at a fifth of the ship's top speed. It
   is a stack of slices through one 3D field rather than a painted sphere, so
   the banks have flat bases, domed tops and real thickness at the horizon. How
   tall a bank builds varies from place to place, between two thirds and all of
@@ -98,8 +98,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   thrusters flare on the throttle.
 - **Power, not fuel tanks.** The ship runs on a reserve that burns with the
   *square* of your speed, so half throttle costs a quarter as much and cruising
-  slowly is a real strategy: 90 seconds flat out, or ten and a half minutes at
-  5 knots.
+  slowly is a real strategy: 90 seconds flat out, or five and a half minutes
+  at 5 knots.
   Stop in daylight and the panels charge you back at a rate that follows the
   sun's height in the sky: half a percent of the reserve per second with the
   sun overhead, which is three and a half minutes from empty, stretching past
@@ -122,7 +122,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the line runs a tension bar the whole way in and you have to tap to keep it
   from snapping. Twenty species in five tiers, each worth gold, each recorded
   in a fish book that shows a silhouette and `UNKNOWN` until you have landed
-  one. Gold and the book survive a reload.
+  one. The shallow water is thick — row 1 keeps a dozen fish alive and row 2
+  eight — and the top of the table is deliberately thin: a legendary is 2% of
+  even the deepest row's spawns, an epic 9%. Gold and the book survive a reload.
   The session costs **half the reserve**, taken the moment it starts, and the
   button is dead below that — but the panels keep charging while you fish, at
   the elevation the sun was frozen at. There is no refund for quitting early.

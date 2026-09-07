@@ -289,17 +289,25 @@ export const ROW_COUNT = 5;
  * the deep water means threading a gap in the shallow traffic — the odds below
  * are only available to a player who can wait for one.
  *
+ * The top three bands have been cut hard against the first-pass table: RARE to
+ * half its old share, EPIC to three tenths, LEGENDARY to a tenth. What each
+ * row gave up went back to COMMON and UNCOMMON in the proportion they already
+ * stood in, so the shape of a row is unchanged and only its ceiling moved. The
+ * deep water is still the good water — row 5 is 26 times likelier than row 2
+ * to show a RARE — but a legendary is now a session's story rather than a
+ * fixture: 2% of row 5's spawns where it used to be a fifth of them.
+ *
  * Each row must total 100. `rollSpecies` walks the row's cumulative sum and
  * falls back to the last non-empty tier, so a row that did not total 100 would
  * bias silently toward that tier rather than throwing; the probe in
  * `tools/` (see FISHING_PLAN.md) is what actually holds these to the table.
  */
 export const ROW_ODDS: readonly (readonly number[])[] = [
-  /* row 1 */ [70, 25, 5, 0, 0],
-  /* row 2 */ [50, 30, 15, 5, 0],
-  /* row 3 */ [30, 30, 25, 12, 3],
-  /* row 4 */ [15, 25, 30, 20, 10],
-  /* row 5 */ [5, 15, 30, 30, 20],
+  /* row 1 */ [71.8, 25.7, 2.5, 0, 0],
+  /* row 2 */ [56.9, 34.1, 7.5, 1.5, 0],
+  /* row 3 */ [41.8, 41.8, 12.5, 3.6, 0.3],
+  /* row 4 */ [29.3, 48.7, 15, 6, 1],
+  /* row 5 */ [18.5, 55.5, 15, 9, 2],
 ];
 
 /**

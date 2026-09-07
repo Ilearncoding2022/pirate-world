@@ -92,26 +92,38 @@ shallowest. Within a tier, species are picked uniformly.
 
 | Row | T1 | T2 | T3 | T4 | T5 |
 |---|---|---|---|---|---|
-| 1 | 70 | 25 | 5 | 0 | 0 |
-| 2 | 50 | 30 | 15 | 5 | 0 |
-| 3 | 30 | 30 | 25 | 12 | 3 |
-| 4 | 15 | 25 | 30 | 20 | 10 |
-| 5 | 5 | 15 | 30 | 30 | 20 |
+| 1 | 71.8 | 25.7 | 2.5 | 0 | 0 |
+| 2 | 56.9 | 34.1 | 7.5 | 1.5 | 0 |
+| 3 | 41.8 | 41.8 | 12.5 | 3.6 | 0.3 |
+| 4 | 29.3 | 48.7 | 15 | 6 | 1 |
+| 5 | 18.5 | 55.5 | 15 | 9 | 2 |
+
+RARE is at half the first-pass share, EPIC at three tenths and LEGENDARY at a
+tenth; what each row gave up went back to COMMON and UNCOMMON in the
+proportion they already stood in, so every row still totals 100 and the shape
+of the curve is unchanged — only its ceiling moved.
 
 ### Row motion
 
-| Row | Direction | Base speed (card widths / s) | Fish alive (min–max) |
-|---|---|---|---|
-| 1 | → | 0.22 | 2–4 |
-| 2 | ← | 0.16 | 2–4 |
-| 3 | → | 0.13 | 2–3 |
-| 4 | ← | 0.10 | 2–3 |
-| 5 | → | 0.08 | 1–3 |
+| Row | Direction | Base speed (card widths / s) | Fish alive (min–max) | Min gap |
+|---|---|---|---|---|
+| 1 | → | 0.22 | 6–12 | 0.06 |
+| 2 | ← | 0.16 | 4–8 | 0.09 |
+| 3 | → | 0.13 | 2–3 | 0.18 |
+| 4 | ← | 0.10 | 2–3 | 0.18 |
+| 5 | → | 0.08 | 1–3 | 0.18 |
 
 A fish spawns just off the edge it enters from and despawns just past the
 other edge. New fish spawn when a row is under its minimum, or on a 1.5–3.5 s
-timer while under its maximum, and never closer than 0.18 card widths to the
-nearest fish on that row.
+timer while under its maximum, and never closer to the nearest fish on that
+row than the row's own minimum gap.
+
+Rows 1 and 2 carry three times and twice their first-pass populations. The
+gap is per-row rather than a single 0.18 because it is also a hard cap: the
+card is one unit wide, so at 0.18 no row could ever hold more than six fish
+however high its maximum was set. Rows 1 and 2 divide the gap by the same 3x
+and 2x, so the water gets denser in exactly the proportion intended instead of
+jamming against a constant.
 
 ### The struggle (tiers 4 and 5)
 

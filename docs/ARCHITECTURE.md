@@ -135,7 +135,7 @@ That derivation is also why **acceleration is retuned through `DRAG`, not
 `ACCEL`**. Halving `ACCEL` halves the top speed with it, because the top speed
 *is* the ratio; halving `DRAG` (0.7 → 0.35) carries the derived `ACCEL` down
 and leaves the ratio alone, so the ship picks up half as hard and still makes
-15 kn. The price cannot be avoided: the time constant is `1 / DRAG`, so it
+its top speed. The price cannot be avoided: the time constant is `1 / DRAG`, so it
 went 1.4 s to 2.9 s in **both** directions and the hull now carries its way
 twice as far. Against constant thrust and linear drag there is no third number
 to spend.
@@ -148,8 +148,8 @@ state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
 ```
 
 Stepping thrust and then drag lands on `(ACCEL / DRAG) * (1 - DRAG * dt)`,
-which makes the top speed depend on the frame rate: 14.8 kn at 60fps, 14.0 at
-10. The closed form is exactly `thrust / DRAG` at any rate, and still decays
+which makes the top speed depend on the frame rate: at the 15 kn this was
+measured under, 14.8 kn at 60fps and 14.0 at 10. The closed form is exactly `thrust / DRAG` at any rate, and still decays
 cleanly to zero with no throttle, so the ship coasts as before.
 
 The hull is drawn at `MODEL_SCALE` (0.65), exported from `ship.ts` because the
@@ -834,7 +834,7 @@ true of a hull drifting quietly across the ring on the wind, false of one that
 had genuinely arrived and not yet lost way. Two seconds inside the ring asks
 the question the ring is drawn to ask. It gives the same protection the speed
 limit did — the zone is 16 units across, so a straight run through it lasts
-1.07 s at 15 kn and 1.6 s at 10 — and it drops this file's last reader of
+1.6 s at the ship's 10 kn top speed — and it drops this file's last reader of
 `groundSpeed`. The clock tracks the *identity* of the berth, so crossing from
 one ring to another restarts it rather than inheriting the time. Anything under
 about 8 kn can now dwell, drifting included: being blown into harbour is an
@@ -907,7 +907,7 @@ every point of sail. The push is then `WIND_GRIP × speed ×` the table entry,
 with `WIND_GRIP` 0.35 — the rule the whole system is tuned around, and the one
 worth remembering: **8 kn of engine under a 10 kn tailwind makes 11.5 kn over
 the ground.** The engine still clamps at `MAX_FORWARD`, but ground speed has no
-ceiling beyond the arithmetic and reaches ~20.6 kn flat out downwind under the
+ceiling beyond the arithmetic and reaches ~13.6 kn flat out downwind under the
 ocean cap. The engine stays the thing the player steers; the wind is a hand on
 it, never the larger half of how fast the ship is going.
 
@@ -996,12 +996,11 @@ only the engine got through, and zero when the ship is beached.
 
 **`COAST_CAP` is never actually reached.** The innermost probe ring is 5 world
 units, so the probe can never report land closer than that, and the ramp floors
-at `8 + 8 × (5/40)` = **9.0 kn** — confirmed in a live run, where the lowest cap
-observed anywhere was exactly 9.00. The 8 is what the ramp extrapolates to at a
-coast distance of zero, which no reading can produce. Both numbers are
-implemented as specified rather than one being quietly bent to fit the other; if
-a true 8 kn at the shoreline is ever wanted, either add a ring at 0 or treat a
-hit on the innermost ring as distance zero.
+at `5.2 + 5.2 × (5/40)` = **5.85 kn**. `COAST_CAP` is what the ramp
+extrapolates to at a coast distance of zero, which no reading can produce. Both
+numbers are implemented as specified rather than one being quietly bent to fit
+the other; if a true `COAST_CAP` at the shoreline is ever wanted, either add a
+ring at 0 or treat a hit on the innermost ring as distance zero.
 
 **Feedback.** The HUD carries a `WND` row (arrow relative to the bow, matching
 the bow-up scope, or `CALM`) and breaks the `SPD` row down into ground speed
@@ -1009,8 +1008,8 @@ plus the wind's signed contribution, which is what makes the grip rule legible.
 The radar draws a rim arrow on the wind's *true* bearing in the **overlay**
 pass on the live frame, like the north mark — it is not attached to terrain, so
 the stale-raster-frame rule does not apply to it. `shipfx.ts` streams the flag
-along the **apparent** wind (true wind minus the hull's own motion, so a 15 kn
-ship in a calm streams astern — it used to lean toward the bow, because the
+along the **apparent** wind (true wind minus the hull's own motion, so a ship
+under way in a calm streams astern — it used to lean toward the bow, because the
 model was authored around a permanent following wind) and adds the tailwind
 component to the sail's belly. The model only bellies the sail one way, so beam and head winds
 show on the flag and not on the sail.

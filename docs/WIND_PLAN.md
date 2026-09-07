@@ -7,17 +7,21 @@ NOT updated to follow later tuning — `docs/ARCHITECTURE.md` is the current
 truth. Three of its decisions have since been changed by the owner:
 
 - the push coefficient is **0.35**, not 0.75, so 8 kn of engine under a 10 kn
-  tailwind makes **11.5 kn**, not 15.5, and ground speed tops out near 20.6
+  tailwind makes **11.5 kn**, not 15.5, and ground speed tops out near 13.6
   rather than ~32;
-- `MAX_FORWARD` is **15 kn**, not 20;
+- `MAX_FORWARD` is **10 kn**, not 20;
+- the caps are **5.2 kn** at the shoreline and **10.4 kn** in open ocean, both
+  35% off the 8 and 16 below — cut together, so the exact-double ratio the
+  decision turns on survives;
 - the hull is drawn at **0.65** scale.
 
 Two claims below were also wrong when they were written, and are worth knowing
 before trusting the rest:
 
-- the **8 kn shoreline cap is unreachable**. The innermost probe ring is 5
-  world units, so the ramp floors at `8 + 8 × (5/40)` = **9.0 kn**. The two
-  decisions are in tension; the code implements both as written.
+- the **shoreline cap is unreachable**. The innermost probe ring is 5 world
+  units, so the ramp floors at `COAST_CAP × (1 + 5/40)` = **5.85 kn** against
+  the current 5.2. The two decisions are in tension; the code implements both
+  as written.
 - the flag **did not** previously stream astern. It leaned toward the bow,
   because the model was authored around a permanent following wind, so the
   apparent-wind flag is a visible change rather than a preserved one.
