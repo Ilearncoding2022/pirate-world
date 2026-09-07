@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { Vector3 } from 'three';
-import { createShip, MAX_FORWARD } from '../../src/ship';
+import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
+import type { Material } from 'three';
+import { createShip, MAX_FORWARD, MODEL_SCALE } from '../../src/ship';
 import type { HazardState, InputState, EnergyState, WindState } from '../../src/types';
 import { createStubTerrain } from './support/stub-terrain';
 import { tangentFrame } from '../../src/geo';
@@ -166,5 +167,71 @@ describe('ship-physics', () => {
     // clockwise positive. See docs/ARCHITECTURE.md "Conventions".
     tangentFrame(home, north, east);
     expect(ship.state.forward.dot(east)).toBeCloseTo(1, 9);
+  });
+
+  it('has no hull to clone before the glTF lands', () => {
+    const ship = createShip(createStubTerrain());
+    // The failed-load half of the contract is the same branch and needs no
+    // second case: `loadHull` catches its own error and never adds a model,
+    // so the named node `cloneHull` looks for is missing either way and an AI
+    // boat is simply not shown. It is never dressed in the stand-in.
+    //
+    // `ready` is deliberately not awaited. Nothing serves the glTF in Node
+    // and the loader's request never settles there, so awaiting it would cost
+    // the unit tier a ten-second timeout for an assertion that is already
+    // made -- see docs/TESTING.md on the budget.
+    expect(ship.cloneHull()).toBeNull();
+  });
+
+  it('clones a loaded hull with shared geometry and no shared material', () => {
+    const ship = createShip(createStubTerrain());
+
+    // Stands in for the glTF `loadHull` would have added: the name is the
+    // only thing `cloneHull` looks for, and one material deliberately serves
+    // two meshes, the way the build script's join-by-material leaves them.
+    const model = new Group();
+    model.name = 'ship-hull';
+    const geometry = new BoxGeometry(1, 1, 1);
+    const shared = new MeshStandardMaterial({ color: 0x334455 });
+    // The flag `postfx.ts` stamps on a material it has already patched.
+    // `Material.copy` deep-copies userData but carries neither the hook nor
+    // the cache key, so a clone that kept this would be skipped by
+    // `postFx.adopt` and render a stop dark.
+    shared.userData['pirate-world/srgb-self-encode'] = true;
+    const port = new Mesh(geometry, shared);
+    const starboard = new Mesh(geometry, shared);
+    model.add(port, starboard);
+    ship.object.add(model);
+
+    const clone = ship.cloneHull();
+    expect(clone).not.toBeNull();
+    expect(clone!.scale.x).toBeCloseTo(MODEL_SCALE, 9);
+
+    const materials: Material[] = [];
+    const geometries: unknown[] = [];
+    clone!.traverse((node) => {
+      const mesh = node as Mesh;
+      if ((mesh as { isMesh?: boolean }).isMesh !== true) return;
+      materials.push(mesh.material as Material);
+      geometries.push(mesh.geometry);
+    });
+
+    expect(materials).toHaveLength(2);
+    for (const material of materials) {
+      expect(material).not.toBe(shared);
+      // Cleared, so `postFx.adopt` patches the raider's copy for real.
+      expect(material.userData).toEqual({});
+    }
+    // One source material is still one material on the clone: cloning per
+    // mesh instead would undo the model's join-by-material and cost the
+    // raider a draw call per bolt.
+    expect(materials[0]).toBe(materials[1]);
+    // Geometry is shared with the player's hull on purpose: same hull, and a
+    // 5 MB model's buffers are not worth a second copy.
+    expect(geometries[0]).toBe(geometry);
+    expect(geometries[1]).toBe(geometry);
+    // The player's own material is untouched by any of it, which is the whole
+    // reason a raider's recolour can never reach the ship.
+    expect(shared.userData['pirate-world/srgb-self-encode']).toBe(true);
   });
 });
