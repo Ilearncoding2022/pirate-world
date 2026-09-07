@@ -46,6 +46,27 @@ export interface Energy {
    * unaffected — a wreck can only ever move the level down.
    */
   wreck(): void;
+  /**
+   * Takes the hull's loss when an AI boat has won the cannon fight.
+   *
+   * The main tank goes to ZERO, and the backup cell — which a wreck leaves
+   * alone because it was bought with gold — is drawn down here too, because a
+   * defeat is not weather: it is another captain taking what the ship had. A
+   * cell holding more than DEFEAT_KEEP_ABOVE is left on DEFEAT_KEEP, and one
+   * at or below it is emptied outright, so the consolation exists only for a
+   * player who had genuinely invested in the cell.
+   *
+   * `rate` and `mode` are untouched, exactly as `spend` and `wreck` leave
+   * them: they describe the plant over the last frame and this is not the
+   * plant. Gold is not this module's to take — see `bounty.ts`.
+   */
+  defeat(): void;
+  /**
+   * Takes a draw's bruise: STALEMATE_COST off the main tank, floored at zero,
+   * and nothing else. Percentage POINTS off the bar, not a share of what was
+   * held — a wreck keeps a fraction, a stand-off costs a fixed amount.
+   */
+  stalemate(): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -410,5 +431,15 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     state.level *= WRECK_KEEP;
   }
 
-  return { state: state as EnergyState, update, spend, wreck };
+  /** STUB. Agent C fills this in; see docs/BATTLE_PLAN.md, "energy.ts". */
+  function defeat(): void {
+    /* stub */
+  }
+
+  /** STUB. Agent C fills this in; see docs/BATTLE_PLAN.md, "energy.ts". */
+  function stalemate(): void {
+    /* stub */
+  }
+
+  return { state: state as EnergyState, update, spend, wreck, defeat, stalemate };
 }

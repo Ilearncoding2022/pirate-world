@@ -296,7 +296,7 @@ function standardMaterialOf(mesh: Mesh): MeshStandardMaterial | null {
  * A flat neon emitter: emissive colour, no emissive map. The sail and the flag
  * carry their glow in a texture, which is exactly how they are told apart.
  */
-function isNeon(material: MeshStandardMaterial): boolean {
+export function isNeon(material: MeshStandardMaterial): boolean {
   const e = material.emissive;
   return material.emissiveMap === null && material.emissiveIntensity > 0 && e.r + e.g + e.b > 0;
 }

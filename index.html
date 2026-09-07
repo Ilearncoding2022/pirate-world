@@ -530,6 +530,19 @@
     </div>
     <!-- END SHOP -->
 
+    <!-- ===================== BATTLE =====================
+         The cannon fight's overlay. `battleui.ts` owns everything inside
+         this block, and it is the ONLY writer here — every other module
+         reaches its own marked block, never this one.
+
+         It ships empty and hidden. The strip, the FIRE key and the result
+         card are built by that module so the markup and the code that
+         drives it cannot drift apart. Below the blackout, which outranks
+         it: both fades of a battle happen behind an opaque screen. -->
+    <!-- BATTLE -->
+    <div class="battle" id="battle" hidden></div>
+    <!-- END BATTLE -->
+
     <!-- ===================== BLACKOUT =====================
          The fade a wreck happens behind. `blackout.ts` owns it.
 

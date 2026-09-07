@@ -2499,6 +2499,28 @@ kbd {
 /* END SHOP */
 
 /* ============================================================
+   BATTLE
+   ============================================================ */
+
+/* BATTLE */
+
+/*
+ * The cannon fight's overlay. `battleui.ts` is the only writer of this block.
+ *
+ * z-index 40, the project's overlay rank -- the fishing card, the record and
+ * the chandlery are all 40 -- and therefore below the blackout at 90, which
+ * both of a battle's fades happen behind, and below the splash at 100.
+ */
+.battle {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+}
+
+/* END BATTLE */
+
+/* ============================================================
    BLACKOUT
    ============================================================ */
 

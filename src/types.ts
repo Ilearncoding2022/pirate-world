@@ -515,3 +515,122 @@ export interface SaveData {
   /** Spare harpoons in the locker, 0-100. */
   readonly harpoons: number;
 }
+
+/* ------------------------------------------------------------------ */
+/* AI boats and the cannon battle                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Which of the two raiders this is. Red hunts the player; orange runs a fixed
+ * straight track and is only dangerous if the two happen to meet.
+ *
+ * The kind is MUTABLE over a boat's life: a red boat whose pursuit clock runs
+ * out becomes an orange one rather than vanishing, which is the whole reason
+ * this is one type and not two. See docs/BATTLE_PLAN.md.
+ */
+export type AiBoatKind = 'red' | 'orange';
+
+/** `pursue` is red-only. Every orange boat, converted or spawned, is `wander`. */
+export type AiBoatPhase = 'pursue' | 'wander';
+
+/**
+ * One AI boat on the sea, owned by `aiboats.ts` and mutated in place for as
+ * long as it lives. Hold the object, never a copy of its vectors.
+ */
+export interface AiBoat {
+  readonly kind: AiBoatKind;
+  readonly phase: AiBoatPhase;
+  /** Unit direction of the hull's centre. */
+  readonly position: Vector3;
+  /** Unit tangent: the direction it is travelling, which is also where its bow points. */
+  readonly forward: Vector3;
+  /** World units per second — the same unit `hud.ts` prints as a knot. */
+  readonly speed: number;
+  /** Seconds left in the current phase: the pursuit clock, or the straight run. */
+  readonly clock: number;
+  /**
+   * Fade in and out, 0..1. Drives the neon and the rim glow, so a boat arrives
+   * and leaves as a light coming up and going down rather than as a hull
+   * appearing out of nothing.
+   */
+  readonly envelope: number;
+}
+
+/**
+ * The raiders as everything downstream sees them. One object, mutated in place
+ * for the life of the run, exactly as `HazardState` and `WindState` are.
+ */
+export interface AiBoatState {
+  /** Live boats, at most one of each kind. */
+  readonly live: readonly AiBoat[];
+  /** Seconds of spawn-and-contact suppression left after a fight. */
+  readonly grace: number;
+}
+
+/**
+ * One side of a battle, in the arena's flat world units.
+ *
+ * The arena is NOT on the globe: `x` and `z` are plain metres about its own
+ * centre, `angle` is the position on the circle both boats travel, and
+ * `heading` is tangent to it. See docs/BATTLE_PLAN.md.
+ */
+export interface Combatant {
+  /** Radians about the arena centre, counter-clockwise positive. */
+  readonly angle: number;
+  readonly x: number;
+  readonly z: number;
+  /** Radians, direction of travel, on the same convention as ShipState.heading. */
+  readonly heading: number;
+  /** Rounds left in the locker, ROUNDS down to 0. */
+  readonly rounds: number;
+  /** Hits taken, 0 up to HITS_TO_LOSE. */
+  readonly hits: number;
+  /** Seconds until this side may fire again. */
+  readonly cooldown: number;
+}
+
+/** One cannonball in flight. Straight line, no drop, no drag. */
+export interface Cannonball {
+  readonly owner: 'player' | 'ai';
+  readonly x: number;
+  readonly z: number;
+  readonly vx: number;
+  readonly vz: number;
+  readonly age: number;
+}
+
+/** Something that happened this tick, for the scene and the UI to react to. */
+export interface BattleEvent {
+  readonly kind: 'fire' | 'hit' | 'splash';
+  readonly owner: 'player' | 'ai';
+  /** Where it happened, arena units. For a hit, the hull that took it. */
+  readonly x: number;
+  readonly z: number;
+}
+
+/** Who won. Set once, and the fight is over the moment it is not null. */
+export type BattleOutcome = 'win' | 'loss' | 'draw';
+
+/** The fight, mutated in place by `battle.ts` for the length of one battle. */
+export interface BattleState {
+  /** Radius of the circle both boats travel, arena units. Shrinks as they close. */
+  readonly radius: number;
+  readonly player: Combatant;
+  readonly ai: Combatant;
+  readonly balls: readonly Cannonball[];
+  /** Seconds since the fight began. */
+  readonly elapsed: number;
+  readonly outcome: BattleOutcome | null;
+  /** THIS TICK's events only. Rebuilt every update; never accumulate it. */
+  readonly events: readonly BattleEvent[];
+}
+
+/** What the player is asking for this tick. Written by `battleui.ts`. */
+export interface BattleInput {
+  /** Edge-triggered: true for exactly the one tick a press lands on. */
+  readonly fire: boolean;
+  /** W or the on-screen up key: go faster round the circle. */
+  readonly faster: boolean;
+  /** S or the on-screen down key: drop back. */
+  readonly slower: boolean;
+}

@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { GLOBE_RADIUS } from './geo';
 import type { HeightMap } from './heightmap';
-import type { HazardState, ShipState, Towns, WindState } from './types';
+import type { AiBoatState, HazardState, ShipState, Towns, WindState } from './types';
 import type { WaterBodies } from './waterbodies';
 import { OCEAN_CAP } from './wind';
 
@@ -325,7 +325,13 @@ const COS_RADAR_RANGE = Math.cos(RADAR_RANGE / GLOBE_RADIUS);
 
 export interface Radar {
   /** Redraws the scope. Safe to call before the first terrain raster. */
-  update(dt: number, ship: ShipState, wind: WindState, hazards: HazardState): void;
+  update(
+    dt: number,
+    ship: ShipState,
+    wind: WindState,
+    hazards: HazardState,
+    boats?: AiBoatState,
+  ): void;
 }
 
 /* ------------------------------------------------------------------ */

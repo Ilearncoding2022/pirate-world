@@ -36,7 +36,7 @@ import { OCEAN_CAP } from './wind';
  * have to move together. It is a mounting height, not the waterline -- see
  * MODEL_WATERLINE_Y for where the sea actually cuts the glTF hull.
  */
-const HULL_OFFSET = 0.6;
+export const HULL_OFFSET = 0.6;
 
 /**
  * Model-space Y at which the glTF hull is meant to meet the water.
@@ -427,6 +427,18 @@ export interface Ship {
    * without walking it there.
    */
   place(dir: Vector3, headingRad: number): void;
+  /**
+   * A copy of the loaded glTF hull, for an AI boat to wear.
+   *
+   * Null before `ready` settles and null forever if the load failed — an AI
+   * boat is not worth showing as the stand-in. Geometry is SHARED with the
+   * player's hull and every material is CLONED, so a raider's recoloured neon
+   * and its rim glow can never reach the ship the player is standing on.
+   *
+   * Scaled and mounted exactly as the player's is, so a clone dropped at the
+   * same radius floats at the same waterline.
+   */
+  cloneHull(): Object3D | null;
   /**
    * Stops the hull dead, where it stands, this instant.
    *
@@ -1081,5 +1093,12 @@ export function createShip(
     applyTransform();
   }
 
-  return { object, state: state as ShipState, ready, update, halt, place };
+  /**
+   * STUB. Agent B fills this in; see docs/BATTLE_PLAN.md, "ship.ts".
+   */
+  function cloneHull(): Object3D | null {
+    return null;
+  }
+
+  return { object, state: state as ShipState, ready, update, halt, place, cloneHull };
 }
