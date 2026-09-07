@@ -230,7 +230,7 @@ describe('aiboats: pursuit', () => {
     const at = step(ship.position, ship.forward, 45);
     boats.force('red', at, towardOf(at, ship.position));
 
-    // 45 units at RED_SPEED is 2.25 s, comfortably inside the shortest clock,
+    // 45 units at RED_SPEED is 3 s, comfortably inside the shortest clock,
     // and PHASE_MAX is the longest one this boat could have drawn.
     let contactAt = -1;
     for (let i = 0; i < PHASE_MAX / dt; i++) {

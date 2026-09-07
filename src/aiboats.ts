@@ -136,17 +136,24 @@ export const ORANGE_SPAWN_MAX = 50;
  * point of them: neither can be outrun in a straight line, so a player who
  * wants to avoid a fight has to out-TURN one. See RED_TURN_RATE, which is what
  * makes that possible.
+ *
+ * The two are now the SAME speed, and the aggressor is no longer the faster
+ * hull. What still separates them is intent and not pace: a red boat steers
+ * at the player every frame while an orange one runs a track drawn once and
+ * never revised, so red closes because it is aimed, not because it is quick.
+ * The escape is unchanged in kind and easier in degree -- see RED_TURN_RATE,
+ * whose turning circle tightens with the speed drop rather than widening.
  */
-export const RED_SPEED = 20;
+export const RED_SPEED = 15;
 export const ORANGE_SPEED = 15;
 
 /**
  * Seconds a boat spends in one phase: a red boat's pursuit, and any orange
  * boat's straight run.
  *
- * Short on purpose. A red boat covers 100 to 160 units in this time, which is
- * two to three scope diameters, so a chase is a thing that happens and then is
- * over rather than a state the player is stuck in. It is also the other half
+ * Short on purpose. A red boat covers 75 to 120 units in this time, which is
+ * one and a half to two scope diameters, so a chase is a thing that happens
+ * and then is over rather than a state the player is stuck in. It is also the other half
  * of the escape: a wide turning circle only matters if the chaser runs out of
  * clock before it can come round for a second pass.
  */
@@ -156,9 +163,9 @@ export const PHASE_MAX = 8;
 /**
  * The tightest a red boat can turn, radians/s.
  *
- * Thirty-five degrees a second at 20 kn is a turning circle of about 33 units
- * radius, ten hull lengths. The player at 10 kn and `ship.ts`'s `TURN_RATE` of
- * 1.2 rad/s turns inside 9. That gap is the escape the owner asked for: a
+ * Thirty-five degrees a second at 15 kn is a turning circle of about 25 units
+ * radius, seven hull lengths. The player at 10 kn and `ship.ts`'s `TURN_RATE`
+ * of 1.2 rad/s turns inside 9. That gap is the escape the owner asked for: a
  * player who puts the helm hard over away from the bow gets inside the
  * chaser's circle, and it overshoots and has to come round again, which the
  * clock above does not leave it time to do.
@@ -584,7 +591,7 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
    * that same rotation: parallel transport, `ship.ts`'s way with the bow and
    * `wind.ts`'s with the weather. The re-orthogonalisation afterwards is not
    * decoration: each step leaves the tangent a rounding error out of the
-   * plane, and a red boat covers 160 units in its life.
+   * plane, and a red boat covers 120 units in its life.
    */
   function transport(boat: MutableAiBoat, dt: number): void {
     _prevPosition.copy(boat.position);
