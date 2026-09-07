@@ -6,7 +6,7 @@ import { HEIGHTMAP_GLSL } from './heightmap';
 import type { WaterBodies } from './waterbodies';
 import { GLOBE_RADIUS } from './geo';
 import type { ShipState, WindState } from './types';
-import { OCEAN_CAP } from './wind';
+import { seaWindStrength } from './wind';
 import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
@@ -353,16 +353,18 @@ export function createWater(
        * The wind, integrated into the sea.
        *
        * `strength` is the wind as a fraction of the strongest the world blows,
-       * which is the same OCEAN_CAP the radar arrow scales its length by -- so
-       * a full-length arrow and a full sea arrive together rather than one of
-       * them topping out first.
+       * biased by `SEA_WIND_BIAS` so the sea reads four knots livelier than it
+       * actually blows -- see that constant for why, and for the saturation it
+       * costs at the top of the range. The arrow on the scope is NOT biased, so
+       * the two no longer top out together: the sea reaches full height at
+       * 6.4 kn while the arrow goes on lengthening to 10.4.
        *
        * Height goes as the SQUARE of it and drift goes linearly, which is the
        * asymmetry that makes weather read: a freshening wind lengthens the
        * swell noticeably before it starts throwing it about, and the last
        * quarter of the range is where most of the height lives.
        */
-      const strength = Math.min(1, Math.max(0, wind.speed / OCEAN_CAP));
+      const strength = seaWindStrength(wind.speed);
       uniforms.uWaveIntensity.value =
         CALM_INTENSITY + (1 - CALM_INTENSITY) * strength * strength;
 

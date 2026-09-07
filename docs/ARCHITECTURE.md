@@ -1166,10 +1166,56 @@ to give up than an extra argument.
 
 The three wave layers drift along `wind.direction` at 1.5 / 1.9 / 2.4 world
 units per second at `OCEAN_CAP`, and wave height runs as `strength²`, where
-`strength` is `speed / OCEAN_CAP` — the same cap the radar arrow scales its
-length by, so a full-length arrow and a full sea arrive together. Height square,
-drift linear: a freshening wind lengthens the swell noticeably before it starts
-throwing it about.
+`strength` is `seaWindStrength(speed)`. Height square, drift linear: a
+freshening wind lengthens the swell noticeably before it starts throwing it
+about.
+
+**The sea is drawn four knots ahead of the weather.** `seaWindStrength` is
+`(speed + SEA_WIND_BIAS) / OCEAN_CAP`, clamped — so the 1 kn lull that
+`LULL_SPEED` guarantees is painted as a 5 kn breeze, 2 as 6, and so on. The
+bias is appearance only: the push on the hull, the SPEED and WIND readouts, the
+scope's arrow, the flag and the sail all still read the true `WindState.speed`.
+The reason is the paragraph below on the two floors — at `LULL_SPEED` the
+wind's own contribution to the height is a hundredth of it, so between gusts
+the sea was almost entirely `CALM_INTENSITY` and read as a plate rather than as
+water.
+
+**It costs the top of the range, and that is a real trade rather than an
+oversight.** Strength is clamped to 1, so past `OCEAN_CAP - SEA_WIND_BIAS`
+— 6.4 kn offshore, and the cap near a coast is only 5.2 — the sea is already
+at full height and a harder blow does not raise it. Above that the water stops
+being a reading of the weather, and the arrow on the scope no longer tops out
+with it: the sea is full at 6.4 while the arrow goes on lengthening to 10.4.
+If the top of the range ever has to separate again, the fix is to RESCALE the
+mapping rather than shift it; `SEA_WIND_BIAS` in `wind.ts` is where that
+argument starts.
+
+**The bias is single-sourced; the height law around it is not.** `water.ts`
+(what is drawn) and `ship.ts` (what the hull rides) keep deliberate copies of
+the `CALM_INTENSITY + (1 - CALM_INTENSITY) · strength²` law — see
+`HULL_CALM_INTENSITY` for why — and both call the one exported
+`seaWindStrength`. A duplicated bias is the desync that duplication invites: a
+hull riding an unbiased sea under a biased one is a boat sitting flat in
+visible waves.
+
+**The trap: the drift offsets are positions, not velocities.** The shader used
+`p + DRIFT * uTime`, which encodes where the field has *always* been — so
+changing the drift rewrites its whole history and every shift of wind would
+teleport the ocean by minutes of travel. They are now integrated on the CPU
+each frame, so a change of wind changes only where the sea goes next. Measured:
+a 90° shift moves the field by one frame's travel, 0.025 world units. The lake
+clock still works because `motion` is constant in time, so scaling an
+integrated offset is the same as integrating a scaled rate.
+
+Two floors, both deliberate departures from strict proportionality. Lulls run
+3–15 s, and a sea whose height and drift both go to zero is a mirror — which
+reads as a bug, not as weather. `CALM_DRIFT` (0.2) and `CALM_INTENSITY` (0.16)
+keep the swell running through one, which is roughly what real swell does.
+They are named for a state the wind no longer has, and they still earn their
+place: at `LULL_SPEED` the wind's own contribution is a hundredth of the
+height, so these two are still what the sea is made of between gusts. Between those floors and a full gale the law is exact:
+half the wind gives 25.0% of the height. Coastal foam keeps its own fixed
+drift — surf runs onto the beach, not downwind.
 
 ### The two speeds
 

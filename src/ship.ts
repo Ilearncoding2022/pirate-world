@@ -23,7 +23,7 @@ import { sampleWave } from './wavefield';
 import type { WaveOffsets, WaveSample } from './wavefield';
 import { DISPLACE_AMPLITUDE } from './waveconstants';
 import { hazardHeight } from './hazardfield';
-import { OCEAN_CAP } from './wind';
+import { seaWindStrength } from './wind';
 
 /* ------------------------------------------------------------------ */
 /* Tuning constants                                                    */
@@ -932,7 +932,13 @@ export function createShip(
     // Same law as `water.ts`'s uWaveIntensity (height ~ wind speed squared,
     // floored so a calm sea still moves): see HULL_CALM_INTENSITY's comment
     // for why this is a second copy of that formula rather than a shared one.
-    const windStrength = clamp(wind.speed / OCEAN_CAP, 0, 1);
+    //
+    // The BIAS inside `seaWindStrength` is not a second copy, deliberately.
+    // The height law is duplicated and kept in step by hand; the four knots
+    // the sea is drawn ahead of the weather are single-sourced in `wind.ts`,
+    // because a hull riding an unbiased sea under a biased one would be a
+    // boat sitting flat in visible waves.
+    const windStrength = seaWindStrength(wind.speed);
     const waveGain = HULL_CALM_INTENSITY + (1 - HULL_CALM_INTENSITY) * windStrength * windStrength;
 
     const halfLength = (HULL_SAMPLE_HALF_LENGTH * MODEL_SCALE) / GLOBE_RADIUS;

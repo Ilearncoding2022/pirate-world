@@ -65,7 +65,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   layers drift the way the wind is blowing, and their height goes as the
   *square* of its speed, so a gale is four times the sea of half a gale and
   not twice it. A calm keeps a residue of both, because swell outlives the
-  wind that raised it.
+  wind that raised it. The water is drawn four knots livelier than it actually
+  blows — the 1-knot lull looks like a 5-knot breeze, 2 looks like 6 — so the
+  sea is never a plate of glass. Only the look of it is shifted: the readouts,
+  the arrow, the push on the hull and the set of the sails are all the true
+  wind. The trade is at the top, where the sea reaches its full height at
+  about 6 knots and a harder blow does not raise it further.
 - **Lakes and inland seas.** Water is flood-filled from the spawn point at
   startup; anything the ship can never reach is shaded as still fresh water —
   green, glassy, a quarter of the sea's motion, and no surf.

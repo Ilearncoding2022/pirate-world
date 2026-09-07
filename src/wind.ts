@@ -51,6 +51,44 @@ export const OCEAN_CAP = 10.4;
  */
 export const OPEN_SEA_DISTANCE = 40;
 
+/**
+ * Knots added to the wind before the SEA reads it. Appearance only.
+ *
+ * The sea is drawn as though it were blowing four knots harder than it is, so
+ * the 1 kn lull that `LULL_SPEED` guarantees looks like a 5 kn breeze, 2 looks
+ * like 6, and so on. It moves nothing else: the hull's push, the SPEED and
+ * WIND readouts, the scope's arrow, the flag and the sail all still read the
+ * true `WindState.speed`. Only how the water LOOKS is shifted, which is what
+ * was asked for -- the old lull was a plate of glass, and the sea spent most
+ * of its time near the bottom of a curve that puts most of its height in the
+ * top quarter.
+ *
+ * **It saturates.** Strength is clamped to 1, so once the true wind passes
+ * `OCEAN_CAP - SEA_WIND_BIAS` -- 6.4 kn offshore -- the sea is already at full
+ * height and blowing harder does not change it. Above that the water stops
+ * being a reading of the weather. That is inherent in "shift the curve
+ * right" and is the price of the lull looking alive; if the top of the range
+ * needs to separate again, the fix is to rescale the mapping rather than to
+ * shift it, and this constant is where that argument starts.
+ *
+ * Exported and read by BOTH `water.ts` (what is drawn) and `ship.ts` (what the
+ * hull rides) through `seaWindStrength`. Those two files keep deliberate
+ * copies of the height law itself -- see `HULL_CALM_INTENSITY` -- but the bias
+ * is single-sourced, because a hull riding a calmer sea than the one on screen
+ * is exactly the desync that duplication invites.
+ */
+export const SEA_WIND_BIAS = 4;
+
+/**
+ * The wind as the sea sees it: 0 at a dead calm, 1 at a full gale.
+ *
+ * The one place `SEA_WIND_BIAS` is applied and the one place the result is
+ * clamped, so the shader and the hull cannot disagree about either.
+ */
+export function seaWindStrength(windSpeed: number): number {
+  return Math.min(1, Math.max(0, (windSpeed + SEA_WIND_BIAS) / OCEAN_CAP));
+}
+
 /** Event and lull durations, seconds. Drawn uniformly from each band. */
 const EVENT_MIN = 5;
 const EVENT_MAX = 30;
