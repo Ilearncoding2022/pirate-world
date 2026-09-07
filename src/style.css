@@ -246,7 +246,7 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   SPD — ground speed, and the wind's signed share of it
+   SPEED — ground speed, and the wind's signed share of it
 
    The suffix is the quiet half of the reading: the big cyan number is what
    the ship is doing, the small one is how much of that the weather is
@@ -323,7 +323,7 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   WND — bow-relative arrow and true wind speed
+   WIND — bow-relative arrow and true wind speed
 
    One modifier class on .wnd carries the whole calm/blowing distinction, the
    same trick .pwr uses for its four states: hud.ts writes one class and the
@@ -382,7 +382,7 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   PWR — percentage, ten-notch bar, mode tag, signed rate
+   POWER — percentage, ten-notch bar, mode tag, signed rate
 
    The four colour states are nothing but a custom-property swap on .pwr,
    set by hud.ts as a single class. Everything under it draws from those
@@ -1083,7 +1083,7 @@ kbd {
     gap: 7px;
   }
   /* Same reasoning as the status line above: with the panel at content width,
-     SPD and WND are now the two rows carrying a second value each, and they
+     SPEED and WIND are now the two rows carrying a second value each, and they
      are what would push it wider. Trim the annotations, not the readings. */
   .spd__wind {
     font-size: 9.5px;
@@ -1131,7 +1131,7 @@ kbd {
 /* HUD DOCK */
 
 /* ---------------------------------------------------------------------
-   GOLD — the purse, in the telemetry panel between WND and PWR.
+   GOLD — the purse, in the telemetry panel between WIND and POWER.
    ------------------------------------------------------------------- */
 
 /*

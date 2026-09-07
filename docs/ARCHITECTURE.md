@@ -435,7 +435,7 @@ happens to the world while it runs.
 Power runs **before** the ship, so it charges for a frame of travel the ship has
 already made rather than one it might not be able to afford. `globe.update` is
 what writes `env`, so the sun the solar panels see is one frame old too — 16 ms
-of a 30-minute day.
+of a 10-minute day.
 
 `globe.update` takes `shipState` and `camera` because two of the water's
 plugins follow the ship: a wake map and a reflection cube, neither of which is
@@ -665,14 +665,69 @@ never of a clock it carries, and cross-timezone travel falls out for free: sail
 east into the sunrise and dawn arrives sooner, sail west and you hold the
 sunset. Nothing models this; deleting it would take work.
 
-The numbers are worth knowing before retuning `DAY_LENGTH`. The terminator
-sweeps the ground at `2*PI*GLOBE_RADIUS / DAY_LENGTH` — 0.35 world units a
-second — while the ship does 20. About sixty to one, the reverse of Earth,
-where the ground beats a ship roughly forty to one. So at anchor the cycle is
-the hour `DAY_LENGTH` says, and under way it is not: full ahead east collapses
-it to about a minute, and full ahead west reverses the sun outright. Only a
-shorter day, a slower ship or a larger `GLOBE_RADIUS` moves that ratio — the
-last because it slows the ship in degrees without slowing the sun.
+The numbers are worth knowing before retuning `DAY_LENGTH`, which is now
+**1200 s — ten minutes of day and ten of night** at the equator. The
+terminator sweeps the ground at `2*PI*GLOBE_RADIUS / DAY_LENGTH` — 1.05 world
+units a second — while the ship does 10. About ten to one, still the reverse of
+Earth, where the ground beats a ship roughly forty to one, but no longer the
+sixty to one it was: the day went from an hour to twenty minutes and the hull
+from 15 kn to 10 in the same pass. So at anchor the cycle is the twenty minutes
+`DAY_LENGTH` says, and under way it is not: full ahead east compresses it to
+about two minutes, and full ahead west stretches it a long way without quite
+stopping the sun the way it used to. Only a shorter day, a slower ship or a
+larger `GLOBE_RADIUS` moves that ratio — the last because it slows the ship in
+degrees without slowing the sun.
+
+## The boot, and the screen it happens behind
+`startGame()` is `async`, and the reason is not concurrency. Building the world
+is heavy **synchronous** work — the height map is rasterised, the islets are
+culled, the land mask is installed, the towns are placed — and synchronous work
+does not let the browser paint. Written straight through, a progress bar would
+jump from 0 to 100 on the frame everything finished and never once be seen.
+
+So `loading.step()` sets the bar and then *waits for the paint*, and every call
+site names the stage that is **about to** run rather than the one that just
+did. The bar is a promise, not a report. `painted()` waits two animation frames
+for it: a single `requestAnimationFrame` callback runs before the paint it is
+scheduled against, so resolving there would hand control straight back to a
+caller that blocks the main thread for half a second.
+
+| | |
+|---|---|
+| Splash markup | ships **visible** in `index.html` — `main.ts` is a deferred module, so the browser paints it from HTML and CSS before a line of the bundle runs |
+| `loading.ts` | takes it over; it is the one piece of UI in the project a module does not build |
+| Hull progress | real bytes, via `createShip`'s `onHullProgress` → `GLTFLoader`'s `onProgress`. It occupies 0.56–0.88 of the bar and reports through `set`, not `step`, because it is not a stage boundary and must not stop for a paint |
+| `?probe=wave` | removes the splash itself; it draws its own canvas and has no world to build |
+| Failure | a bundle that never loads leaves the splash up forever, which is correct — there is no game behind it to reveal |
+
+**The hull is awaited before the first frame.** It used to land mid-game behind
+the stand-in; now the first frame the player sees has a ship in it. `loadHull`
+catches its own failure, so a missing model costs the boot one request and no
+more.
+
+**One frame is rendered and thrown away while the splash is still up.**
+Materials in this engine compile on first draw, so without it the first frame
+the player sees is the frame every shader in the world is handed to the driver
+— a hitch of hundreds of milliseconds arriving exactly when they have just been
+told the game is ready. It runs the frame loop's own sequence minus the ship's
+physics, so nothing compiles there that would not have compiled here.
+
+### Illustrations
+The two paintings in `assets/Illustrations/` are **WebP at web sizes**, not the
+1792x1024 PNGs they were authored as: 2.5 MB each became 133 KB and 119 KB,
+a 95% cut with no visible loss. The masters are kept alongside in
+`assets/Illustrations/masters/`.
+
+The sizes are picked against where each is actually drawn. The cover is 1280
+wide because its panel is at most 572 CSS px across, which is 1144 device
+pixels on a 2x display — a slight downscale at every size it is really used
+rather than an upscale. The splash is 1600 because it is full-bleed.
+
+Both are CSS `background-image`s with the painting's own deep navy as a
+`background-color` underneath, so the first paint is the right colour rather
+than a white flash. The cover's element ships `display: none`, so its file is
+not fetched until the screen is first opened; the splash's is fetched
+immediately, which is the whole point of it.
 
 ## Frames, and where they stop working
 A tangent frame exists at a point. `tangentFrame(up)` is degenerate at the
@@ -795,7 +850,7 @@ frame. The wind arrow rides the rim on the true bearing from the **live** frame,
 not the raster's: it is attached to nothing on the picture, so projecting it
 through a frame up to a tenth of a second old would simply lag the bow through
 every turn. It carries the gust glyph on its **tail**, byte-for-byte the same
-SVG path data the SPD row uses, parsed by `Path2D` so the two cannot drift
+SVG path data the SPEED row uses, parsed by `Path2D` so the two cannot drift
 apart by a curve — on the tail because the head is the reading, and a mark laid
 over it would be taken for part of the arrowhead. That glyph is the one thing
 on this canvas authored with a pixel floor rather than purely in scope radii:
@@ -962,7 +1017,7 @@ its own.
 | Number | Means | Who reads it |
 |---|---|---|
 | `ShipState.speed` | engine only, along the bow | the burn, turn rate, bank, `MAX_FORWARD` clamp, `STOP_EPSILON`, the solar test. Heave, pitch and roll no longer read it at all — they are `sampleWave` readings at the hull, driven by the wave field and the wind, not by the engine; see **The wave field** |
-| `ShipState.groundSpeed` | engine + wind, signed | the HUD's `SPD` row, the berth connect test |
+| `ShipState.groundSpeed` | engine + wind, signed | the HUD's `SPEED` row, the berth connect test |
 
 Two rules in `energy.ts` moved or deliberately did not:
 
@@ -1002,8 +1057,8 @@ numbers are implemented as specified rather than one being quietly bent to fit
 the other; if a true `COAST_CAP` at the shoreline is ever wanted, either add a
 ring at 0 or treat a hit on the innermost ring as distance zero.
 
-**Feedback.** The HUD carries a `WND` row (arrow relative to the bow, matching
-the bow-up scope, or `CALM`) and breaks the `SPD` row down into ground speed
+**Feedback.** The HUD carries a `WIND` row (arrow relative to the bow, matching
+the bow-up scope, or `CALM`) and breaks the `SPEED` row down into ground speed
 plus the wind's signed contribution, which is what makes the grip rule legible.
 The radar draws a rim arrow on the wind's *true* bearing in the **overlay**
 pass on the live frame, like the north mark — it is not attached to terrain, so

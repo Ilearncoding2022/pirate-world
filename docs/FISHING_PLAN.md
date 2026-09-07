@@ -318,7 +318,7 @@ everything else. Both buttons opt back into `pointer-events`.
 
 ### Gold readout
 
-A new `readout` row `GOLD` in the telemetry panel between WND and PWR,
+A new `readout` row `GOLD` in the telemetry panel between WIND and POWER,
 value in `--gold: #ffc44d`, tabular numerals, no thousands separator under
 10 000 and a thin space above. The card header shows the same figure and the
 session's earned figure beside it.

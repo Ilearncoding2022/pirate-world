@@ -56,11 +56,16 @@ const FULL_SPEED_ENDURANCE = 90;
 /**
  * Seconds of full tank at anchor with the panels dark, ie. the hotel load.
  *
- * `daynight.ts` runs a 1800 s day, half of it night, so 42 minutes is one
- * whole night hove to that ends on 29% rather than on empty. The margin is the
- * point: a player who anchors at dusk should wake up low and nervous, not
- * dead. Systems always draw something -- a plant that costs nothing to leave
- * running is a plant nobody bothers to recharge.
+ * 42 minutes. It was set against an 1800 s night, which it outlasted by a
+ * margin -- a player who anchored at dusk woke up on 29% rather than dead --
+ * and `daynight.ts` has since cut the night to 600 s. The endurance was
+ * deliberately left where it was rather than shortened to hold the old
+ * squeeze, so a night hove to now costs about 24% and ends around 76%.
+ *
+ * That is a real loosening and it is the one to reach for first if drifting
+ * overnight stops being a decision. Systems always draw something -- a plant
+ * that costs nothing to leave running is a plant nobody bothers to recharge --
+ * but the draw only bites while the night is long enough to feel it.
  */
 const IDLE_ENDURANCE = 42 * 60;
 

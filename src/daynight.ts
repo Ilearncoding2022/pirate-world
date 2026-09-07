@@ -16,10 +16,10 @@ export interface DayNight {
 /**
  * Real seconds for one full orbit of the sun around the globe.
  *
- * An hour: thirty minutes of day and thirty of night, for a ship sitting still
- * on the equator. Away from the equator the split is uneven and drifts with
- * the season, exactly as it does on Earth, because the sun's latitude wanders
- * -- see AXIAL_TILT below.
+ * Twenty minutes: ten of day and ten of night, for a ship sitting still on the
+ * equator. Away from the equator the split is uneven and drifts with the
+ * season, exactly as it does on Earth, because the sun's latitude wanders --
+ * see AXIAL_TILT below.
  *
  * A moving ship gets a different day entirely, and gets it for free. The sun
  * is placed in world space from elapsed time alone, and every shader decides
@@ -30,15 +30,18 @@ export interface DayNight {
  * of the geometry rather than being modelled.
  *
  * One caveat worth knowing before retuning this. The terminator sweeps the
- * ground at 2*PI*GLOBE_RADIUS / DAY_LENGTH, which here is 0.35 world units a
- * second, while the ship does 20. The ship is about sixty times faster than
- * the sun -- the reverse of Earth, where the ground beats a ship roughly forty
- * to one -- so running west at speed does not merely stretch the day, it stops
- * the sun outright, and running east collapses the hour into about a minute.
- * Only three things move that ratio: a shorter day, a slower ship, or a larger
+ * ground at 2*PI*GLOBE_RADIUS / DAY_LENGTH, which at 1200 s is 1.05 world
+ * units a second against the ship's 10. The ship is about ten times faster
+ * than the sun -- the reverse of Earth, where the ground beats a ship roughly
+ * forty to one. Cutting the day from an hour to twenty minutes and the hull
+ * from 15 kn to 10 has narrowed that gap from sixty to one: running west at
+ * speed still stretches the day a long way, but it no longer stops the sun
+ * outright the way it used to, and running east now compresses the twenty
+ * minutes to about two rather than collapsing the hour into one. Only three
+ * things move the ratio: the day's length, the ship's speed, or a larger
  * GLOBE_RADIUS, which slows the ship in degrees without slowing the sun.
  */
-const DAY_LENGTH = 3600;
+const DAY_LENGTH = 1200;
 
 /**
  * Days in one seasonal cycle. The subsolar latitude drifts on this much slower

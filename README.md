@@ -62,10 +62,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 - **Lakes and inland seas.** Water is flood-filled from the spawn point at
   startup; anything the ship can never reach is shaded as still fresh water —
   green, glassy, a quarter of the sea's motion, and no surf.
-- **Day and night.** The sun orbits once an hour on a slowly drifting tilt —
-  thirty minutes of daylight and thirty of dark for a ship at anchor on the
-  equator — sweeping a terminator across the globe. Under way it is not an
-  hour: the sun is placed in world space and every surface works out day or
+- **Day and night.** The sun orbits every twenty minutes on a slowly drifting
+  tilt — ten minutes of daylight and ten of dark for a ship at anchor on the
+  equator — sweeping a terminator across the globe. Under way it is not twenty
+  minutes: the sun is placed in world space and every surface works out day or
   night from where it actually is, so sailing east into the sunrise shortens
   your day and sailing west holds the sunset, the same way crossing time zones
   does. Light warms toward the horizon.
@@ -136,7 +136,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   drives round it; run west and it stalls. Latitude, longitude and heading sit above the glass; the
   wind rides the rim as a warm arrow, signed on its tail with the same gust
   glyph the speed readout uses, so the two marks are legibly one subject.
-  Speeds are whole knots — the tenth only ever flickered. The compass sits in
+  Speeds are whole knots — the tenth only ever flickered, and every readout on
+  the panel is spelled out: SPEED, WIND, POWER. The compass sits in
   the middle of the helm pad, and the purse rides the telemetry panel in brass,
   the one warm figure on a cold instrument.
 

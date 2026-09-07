@@ -217,7 +217,7 @@ const RAD_TO_DEG = 180 / Math.PI;
 /**
  * "+8" -- the wind's signed share of the ground speed, or "" for none.
  *
- * Whole knots, because it rides directly beside SPD and a tenth here against
+ * Whole knots, because it rides directly beside SPEED and a tenth here against
  * an integer there would read as two different instruments. It follows
  * `formatSpeed` for that reason and not on its own account.
  *
@@ -401,8 +401,8 @@ export function createHud(wallet: Wallet): {
   const writeNeedle = transformWriter(document.getElementById('hud-compass-needle'));
   const writeSpeed = textWriter(document.getElementById('hud-speed'));
   const writeSpeedWind = textWriter(document.getElementById('hud-speed-wind'));
-  // One modifier on the SPD wrapper hides both the icon and the number, the
-  // same way the WND row hides its dart: the glyph and the figure it labels
+  // One modifier on the SPEED wrapper hides both the icon and the number,
+  // the same way the WIND row hides its dart: the glyph and the figure it labels
   // cannot end up disagreeing about whether the wind is doing anything.
   const writeSpdState = modifierWriter(document.getElementById('hud-spd'), 'spd');
   const writeLat = textWriter(document.getElementById('hud-lat'));
@@ -443,7 +443,7 @@ export function createHud(wallet: Wallet): {
       // The rose is fixed; the needle points where the ship is heading.
       writeNeedle(`rotate(${headingDeg.toFixed(1)}deg)`);
 
-      // SPD is GROUND speed -- what the player watches go past -- with the
+      // SPEED is GROUND speed -- what the player watches go past -- with the
       // engine's share subtracted out beside it. Printing engine speed here
       // instead would leave the panel flatly contradicting the sea, and the
       // difference is the only place the 0.35 grip rule becomes visible: 8 kn

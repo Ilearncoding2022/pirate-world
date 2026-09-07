@@ -240,7 +240,7 @@ function startGame(): void {
 
     // Power first, on last frame's speed: the ship must not spend energy it
     // turns out not to have. `globe.update` is what writes `env`, so the sun the
-    // solar panels see is also one frame old -- 16 ms of a 30-minute day.
+    // solar panels see is also one frame old -- 16 ms of a 10-minute day.
     energy.update(dt, ship.state, env);
     // Wind sits between the two: it needs this frame's docked verdict to know
     // whether the ship is in shelter, and the ship needs this frame's push.

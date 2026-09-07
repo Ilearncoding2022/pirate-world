@@ -115,7 +115,7 @@ const WIND_FILL = 'rgba(255, 186, 84, 0.9)';
 /**
  * The gust glyph that sits on the arrow's tail, as SVG path data.
  *
- * Byte-for-byte the same three strokes `index.html` puts in front of the SPD
+ * Byte-for-byte the same three strokes `index.html` puts in front of the SPEED
  * row's wind share, because it has to be recognised as the same mark: the
  * panel says how many knots the weather is worth and the scope says which way
  * it is going, and a player should not have to learn that twice. Path2D parses

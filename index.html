@@ -24,10 +24,10 @@
         <!-- Ground speed, with the wind's signed share of it trailing. The
              two are wrapped together so the pair rides the row's right edge
              as one value; the suffix ships empty and CSS collapses it, which
-             is how a windless run keeps the SPD row exactly as it always
+             is how a windless run keeps the SPEED row exactly as it always
              looked. -->
         <div class="readout">
-          <span class="readout__key">SPD</span>
+          <span class="readout__key">SPEED</span>
           <span class="spd spd--calm" id="hud-spd">
             <span class="readout__val" id="hud-speed">0 kn</span>
             <!-- The gust glyph labels the grey figure beside it as the wind's
@@ -50,7 +50,7 @@
              pushing the hull. It ships calm because the sim does; hud.ts
              reads that class back rather than assuming it. -->
         <div class="readout">
-          <span class="readout__key">WND</span>
+          <span class="readout__key">WIND</span>
           <span class="wnd wnd--calm" id="hud-wnd">
             <span class="wnd__arrow" id="hud-wnd-arrow" aria-hidden="true">
               <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" focusable="false">
@@ -63,7 +63,7 @@
 
         <!-- The purse. It sits between the weather and the power because it
              is the one warm figure on a cold panel and the rule beneath the
-             PWR block would otherwise separate it from the readouts it is
+             POWER block would otherwise separate it from the readouts it is
              one of. hud.ts writes it from a wallet subscription, not from the
              frame loop, so the shipped 0 is what a new save actually holds
              and the first write is a real catch. -->
@@ -79,7 +79,7 @@
              hud.ts reads both back at construction rather than assuming. -->
         <div class="pwr pwr--solar" id="hud-pwr">
           <div class="readout">
-            <span class="readout__key">PWR</span>
+            <span class="readout__key">POWER</span>
             <span class="readout__val pwr__val" id="hud-pwr-value">100%</span>
           </div>
 
@@ -120,7 +120,7 @@
            Owned by agent D. Everything between this comment and the
            matching END marker belongs to one agent; edit inside it, never
            replace the file. The gold readout goes in the telemetry panel
-           above, between the WND and PWR rows. -->
+           above, between the WIND and POWER rows. -->
       <!-- HUD DOCK -->
       <!-- The two things the ship can do that are not steering it. Styled as
            the helm keys are, and for the same reason: everything on this HUD
@@ -130,7 +130,7 @@
            [FISH] ships ARMED, with no title, because the sim starts on a full
            tank. hud.ts reads that state back off the markup rather than
            assuming it, so the first frame writes no attribute at all -- the
-           same contract the PWR block's shipped-lit segments keep. -->
+           same contract the POWER block's shipped-lit segments keep. -->
       <nav class="dock" aria-label="Ship activities">
         <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Go fishing">
           <span class="dock__key">FISH</span>
@@ -328,7 +328,7 @@
           <p class="fishing__total" id="fishing-total">+0 gold</p>
           <div class="fishing__actions">
             <button class="fbtn fbtn--go" id="fishing-again" type="button">
-              Fish again <span class="fbtn__cost">-50% pwr</span>
+              Fish again <span class="fbtn__cost">-50% power</span>
             </button>
             <button class="fbtn" id="fishing-close" type="button">Close</button>
           </div>
