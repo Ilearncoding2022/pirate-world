@@ -1221,8 +1221,10 @@ decisions a later reader is most likely to undo by accident.
 
 Three hazards at most, one of each kind, rolled every **1 s at 20% / 10% / 2%**.
 There is ONE roll timer and both waves and maelstroms are drawn on it, so
-`ROLL_PERIOD` moves all three frequencies together — retune a single
-probability instead. At a roll a second the nominal waits are 5 s / 10 s / 50 s,
+`hazards.ROLL_PERIOD` moves all three frequencies together — retune a single
+probability instead. Note `aiboats.ts` exports a `ROLL_PERIOD` of its own on
+the same name and a different value (10 s); nothing imports both, and neither
+is the other's to retune. At a roll a second the nominal waits are 5 s / 10 s / 50 s,
 but those are ceilings rather than rates: only one hazard of each kind is ever
 on the water, so what the fast tick actually buys is that the next one rises
 soon after the last one dies, not a sea three deep. A crest is a 20-unit
