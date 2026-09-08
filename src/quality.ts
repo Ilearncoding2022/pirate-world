@@ -72,6 +72,12 @@ export interface QualitySettings {
   /**
    * How many raindrops `rain.ts` builds, and whether it is built at all.
    *
+   * A quarter more than the counts this table opened with (1500 and 3000).
+   * The curtain was hard to see, and the fix is mostly `rain.ts`'s own alpha
+   * and streak length -- both free -- rather than vertices; the extra quarter
+   * is what closes the gaps those two cannot, at a cost that stays well
+   * inside one draw call.
+   *
    * 0 means the module is ABSENT rather than idle, the same convention
    * `reflectionSize` uses: on the low tier a storm is a dark sky, a dimmed
    * key light and thick haze, which is most of what a storm is, and the one
@@ -119,7 +125,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 1,
     landDetail: 80,
     landFacetBlend: 0.8,
-    rainDrops: 1500,
+    rainDrops: 1875,
   },
   high: {
     pixelRatioCap: 2,
@@ -131,7 +137,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 2,
     landDetail: 96,
     landFacetBlend: 0.85,
-    rainDrops: 3000,
+    rainDrops: 3750,
   },
 };
 
@@ -216,6 +222,7 @@ declare global {
         storm: number;
         fog: number;
         rain: number;
+        flash: number;
         visibility: number;
         encounters: number;
         cells: { kind: string; radius: number; strength: number; distance: number }[];

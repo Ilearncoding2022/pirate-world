@@ -86,6 +86,8 @@ function weatherWith(storm: number, fog: number): WeatherState {
     fog,
     flash: 0,
     flashLocal: false,
+    flashOrigin: null,
+    flashSeed: 0,
     visibility: 50,
   };
 }

@@ -21,6 +21,7 @@
  *  - **Read `weathermap.ts`.** Every number here is a decision, and decisions
  *    read `CellsState`'s analytic sample. See docs/WEATHER_PLAN.md, Trap 3.
  */
+import { Vector3 } from 'three';
 import type { CellsState, WeatherKind, WeatherState, WindState } from './types';
 import { RADAR_RANGE } from './radar';
 import { mulberry32 } from './towns';
@@ -112,11 +113,17 @@ const FOG_TAU = 1;
 /**
  * How far into a storm the rain starts.
  *
- * Rain is the storm's own envelope with its first quarter cut off and the
- * remainder eased, so the sky darkens before the first drop falls. Weather
- * that arrives all at once reads as a switch.
+ * Rain is the storm's own envelope with its first tenth cut off and the
+ * remainder eased, so the sky still darkens before the first drop falls.
+ * Weather that arrives all at once reads as a switch.
+ *
+ * It was a quarter, and a quarter turned out to be most of the ordinary
+ * weather in the game: a squall that peaked below 0.25 greyed the sky and
+ * then rained nothing at all, which read as a storm that never arrived. A
+ * tenth keeps the lead-in -- there is still a stretch of dark sky before the
+ * first drop -- while letting moderate weather actually be wet.
  */
-const RAIN_ONSET = 0.25;
+const RAIN_ONSET = 0.1;
 
 /**
  * How much cloud an ordinary, non-storm event builds.
@@ -178,6 +185,8 @@ interface MutableWeatherState {
   fog: number;
   flash: number;
   flashLocal: boolean;
+  flashOrigin: Vector3 | null;
+  flashSeed: number;
   visibility: number;
 }
 
@@ -221,8 +230,20 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
     fog: 0,
     flash: 0,
     flashLocal: false,
+    flashOrigin: null,
+    flashSeed: 0,
     visibility: RADAR_RANGE,
   };
+
+  /**
+   * Where a cell strike is, owned by this module and handed out through
+   * `state.flashOrigin`.
+   *
+   * Copied from the cell rather than aliased to it: a cell's `centre` is
+   * mutated in place as it drifts, and a bolt that followed it would slide
+   * across the sky over the third of a second it is lit.
+   */
+  const flashOrigin = new Vector3();
 
   /** The phase the last roll was made for. -1 so the opening phase rolls. */
   let rolledIndex = -1;
@@ -283,7 +304,12 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
    * and whether either source is a lightning one — so the per-frame draw
    * below cannot desynchronise a replay that agrees about everything else.
    */
-  function updateFlash(dt: number, lightningLive: boolean, local: boolean): void {
+  function updateFlash(
+    dt: number,
+    lightningLive: boolean,
+    local: boolean,
+    cells: CellsState,
+  ): void {
     if (strikeAge >= 0) {
       strikeAge += dt;
       let flash = 0;
@@ -295,7 +321,14 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
       }
       state.flash = clamp01(flash);
       // Retire the strike once even its last pulse is under a 255th.
-      if (strikeAge > strikePulses * FLASH_GAP + 6 * FLASH_DECAY) strikeAge = -1;
+      if (strikeAge > strikePulses * FLASH_GAP + 6 * FLASH_DECAY) {
+        strikeAge = -1;
+        // The place and the shape go with it. Nothing reads either while
+        // `flash` is 0, but leaving last strike's numbers standing would make
+        // the state lie about what is happening.
+        state.flashOrigin = null;
+        state.flashSeed = 0;
+      }
     } else {
       state.flash = 0;
     }
@@ -306,10 +339,24 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
     if (rng() < dt / FLASH_MEAN) {
       strikeAge = 0;
       strikePulses = rng() < 0.5 ? 2 : 3;
-      // Recorded at the moment of the strike, not read per frame: a cell
-      // drifting off the ship mid-flash must not turn that flash into a
-      // placeless one halfway through its own decay.
+      // All three recorded at the moment of the strike, not read per frame: a
+      // cell drifting off the ship mid-flash must not turn that flash into a
+      // placeless one halfway through its own decay, nor drag its bolt across
+      // the sky, nor reshape it.
       state.flashLocal = local;
+      // The bolt's shape comes off this module's own stream, so a replay that
+      // agrees about the weather agrees about the lightning down to the fork.
+      state.flashSeed = (rng() * 0xffffffff) >>> 0;
+      // A squall is wherever the ship is and gets no origin at all; a cell
+      // strike is at the cell that is doing the striking, copied out of it so
+      // the cell's own drift cannot move a bolt that is already lit.
+      const cell = local ? null : cells.stormCellAtShip;
+      if (cell) {
+        flashOrigin.copy(cell.centre);
+        state.flashOrigin = flashOrigin;
+      } else {
+        state.flashOrigin = null;
+      }
     }
   }
 
@@ -337,7 +384,7 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
       state.fog = Math.max(p.fog, cells.fogAtShip);
       // A pinned flash is placeless: `?weather=lightning` is for looking at
       // the effect, and it should light the sky whether a cell is there or not.
-      updateFlash(dt, pin === 'lightning' || cells.lightningAtShip, pin === 'lightning');
+      updateFlash(dt, pin === 'lightning' || cells.lightningAtShip, pin === 'lightning', cells);
     } else {
       // ---- The roll -------------------------------------------------------
       if (wind.phaseIndex !== rolledIndex) {
@@ -373,7 +420,7 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
       // the sky darkens before the first drop falls.
       state.rain = smoothstep01((state.storm - RAIN_ONSET) / (1 - RAIN_ONSET));
 
-      updateFlash(dt, squallLightningClass || cells.lightningAtShip, squallLightningClass);
+      updateFlash(dt, squallLightningClass || cells.lightningAtShip, squallLightningClass, cells);
     }
 
     // ---- What all of that comes to --------------------------------------

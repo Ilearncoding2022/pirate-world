@@ -282,6 +282,7 @@ interface MutableCellsState {
   stormAtShip: number;
   fogAtShip: number;
   lightningAtShip: boolean;
+  stormCellAtShip: MutableCell | null;
 }
 
 /**
@@ -303,6 +304,7 @@ export function createWeatherCells(
     stormAtShip: 0,
     fogAtShip: 0,
     lightningAtShip: false,
+    stormCellAtShip: null,
   };
 
   let rollTimer = 0;
@@ -459,6 +461,7 @@ export function createWeatherCells(
     let storm = 0;
     let fog = 0;
     let lightning = false;
+    let stormCell: MutableCell | null = null;
     for (const cell of state.live) {
       const v = cellProfile(cell.strength, arcDistance(ship.position, cell.centre), cell.radius);
       if (v <= 0) continue;
@@ -467,11 +470,16 @@ export function createWeatherCells(
       } else if (v > storm) {
         storm = v;
         lightning = cell.lightning;
+        stormCell = cell;
       }
     }
     state.stormAtShip = storm;
     state.fogAtShip = fog;
     state.lightningAtShip = lightning;
+    // The winner itself, not just its numbers: `weather.ts` places a bolt at
+    // its centre, and a second pass looking for "the strongest storm cell"
+    // could break a tie the other way from the one this loop just did.
+    state.stormCellAtShip = stormCell;
   }
 
   function update(dt: number, ship: ShipState, _energy: EnergyState): void {

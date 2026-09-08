@@ -27,7 +27,7 @@ function cell(partial: Partial<WeatherCell> & { centre: Vector3 }): WeatherCell 
 }
 
 function state(live: WeatherCell[]): CellsState {
-  return { live, stormAtShip: 0, fogAtShip: 0, lightningAtShip: false };
+  return { live, stormAtShip: 0, fogAtShip: 0, lightningAtShip: false, stormCellAtShip: null };
 }
 
 /** Read one texel by direction, the way the shader's `dirToEquirect` would. */

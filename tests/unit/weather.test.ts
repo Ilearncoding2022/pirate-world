@@ -23,10 +23,17 @@ const NO_CELLS: CellsState = {
   stormAtShip: 0,
   fogAtShip: 0,
   lightningAtShip: false,
+  stormCellAtShip: null,
 };
 
 function cells(storm: number, fog: number, lightning = false): CellsState {
-  return { live: [], stormAtShip: storm, fogAtShip: fog, lightningAtShip: lightning };
+  return {
+    live: [],
+    stormAtShip: storm,
+    fogAtShip: fog,
+    lightningAtShip: lightning,
+    stormCellAtShip: null,
+  };
 }
 
 /** A wind whose phase machine the test drives by hand. */
@@ -183,6 +190,31 @@ describe('weather', () => {
     expect(peak.cover).toBeGreaterThan(0.8);
     // Lightning follows the cell's own flag, not the squall's class.
     expect(peak.flash).toBeGreaterThan(0);
+  });
+
+  it('rains under a moderate storm, and still darkens the sky before it does', () => {
+    // The onset is what decides whether ordinary weather is ever wet. At the
+    // quarter it opened at, a storm that peaked at 0.3 produced a rain
+    // envelope of 0.02 -- a greyed sky and no drops, which read as a storm
+    // that never turned up. These two assertions are the whole of the rule:
+    // moderate weather rains, and the sky is always ahead of the rain.
+    const weather = createWeather(4242);
+    const wind = scriptedWind();
+    const peak = runPhase(weather, wind, 'lull', 40, cells(0.35, 0, false));
+    // 0.19 at the tenth, against 0.05 at the quarter -- a storm a third of the
+    // way up now rains about four times as hard, which is the difference
+    // between a curtain and a rumour of one.
+    expect(peak.rain).toBeGreaterThan(0.15);
+    // The lead-in survives: cover is a slower envelope than rain, and rain is
+    // the storm with its first tenth cut off, so the sky is never behind the
+    // weather.
+    expect(peak.cover).toBeGreaterThan(peak.rain);
+
+    // And the cut is still there at the bottom: a whisper of a storm is dry.
+    const faint = createWeather(4242);
+    const faintWind = scriptedWind();
+    const faintPeak = runPhase(faint, faintWind, 'lull', 40, cells(0.08, 0, false));
+    expect(faintPeak.rain).toBe(0);
   });
 
   it('shrinks visibility with fog and rain, and never past the floor', () => {

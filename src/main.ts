@@ -18,6 +18,7 @@ import { createWeatherCells } from './weathercells';
 import { createWeather } from './weather';
 import type { WeatherPin } from './weather';
 import { createRain } from './rain';
+import { createLightning } from './lightning';
 import { createChart } from './chart';
 import { createDocks } from './docks';
 import { createPostFx } from './postfx';
@@ -355,6 +356,17 @@ async function startGame(): Promise<void> {
    */
   const rain = quality.rainDrops > 0 ? createRain(quality.rainDrops) : null;
   if (rain) scene.add(rain.object);
+
+  /*
+   * The bolt, on every tier including the one with no rain.
+   *
+   * Deliberately not gated on `quality.rainDrops`: a strike is under two
+   * hundred vertices for a third of a second, so there is no tier at which
+   * cutting it buys a frame, and a low-tier storm that flashes with nothing
+   * to see in it is the weakest storm the game has.
+   */
+  const lightning = createLightning();
+  scene.add(lightning.object);
 
   const hud = createHud(records.wallet, records.seaAnchor, records.overdrive);
   const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
@@ -1336,6 +1348,11 @@ async function startGame(): Promise<void> {
         storm: weather.state.storm,
         fog: weather.state.fog,
         rain: weather.state.rain,
+        // Published for the same reason as the rest: a shot of lightning has
+        // to wait for a strike rather than for a clock, because a bolt is lit
+        // for a third of a second every several seconds and a screenshot
+        // taken on a timer will almost always miss it.
+        flash: weather.state.flash,
         visibility: weather.state.visibility,
         encounters: cellEncounters,
         cells: weatherCells.state.live.map((c) => ({
@@ -1388,6 +1405,10 @@ async function startGame(): Promise<void> {
     // After `globe.update`: the box hangs on the hull the camera has just
     // been framed against, and nothing reads it until the render.
     rain?.update(dt, ship.state, wind.state, weather.state);
+    // Alongside the rain and for the same reason: it hangs on the hull the
+    // camera has just been framed against, and nothing reads it until the
+    // render at the foot of the frame.
+    lightning.update(dt, ship.state, weather.state);
     // Before postFx.render: it renders straight into its own cube target and
     // must restore the renderer's target before the visible frame draws, or
     // the game renders into its own reflection cube and the canvas goes black.

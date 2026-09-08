@@ -331,6 +331,16 @@ export interface CellsState {
   readonly fogAtShip: number;
   /** True when the strongest storm at the ship is one that carries lightning. */
   readonly lightningAtShip: boolean;
+  /**
+   * The cell that produced `stormAtShip`, or null when no storm reaches the
+   * ship at all.
+   *
+   * The same winner the three numbers above are read off, published rather
+   * than re-derived: `weather.ts` needs the striking cell's CENTRE to place a
+   * bolt, and a second pass over `live` to find it could disagree with this
+   * one about which cell won a tie.
+   */
+  readonly stormCellAtShip: WeatherCell | null;
 }
 
 /** The label the HUD prints. Derived; nothing else may branch on it. */
@@ -377,6 +387,29 @@ export interface WeatherState {
    * lights nothing at all because no cell claimed it.
    */
   readonly flashLocal: boolean;
+  /**
+   * Where the live flash is, as a unit direction, or null when it is at the
+   * ship.
+   *
+   * Recorded once at the moment of the strike, exactly as `flashLocal` is and
+   * for the same reason: a cell that drifts or retires part-way through a
+   * flash's own decay must not drag the bolt across the sky with it. Null
+   * whenever `flashLocal` is true -- a squall has no place, so the bolt is
+   * hung on the ship.
+   *
+   * `lightning.ts` is the only reader. The sky and the cloud deck light the
+   * whole hemisphere from `flash` and do not need to know where it came from.
+   */
+  readonly flashOrigin: Vector3 | null;
+  /**
+   * The seed the live flash's bolt geometry is built from.
+   *
+   * Drawn from `weather.ts`'s own stream at the moment of the strike, so a
+   * replay that agrees about the weather agrees about the shape of the bolt,
+   * and `?weather=lightning` photographs the same bolt every time. 0 when no
+   * strike is live.
+   */
+  readonly flashSeed: number;
   /**
    * How far the ship can see, world units, in [VIS_MIN, RADAR_RANGE].
    *

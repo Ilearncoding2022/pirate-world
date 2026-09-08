@@ -62,13 +62,23 @@ const RAIN_DRIFT = 0.35;
  * How long a drop is drawn, world units, and how bright.
  *
  * Rain photographs and renders as streaks rather than points because both a
- * camera and an eye integrate over time. Half a unit is about a sixth of the
+ * camera and an eye integrate over time. 0.85 is about a quarter of the
  * hull's length: long enough to read as motion, short enough not to become
- * hail. The alpha is low because the drops are ADDITIVE and there are
- * thousands of them; the density does the work, not the individual drop.
+ * hail.
+ *
+ * Both numbers were raised (from 0.5 and 0.35) because the storm was the one
+ * piece of weather nobody could see. A drop is one pixel wide whatever these
+ * say -- WebGL ignores `linewidth`, so thickness is not available without
+ * rebuilding every drop as a camera-facing quad -- which leaves length and
+ * alpha as the only two levers that cost nothing, and is why they carry most
+ * of the increase rather than the drop count.
+ *
+ * The alpha stays under half because the drops are ADDITIVE and there are
+ * thousands of them, and because a streak crossing the moon or a lit window
+ * adds to it: the density does the work, not the individual drop.
  */
-const RAIN_LENGTH = 0.5;
-const RAIN_ALPHA = 0.35;
+const RAIN_LENGTH = 0.85;
+const RAIN_ALPHA = 0.6;
 
 /** Below this much rain the whole object is hidden, so fair weather costs no draw call. */
 const RAIN_VISIBLE = 0.02;
