@@ -281,9 +281,10 @@ shader.
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
 | `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | `update`'s optional sixth argument is the weather: a full storm leaves 5% of the panels and a full fog bank half, moonlight cut by the same factor, and a berth untouched — which is what makes a berth worth running for. burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` and the eleven-rung `EnergyMode` ladder that names what the plant is doing (`overcast` is the weather's own rung); `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED`, `CELL_WIND_LIFT` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast. Also publishes the phase reading `weather.ts` rolls on — `phase`, `phaseTime`, `phaseDuration`, `phaseIndex`, `envelope` — all of which were already locals. `update`'s optional fourth argument is `CellsState.stormAtShip`, a FLOOR on the speed (never the bearing) so a storm always blows: the one coupling from the weather back into the wind, and the reason `weatherCells.update` runs first in the loop |
-| `weathercells.ts` | `createWeatherCells(terrain, heightMap, seed?)`, `cellProfile`, `CELL_CORE` | the drifting weather: a population of `CELL_TARGET` storm and fog cells in a bubble around the ship, each a centre and a travel tangent carried by parallel transport exactly as a hazard's is. Owns `CellsState`, mutated in place; DOM-free, scene-free and seeded, like `wind.ts` and `hazards.ts`. Its own PRNG, never the wind's — see **Weather** |
-| `weather.ts` | `createWeather(seed?, pin?)`, `WeatherPin`, `VIS_MIN`, the share constants | the weather AT THE SHIP: squalls rolled off `WindState`'s phases, combined with the cells by `max` BEFORE smoothing. Owns `WeatherState`. `?weather=` pins the envelopes and switches the squall roll off; cells keep running under a pin |
-| `rain.ts` | `createRain(drops)` | a ship-scale box of `quality.rainDrops` drops, all motion in the vertex shader, hidden entirely below `rain > 0.02`. `LAYER_DEFAULT` only: rain in the reflection cube is rain reflected in rain, directly under the hull |
+| `weathercells.ts` | `createWeatherCells(terrain, heightMap, seed?)`, `cellProfile`, `CELL_CORE` | the drifting weather: a population of `CELL_TARGET` storm and fog cells in a bubble around the ship, each a centre and a travel tangent carried by parallel transport exactly as a hazard's is. Owns `CellsState`, mutated in place; DOM-free, scene-free and seeded, like `wind.ts` and `hazards.ts`. Publishes the winning cell itself as `stormCellAtShip`, not just its numbers, so `weather.ts` can hang a bolt on a centre this sample already agreed on rather than re-deriving one and breaking the tie the other way. Its own PRNG, never the wind's — see **Weather** |
+| `weather.ts` | `createWeather(seed?, pin?)`, `WeatherPin`, `VIS_MIN`, the share constants | the weather AT THE SHIP: squalls rolled off `WindState`'s phases, combined with the cells by `max` BEFORE smoothing. Owns `WeatherState`, including the three the flash carries — `flashLocal`, `flashSeed` and `flashOrigin`, all fixed at the INSTANT of the strike and cleared when it retires, so a cell that drifts or dies mid-flash cannot displace, reshape or unplace a bolt that is already lit. `?weather=` pins the envelopes and switches the squall roll off; cells keep running under a pin |
+| `rain.ts` | `createRain(drops)` | a ship-scale box of `quality.rainDrops` drops, all motion in the vertex shader, hidden entirely below `rain > 0.02`. The drops dissolve toward three of the box's four walls (`RAIN_FADE`), so the footprint has no edge to see; the fourth is the wall astern, which the chase camera looks THROUGH rather than at, and fading it takes the storm with it — see **Weather**. `LAYER_DEFAULT` only: rain in the reflection cube is rain reflected in rain, directly under the hull |
+| `lightning.ts` | `createLightning()`, `buildBolt(positions, seed)` | the BOLT, for the flash `weather.ts` has always had. Owns no timing, no gate and no randomness of its own: `weather.flash` is the envelope, `flashSeed` the shape, `flashOrigin` the place. Geometry is rewritten once per STRIKE rather than per frame, and the object hides itself between them; built on every tier including the one with no rain, because a bolt is under two hundred vertices for a third of a second. `LAYER_DEFAULT` only, for `rain.ts`'s reason |
 | `chart.ts` | `createChart(w?, h?, encoded?)`, `CHART_WIDTH/HEIGHT`, `CHART_SAVE_INTERVAL`, `CHART_VERSION` | the fog-of-war bitmap: 1024×512 bytes in memory (the scope samples it 37 000 times a raster and a byte read beats a shift), bit-packed and base64'd in storage. `reveal` stamps a spherical cap through `geo.ts`'s `capColumns`, the same function `weathermap.ts` stamps a cell with |
 | `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards**. `update`'s optional fifth argument is `stormOdds`, a multiplier on the roll's COMPARISON only (the draw stays unconditional, so the stream still replays) |
 | `aiboats.ts` | `createAiBoats(deps)`, `AiBoatsDeps`, `AiBoats`, `ROLL_PERIOD`, the spawn and pursuit constants | the raider sim: the roll, spawning, transport, pursuit, conversion, contact and the post-fight grace. Owns `AiBoatState`, mutated in place; DOM-free, scene-free and seeded, exactly as `hazards.ts` is; see **AI boats and the battle** |
@@ -501,6 +502,63 @@ All three figures are measured, in `aiboats.test.ts` and `hazards.test.ts`,
 over 100 minutes of sim. Anyone reading "tripled" and expecting it of any of
 them would be wrong.
 
+### The strike is three numbers, and the bolt is the only reader of two
+
+The flash existed long before anything was drawn for it: `sky.ts` brightens
+the dome on `weather.flash` and `clouds.ts` lifts the cloud undersides toward
+white, and both are enough to light a storm. What neither gives you is
+anything to LOOK at, and a flash with no bolt reads as the exposure changing
+rather than as lightning — the player never finds out which way the storm is.
+
+`lightning.ts` draws that bolt and nothing else. It owns no timing, no gate
+and no randomness: everything it needs is fixed by `weather.ts` at the instant
+of the strike and published on `WeatherState`.
+
+- `flash` is the ENVELOPE — the same double pulse the sky rides, so the
+  channel dims and re-lights with the hemisphere instead of on a clock of its
+  own.
+- `flashSeed` is the SHAPE. A draw off `weather.ts`'s own stream, which is why
+  a replay that agrees about the weather agrees about the fork, and why
+  `?weather=lightning` photographs the same bolt twice. `buildBolt` is pure
+  given it.
+- `flashOrigin` is the PLACE: a copy of the striking cell centre, or null for
+  a squall, which has none and hangs its bolt on the ship.
+
+All three are latched at the strike and cleared when it retires. That is the
+whole reason they are state rather than a per-frame read: a cell drifts, and
+one read per frame would slide a lit bolt across the sky, reshape it, or turn
+a placed flash into a placeless one halfway through its own decay.
+
+The consequence for the module is that geometry is rewritten once per STRIKE
+and not once per frame — a lit frame costs one uniform write and one draw
+call, an unlit one costs nothing, because the object hides itself. That is the
+same bargain `rain.ts` makes, and the reason both sit in the frame loop
+unguarded. It is also why the bolt is built on every quality tier, including
+the one with no rain at all: under two hundred vertices for a third of a
+second buys nothing back by being cut, and a low-tier storm that flashes with
+nothing to see in it is the weakest storm the game has.
+
+### The rain box has four walls and only three of them are visible
+
+The drops live in a fixed box that follows the hull, and a box has edges. That
+did not matter while the rain was faint enough that nobody could see where it
+stopped; raising `RAIN_ALPHA` to make a storm legible made the FOOTPRINT
+legible with it — a hard-edged rectangle of streaks on the water with dry sea
+on all four sides.
+
+The fix is `RAIN_FADE`, and the interesting part is which walls it applies to.
+The box is heading-aligned, so `-z` is the wall astern, and the chase camera
+sits behind and above the ship looking THROUGH it. Perspective then makes
+those astern drops the nearest thing to the lens and by far the largest part
+of the curtain on screen, while the wall itself falls behind the camera where
+nobody can see it end. Fade it and the storm goes with it: a symmetric fade
+was tried at two settings and both took the rain back to roughly what it had
+been before the alpha was ever raised.
+
+So three walls dissolve and the fourth is left alone. The general lesson is
+the one **Testing** already states in other words: a change whose whole
+purpose is visible only in a frame has to be judged in a frame. Every version
+of this fix typechecked, and every version passed the suite.
 ### The panel has a word for it: `overcast`
 
 `EnergyMode`'s eleventh rung, added with the weather. Without it the panel
@@ -595,8 +653,10 @@ storm cannot quietly pass while the player reads a menu.
 switches the squall roll off. `?cell=storm|fog|lightning` forces one cell 60
 units dead ahead — further than `?hazard=`'s 25, because the half of a cell
 worth photographing is the half seen from outside it. The two combine.
-`?debug` publishes the live envelopes, every cell, and `encounters`, which is
-the measurement `CELL_TARGET` was chosen against.
+`?debug` publishes the live envelopes — `flash` among them, so a shot of
+lightning can wait for a STRIKE instead of for a clock, which it would
+otherwise miss almost every time — every cell, and `encounters`, which is the
+measurement `CELL_TARGET` was chosen against.
 
 ## The cloud deck
 `clouds.ts` is not one sphere but `SHELL_COUNT` concentric ones spanning
@@ -644,6 +704,7 @@ camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
 globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
 rain.update(dt, shipState, wind.state, weather.state)  // after globe: the box hangs on the hull the camera has just been framed against
+lightning.update(dt, shipState, weather.state)  // alongside the rain, for the same reason; rebuilds its geometry only when flashSeed changes
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
