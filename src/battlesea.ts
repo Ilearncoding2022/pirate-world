@@ -203,7 +203,15 @@ export const KEEL_CLEARANCE = OBSTACLE_ZONE + OBSTACLE_R_MAX + HIT_RADIUS;
 /* Flotsam                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Units/s. About sixteen seconds to cross the diameter, twenty or so on a track angled off it. */
+/**
+ * Units/s.
+ *
+ * Born and lost `FLOTSAM_MARGIN` outside the ring on either side of its own
+ * track, a raft aimed straight through the middle covers about 52 units, so
+ * this crosses the arena in about twenty seconds — close to the twenty-one a
+ * hull takes to lap the ring at the base rate, so a raft is a comparable
+ * event to one full circuit rather than something that flashes past.
+ */
 export const FLOTSAM_SPEED = 2.5;
 
 /** The raft's own radius, arena units. Contact with a hull is this plus `HIT_RADIUS`. */

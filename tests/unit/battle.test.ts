@@ -10,6 +10,7 @@ import {
   THROTTLE_GAIN,
   createBattleSim,
 } from '../../src/battle';
+import { CALM } from '../../src/battlesea';
 import { mulberry32 } from '../../src/towns';
 import type { BattleInput, BattleState, Combatant } from '../../src/types';
 
@@ -180,26 +181,42 @@ describe('battle: the outcome', () => {
 });
 
 /**
- * SKIPPED BY STEP 0 OF THE REWORK, and agent A owns un-skipping it.
+ * Measured 2026-09-08, on a calm sea (CALM: no crests, no shoals, no raft, so
+ * nothing but the gunner itself can move the answer) against a player who
+ * never touches the throttle, 200 fights, seeds 0x1000 through 0x10c7: **65
+ * hits out of 1997 shots, 3.25%**. Pinned at plus or minus ten points around
+ * that, clamped at zero because a rate cannot go negative.
  *
- * `battleai.ts` is a stub that never fires, so this measures nothing until the
- * real gunner lands. The band below is a measurement of the OLD gunner — the
- * one with a reaction, a jitter and a perfect reading of the player — and it
- * must not be kept out of habit. The new one reads the player two seconds
- * late, telegraphs every shot by a fixed fuse and flips a coin for one helm
- * decision in four, and it will not land 46.5% of its shots.
+ * This is not the 35% to 55% the old gunner (perfect reading, a 0.2-0.6 s
+ * reaction, a 0.35 s jitter) landed, and the gap is bigger than decisions 1
+ * and 2 alone explain. Against a player who does nothing, the two-second-old
+ * reading costs the AI nothing — the extrapolation is exact against a
+ * constant rate — and the coin only spoils a quarter of the AI's OWN helm
+ * decisions. What actually empties the locker is decision 4's fixed 1.5 s
+ * fuse: the AI's own hull keeps travelling its circle for the whole of that
+ * window (ARENA_OMEGA times up to 1+THROTTLE_GAIN, over 1.5 s, is up to about
+ * 0.68 rad — three times AI_SOLUTION_TOLERANCE's own angular width at a
+ * mid-fight radius), and `battle.ts`'s `fire()` throws the ball down whatever
+ * beam the hull is actually on the tick it fires, not the one the solution
+ * was solved against at commit. A solved shot is routinely stale by the time
+ * it goes even when the PLAYER never moves at all. See
+ * docs/BATTLE_REWORK_PLAN.md, "The prediction horizon, and the risk in it" —
+ * this is the same horizon, just driven by the AI's own helm rather than the
+ * player's.
  *
- * Agent A: build the sim with CALM so the sea cannot move the answer, measure
- * what the gunner actually does, then pin it at plus or minus ten points
- * around the measurement and say in the test what was measured.
- * See docs/BATTLE_REWORK_PLAN.md, "Tests".
+ * The owner should know this before playing it: on a calm sea, an idle
+ * player is hit roughly one round in thirty. Decisions 1, 2 and 4 are
+ * implemented exactly as specified; this is what they come to together, and
+ * shortening AI_FUSE is the lever that would move it, per the plan's own
+ * closing note that AI_FUSE is not to be retuned before the owner has played
+ * the result.
  */
-describe.skip('battle: the AI gunner', () => {
-  it('lands between 35% and 55% of its shots on a player who does nothing', () => {
+describe('battle: the AI gunner', () => {
+  it('lands about 3.25% of its shots on a calm sea against a player who does nothing', () => {
     let shots = 0;
     let hits = 0;
     for (let fight = 0; fight < 200; fight++) {
-      const sim = createBattleSim(mulberry32(0x1000 + fight));
+      const sim = createBattleSim(mulberry32(0x1000 + fight), CALM);
       for (let i = 0; i < (BATTLE_TIMEOUT + 1) / DT; i++) {
         sim.update(DT, IDLE);
         shots += count(sim.state, 'fire', 'ai');
@@ -209,7 +226,9 @@ describe.skip('battle: the AI gunner', () => {
     }
     expect(shots).toBeGreaterThan(200 * HITS_TO_LOSE);
     const rate = hits / shots;
-    expect(rate).toBeGreaterThan(0.35);
-    expect(rate).toBeLessThan(0.55);
+    // Measured 3.25%; the old 35%-55% band described a gunner that no longer
+    // exists and must not be kept out of habit.
+    expect(rate).toBeGreaterThan(0);
+    expect(rate).toBeLessThan(0.1325);
   });
 });
