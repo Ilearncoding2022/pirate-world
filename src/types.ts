@@ -689,8 +689,6 @@ export interface Combatant {
   readonly z: number;
   /** Radians, direction of travel, on the same convention as ShipState.heading. */
   readonly heading: number;
-  /** Rounds left in the locker, ROUNDS down to 0. */
-  readonly rounds: number;
   /** Hits taken, 0 up to HITS_TO_LOSE. */
   readonly hits: number;
   /** Seconds until this side may fire again. */

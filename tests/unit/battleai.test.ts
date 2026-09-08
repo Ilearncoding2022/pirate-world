@@ -27,7 +27,6 @@ function playerAt(angle: number, swayX = 0, swayZ = 0): Combatant {
     x: 0,
     z: 0,
     heading: 0,
-    rounds: 0,
     hits: 0,
     cooldown: 0,
     swayX,
@@ -43,7 +42,6 @@ function fakeState(overrides: {
   aiAngle?: number;
   aiX?: number;
   aiZ?: number;
-  aiRounds?: number;
   aiCooldown?: number;
   aiFouled?: number;
 }): BattleState {
@@ -58,7 +56,6 @@ function fakeState(overrides: {
       x: overrides.aiX ?? radius * Math.cos(aiAngle),
       z: overrides.aiZ ?? radius * Math.sin(aiAngle),
       heading: 0,
-      rounds: overrides.aiRounds ?? 10,
       hits: 0,
       cooldown: overrides.aiCooldown ?? 0,
       swayX: 0,

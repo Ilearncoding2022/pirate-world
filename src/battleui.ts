@@ -1,4 +1,4 @@
-import { HITS_TO_LOSE, ROUNDS } from './battle';
+import { HITS_TO_LOSE } from './battle';
 import { STALEMATE_COST } from './energy';
 import type { AiBoatKind, BattleInput, BattleOutcome, BattleState, InputState } from './types';
 
@@ -105,9 +105,7 @@ function formatGold(gold: number): string {
  */
 export function createBattleUi(deps: BattleUiDeps): BattleUi {
   const root = document.getElementById('battle');
-  const youRoundsEl = document.getElementById('battle-you-rounds');
   const youPipsEl = document.getElementById('battle-you-pips');
-  const foeRoundsEl = document.getElementById('battle-foe-rounds');
   const foePipsEl = document.getElementById('battle-foe-pips');
   const promptEl = document.getElementById('battle-prompt');
   const fireEl = document.getElementById('battle-fire');
@@ -138,9 +136,7 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
 
   if (
     !root ||
-    !youRoundsEl ||
     !youPipsEl ||
-    !foeRoundsEl ||
     !foePipsEl ||
     !promptEl ||
     !(fireEl instanceof HTMLButtonElement) ||
@@ -197,7 +193,7 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   const continueBtn: HTMLButtonElement = continueEl;
 
   /**
-   * One side of the strip: its two elements and its own write-through cache.
+   * One side of the strip: its pips and its own write-through cache.
    *
    * Built once and mutated in place, never rebuilt, for the reason `main.ts`'s
    * resting snapshot is: `update` runs at 60fps for as long as a fight lasts,
@@ -208,16 +204,18 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
    * the markup, because the count IS the rule: three pips beside a sim that
    * ended a fight on two would be an instrument lying about the only thing the
    * player is really watching.
+   *
+   * There used to be a ROUNDS figure beside them, and it went with the locker
+   * it counted. A readout that never moves teaches the player to stop looking
+   * at the strip, which is where the hits and the foe's fuse live.
    */
   interface Side {
-    readonly roundsOut: HTMLElement;
     readonly pips: readonly HTMLElement[];
     /** Last painted, so an unchanged frame touches no DOM at all. */
-    rounds: string;
     hits: number;
   }
 
-  function buildSide(roundsOut: HTMLElement, pipHost: HTMLElement): Side {
+  function buildSide(pipHost: HTMLElement): Side {
     const pips: HTMLElement[] = [];
     for (let i = 0; i < HITS_TO_LOSE; i++) {
       const pip = document.createElement('span');
@@ -225,14 +223,24 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
       pips.push(pip);
     }
     pipHost.replaceChildren(...pips);
-    return { roundsOut, pips, rounds: '', hits: -1 };
+    return { pips, hits: -1 };
   }
 
-  const youSide = buildSide(youRoundsEl, youPipsEl);
-  const foeSide = buildSide(foeRoundsEl, foePipsEl);
+  const youSide = buildSide(youPipsEl);
+  const foeSide = buildSide(foePipsEl);
 
   /** Whether the prompt is currently down. Null until the first paint. */
   let lastPromptHidden: boolean | null = null;
+
+  /**
+   * Whether the player has fired at all this fight. Reset by `open`.
+   *
+   * The prompt used to read a spent round off the sim for this, and with the
+   * locker gone there is nothing on `BattleState` that says "this player has
+   * pressed the key at least once". So it is latched here, in `input`, which
+   * is the one place that knows a press actually became a shot.
+   */
+  let hasFired = false;
 
   /**
    * The fuse bar's own write-through cache.
@@ -258,12 +266,7 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   /** The colour class on the root, so it can be taken off again on close. */
   let kindClass = '';
 
-  function paintSide(side: Side, rounds: number, hits: number): void {
-    const text = String(Math.max(0, rounds));
-    if (text !== side.rounds) {
-      side.rounds = text;
-      side.roundsOut.textContent = text;
-    }
+  function paintSide(side: Side, hits: number): void {
     if (hits !== side.hits) {
       side.hits = hits;
       for (let i = 0; i < side.pips.length; i++) {
@@ -365,9 +368,8 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     lastPromptHidden = false;
     // A fresh fight repaints both sides from scratch: the caches are holding
     // the last fight's figures and the pips are still lit from it.
-    youSide.rounds = '';
+    hasFired = false;
     youSide.hits = -1;
-    foeSide.rounds = '';
     foeSide.hits = -1;
     // The fuse and the FOULED word both ship hidden, and both diff caches go
     // back to "never painted" so the first frame of the new fight repaints
@@ -401,6 +403,7 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   function input(raw: InputState): BattleInput {
     const fired = pressed;
     pressed = false;
+    if (fired) hasFired = true;
     // W and S straight off the shared `InputState`, which is what makes the
     // D-pad's up and down keys work in the arena without this file knowing
     // the pad exists. There is no helm here, so `left` and `right` are simply
@@ -411,15 +414,15 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   function update(state: BattleState): void {
     if (!open) return;
 
-    paintSide(youSide, state.player.rounds, state.player.hits);
-    paintSide(foeSide, state.ai.rounds, state.ai.hits);
+    paintSide(youSide, state.player.hits);
+    paintSide(foeSide, state.ai.hits);
 
     // The prompt goes as soon as the player has fired once, and never comes
     // back. It is instructions, and instructions that stay up past the moment
     // they were understood are clutter over the one thing being aimed at.
-    // A spent round is the reading, because it is the one thing that can only
+    // `hasFired` is the reading, because it is the one thing that can only
     // have happened by the player pressing the key the prompt names.
-    const hide = state.player.rounds < ROUNDS;
+    const hide = hasFired;
     if (hide !== lastPromptHidden) {
       lastPromptHidden = hide;
       prompt.hidden = hide;

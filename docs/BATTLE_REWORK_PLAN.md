@@ -23,6 +23,9 @@ description of what the fight now is. The differences:
   each with its own size and its own speed, kept up to strength as they are
   sunk, fouled on or carried out of the ring.
 
+Outside the sea, the locker went with them: `ROUNDS` is gone and
+`FIRE_COOLDOWN` is a third of a second rather than one, so a gun is limited by
+its cadence alone. `settle` lost the draw rule that read two empty lockers.
 
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially

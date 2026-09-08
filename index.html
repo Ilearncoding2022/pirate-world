@@ -518,9 +518,9 @@
          with a way out would be advertising a choice the game does not offer.
 
          The sentence and the digit both ship EMPTY and are written by
-         battlecover.ts: the rules come off ROUNDS and HITS_TO_LOSE, and a
-         count typed here would be a second opinion about how long the beat
-         lasts. -->
+         battlecover.ts: the rules come off FIRE_COOLDOWN and HITS_TO_LOSE,
+         and a count typed here would be a second opinion about how long the
+         beat lasts. -->
     <!-- BATTLE COVER -->
     <div class="battlecover" id="battlecover" hidden aria-hidden="true">
       <div class="battlecover__backdrop"></div>
@@ -910,8 +910,6 @@
       <header class="battle__strip">
         <div class="bside bside--you">
           <span class="bside__name">YOU</span>
-          <span class="bside__key">ROUNDS</span>
-          <span class="bside__rounds" id="battle-you-rounds">0</span>
           <span class="bside__key">HITS</span>
           <!-- The pips ship EMPTY and are built by battleui.ts from
                `HITS_TO_LOSE`. Three typed here would be three the markup
@@ -927,8 +925,6 @@
 
         <div class="bside bside--foe">
           <span class="bside__name">FOE</span>
-          <span class="bside__key">ROUNDS</span>
-          <span class="bside__rounds" id="battle-foe-rounds">0</span>
           <span class="bside__key">HITS</span>
           <span class="bside__pips" id="battle-foe-pips"></span>
           <!-- The telegraph. Hidden while `state.fuse` is null; while it is

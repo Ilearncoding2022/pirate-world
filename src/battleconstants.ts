@@ -56,19 +56,27 @@ export const ARENA_OMEGA = ARENA_SPEED / ARENA_R0;
  */
 export const THROTTLE_GAIN = 0.5;
 
-/** Rounds in each side's locker. */
-export const ROUNDS = 10;
 /** Hits that end a hull's fight. */
 export const HITS_TO_LOSE = 3;
 
 /**
- * Seconds between shots from one side.
+ * Seconds between shots from one side: three a second, and the locker is
+ * bottomless.
  *
- * Unchanged by the rework even though the ball is twice as fast, and
- * deliberately so: this is what makes ten rounds last, and a locker emptied at
- * will would be gone in three seconds however quick the shot.
+ * Both halves of that are one decision. There used to be ten rounds a side at
+ * one a second, and the two numbers were holding each other up: the cooldown
+ * existed to make a locker last, and the locker existed to stop a fight being
+ * decided in the first three seconds. Take the locker away and the cooldown
+ * has only its own job left, which is to keep a shot a decision rather than a
+ * held key -- a third of a second is still four ball-flights of the arena at
+ * BALL_SPEED, so a gunner who fires the moment the gun is cold is throwing
+ * rounds at where the hull was, not where it will be.
+ *
+ * What this changes about the fight: it can no longer end because both sides
+ * ran out of ammunition, and `battle.ts`'s `settle` lost that draw rule with
+ * it. A stand-off now ends on BATTLE_TIMEOUT and nowhere else.
  */
-export const FIRE_COOLDOWN = 1;
+export const FIRE_COOLDOWN = 1 / 3;
 
 /**
  * The ball: how fast it flies, how long it may live, and how far past the far

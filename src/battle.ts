@@ -17,7 +17,6 @@ import {
   FIRE_COOLDOWN,
   HITS_TO_LOSE,
   HIT_RADIUS,
-  ROUNDS,
   SPLASH_MARGIN,
   THROTTLE_GAIN,
 } from './battleconstants';
@@ -29,7 +28,7 @@ import { mulberry32 } from './towns';
  * battle.ts — the cannon fight, in flat arena units.
  *
  * The whole ruleset with no DOM and no Three, exactly as `fishsim.ts` is: two
- * boats on a shrinking circle, ten rounds each, three hits to lose. One sim is
+ * boats on a shrinking circle, three hits to lose, no locker to run dry. One sim is
  * built per battle and thrown away after, so nothing here has to reset.
  *
  * The brief is docs/BATTLE_PLAN.md for the fight and
@@ -73,7 +72,6 @@ export {
   FIRE_COOLDOWN,
   HITS_TO_LOSE,
   HIT_RADIUS,
-  ROUNDS,
   SPLASH_MARGIN,
   THROTTLE_GAIN,
 } from './battleconstants';
@@ -121,7 +119,6 @@ interface MutableCombatant extends Combatant {
   x: number;
   z: number;
   heading: number;
-  rounds: number;
   hits: number;
   cooldown: number;
   swayX: number;
@@ -158,7 +155,6 @@ function combatant(angle: number): MutableCombatant {
     x: 0,
     z: 0,
     heading: 0,
-    rounds: ROUNDS,
     hits: 0,
     cooldown: 0,
     swayX: 0,
@@ -238,16 +234,19 @@ export function createBattleSim(
   }
 
   /**
-   * Spend a round out of `c`'s locker, along its track's inboard beam.
+   * Put a ball out along `c`'s track's inboard beam.
    *
    * The direction is `(-cos angle, -sin angle)`: the way the centre lies from
    * this hull's point ON THE CIRCLE, regardless of where the sea has put the
    * hull itself. The ball leaves from the hull's real position and flies
    * parallel to the diameter. Returns whether the shot went.
+   *
+   * The cooldown is the only thing that can refuse one now. There is no
+   * locker left to be empty -- see FIRE_COOLDOWN -- so a hull is out of the
+   * fight when it has taken its three hits and at no other moment.
    */
   function fire(c: MutableCombatant, owner: 'player' | 'ai'): boolean {
-    if (c.cooldown > 0 || c.rounds <= 0) return false;
-    c.rounds -= 1;
+    if (c.cooldown > 0) return false;
     c.cooldown = FIRE_COOLDOWN;
     state.balls.push({
       owner,
@@ -316,9 +315,10 @@ export function createBattleSim(
     if (playerOut && aiOut) state.outcome = 'draw';
     else if (aiOut) state.outcome = 'win';
     else if (playerOut) state.outcome = 'loss';
-    else if (state.player.rounds === 0 && state.ai.rounds === 0 && state.balls.length === 0) {
-      state.outcome = 'draw';
-    } else if (state.elapsed >= BATTLE_TIMEOUT) state.outcome = 'draw';
+    // The fourth rule is gone with the locker it read: a fight can no longer
+    // end because both sides ran out of ammunition, only because someone was
+    // hit three times or because the clock ran out.
+    else if (state.elapsed >= BATTLE_TIMEOUT) state.outcome = 'draw';
   }
 
   /**

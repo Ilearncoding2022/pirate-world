@@ -312,7 +312,7 @@ export function createBattleAi(rng: () => number = Math.random): BattleAi {
       return null;
     }
 
-    if (state.ai.rounds > 0 && state.ai.cooldown <= 0) {
+    if (state.ai.cooldown <= 0) {
       const solution = solve(state);
       if (solution !== null && solution.downRange > 0 && Math.abs(solution.lateral) < AI_SOLUTION_TOLERANCE) {
         fuseValue = AI_FUSE;

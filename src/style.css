@@ -3207,15 +3207,10 @@ kbd {
   text-shadow: 0 0 12px currentcolor;
 }
 
-/* The two labels are said quietly: the figures beside them are the reading. */
+/* The label is said quietly: the pips beside it are the reading. */
 .bside__key {
   color: var(--ink-mute);
   letter-spacing: 0.18em;
-}
-
-.bside__rounds {
-  min-width: 2ch;
-  text-align: right;
 }
 
 .bside__pips {

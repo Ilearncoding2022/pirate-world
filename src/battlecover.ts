@@ -1,4 +1,4 @@
-import { HITS_TO_LOSE, ROUNDS } from './battle';
+import { FIRE_COOLDOWN, HITS_TO_LOSE } from './battle';
 import type { AiBoatKind } from './types';
 
 /**
@@ -7,9 +7,9 @@ import type { AiBoatKind } from './types';
  * A ram used to go straight to the fade: contact, black, arena, guns. That is
  * the correct shape for the END of a fight and the wrong one for the start of
  * it, because the player arrives in the arena already being shot at by a set
- * of rules they have never been told. Ten rounds, three hits, no helm and a
- * gun that fires out of the beam are all learnable in one sentence and none of
- * them are guessable from the scene.
+ * of rules they have never been told. Three hits, no helm and a gun that
+ * fires out of the beam on its own cooldown are all learnable in one sentence
+ * and none of them are guessable from the scene.
  *
  * So: one plate of art, one sentence, and three seconds to read it.
  *
@@ -33,7 +33,7 @@ import type { AiBoatKind } from './types';
  * for the one player who most needs it, the one meeting a raider for the first
  * time, is the player most likely to hammer past it. It is short enough that a
  * veteran on their fortieth fight is not being held up: three seconds against
- * a fight that runs ten rounds at one a second.
+ * a fight that runs up to two minutes.
  *
  * Counted on the WALL CLOCK, not on the frame loop's dt, and that distinction
  * is the whole of `MAX_TICK` below. Three seconds here means three seconds to
@@ -113,27 +113,32 @@ const KIND_LABEL: Record<AiBoatKind, string> = {
 /**
  * The rules, off the constants that actually enforce them.
  *
- * Written from `ROUNDS` and `HITS_TO_LOSE` rather than typed into the markup,
- * on the house rule index.html states for every other figure in an overlay: a
- * number spelled out in HTML is a number that goes stale the first time the
- * fight is retuned, and a screen whose whole job is to teach the rules is the
- * worst possible place to advertise the old ones.
+ * Written from `FIRE_COOLDOWN` and `HITS_TO_LOSE` rather than typed into the
+ * markup, on the house rule index.html states for every other figure in an
+ * overlay: a number spelled out in HTML is a number that goes stale the first
+ * time the fight is retuned, and a screen whose whole job is to teach the
+ * rules is the worst possible place to advertise the old ones.
  *
- * The added sentence about the sea is deliberately NOT built from a constant
- * the same way. `battlesea.ts`'s numbers — how far a crest shoves, how long a
+ * The rate is stated as shots per second rather than as the cooldown itself,
+ * because a third of a second is not a figure anyone holds in their head
+ * while aiming; "three a second" is. It is derived and rounded rather than
+ * written, so retuning the gun moves the sentence with it.
+ *
+ * The sentence about the sea is deliberately NOT built from a constant the
+ * same way. `battlesea.ts`'s numbers — how far a crest shoves, how long a
  * foul lasts — are arena units nobody reading this card has a feel for yet,
- * unlike ROUNDS and HITS_TO_LOSE, which the player is about to watch tick
- * down on the strip a second later. Naming one here would teach a figure
- * instead of the fact the player actually needs before the first shot: the
- * ring shoves you off your mark, and the water can eat a ball meant for the
- * enemy.
+ * unlike the rate and the hit count, which the player is about to watch on
+ * the strip a second later. Naming one here would teach a figure instead of
+ * the fact the player actually needs before the first shot: the ring shoves
+ * you off its mark, and the water can eat a ball meant for the enemy.
  */
 function blurbText(): string {
+  const perSecond = Math.round(1 / FIRE_COOLDOWN);
   return (
-    `${ROUNDS} rounds, one a second, fired straight out of the inboard beam. ` +
-    `${HITS_TO_LOSE} hits lose it. W and S are your place on the ring — ` +
-    `there is no helm in a fight. The sea will shove you off it, and the ` +
-    `wreckage in it will eat a shot meant for the enemy.`
+    `Unlimited rounds, up to ${perSecond} a second, fired straight out of the ` +
+    `inboard beam. ${HITS_TO_LOSE} hits lose it. W and S are your place on ` +
+    `the ring — there is no helm in a fight. The sea will shove you off it, ` +
+    `and the wreckage adrift in it will eat a shot meant for the enemy.`
   );
 }
 

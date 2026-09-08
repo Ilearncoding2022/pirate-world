@@ -6,7 +6,6 @@ import {
   BATTLE_TIMEOUT,
   FIRE_COOLDOWN,
   HITS_TO_LOSE,
-  ROUNDS,
   THROTTLE_GAIN,
   createBattleSim,
 } from '../../src/battle';
@@ -15,8 +14,8 @@ import { mulberry32 } from '../../src/towns';
 import type { BattleInput, BattleState, Combatant } from '../../src/types';
 
 /**
- * `battle.ts`'s rule set: the ball's geometry, the locker, the outcomes, and
- * the AI's measured hit rate.
+ * `battle.ts`'s rule set: the ball's geometry, the gun's cadence, the
+ * outcomes, and the AI's measured hit rate.
  *
  * The sim is pure and takes its `rng` as an argument, so every case here is
  * deterministic and none of them draws a pixel. The one number that is not
@@ -34,7 +33,7 @@ const DT = 1 / 60;
 /** The mutable face of the state, for the cases that have to set one up. */
 type Mutable = {
   -readonly [K in keyof BattleState]: BattleState[K];
-} & { player: Combatant & { angle: number; rounds: number; hits: number }; ai: Combatant & { angle: number; rounds: number; hits: number } };
+} & { player: Combatant & { angle: number; hits: number; cooldown: number }; ai: Combatant & { angle: number; hits: number; cooldown: number } };
 
 function mutable(state: BattleState): Mutable {
   return state as unknown as Mutable;
@@ -81,8 +80,6 @@ describe('battle: the ball', () => {
     // geometry being wrong.
     const sim = createBattleSim(mulberry32(0xba11), CALM);
     const state = mutable(sim.state);
-    // Silence the AI's own guns: this case is about one ball, not a fight.
-    state.ai.rounds = 0;
     const start = state.ai.angle - lead;
 
     let hits = 0;
@@ -98,6 +95,9 @@ describe('battle: the ball', () => {
   }
 
   it('hits at the exact lead solution and splashes when the shot is late', () => {
+    // Only the PLAYER's balls are counted, so the AI firing alongside cannot
+    // move these numbers. It used to be silenced by emptying its locker, and
+    // there is no locker to empty any more.
     // The lead the geometry actually owes: the enemy travels for one flight
     // time before the ball gets to the far end of the diameter.
     const onTime = shoot(0, SCRIPT_OMEGA * FLIGHT);
@@ -118,25 +118,58 @@ describe('battle: the ball', () => {
   });
 });
 
-describe('battle: the locker', () => {
-  it('refuses a second shot inside FIRE_COOLDOWN, and never goes below zero', () => {
-    const sim = createBattleSim(mulberry32(1));
-    const state = mutable(sim.state);
-    state.ai.rounds = 0;
+describe('battle: the gun', () => {
+  it('refuses a second shot inside FIRE_COOLDOWN, and never runs out of rounds', () => {
+    // The locker is gone: the cooldown is the only thing that can refuse a
+    // shot now, so the case that used to count a budget down counts the
+    // cadence instead -- and then holds the key down long enough that any
+    // surviving limit would have stopped the gun.
+    const sim = createBattleSim(mulberry32(1), CALM);
 
     sim.update(DT, FIRE);
-    expect(state.player.rounds).toBe(ROUNDS - 1);
-    // Held down for most of a second: the cooldown is what makes ten rounds a
-    // budget rather than a burst.
-    run(sim, FIRE_COOLDOWN - 3 * DT, FIRE);
-    expect(state.player.rounds).toBe(ROUNDS - 1);
-    run(sim, 4 * DT, FIRE);
-    expect(state.player.rounds).toBe(ROUNDS - 2);
+    expect(count(sim.state, 'fire', 'player')).toBe(1);
 
-    // Firing flat out for far longer than the locker can pay for.
-    run(sim, ROUNDS * FIRE_COOLDOWN + 5, FIRE);
-    expect(state.player.rounds).toBe(0);
-    expect(state.player.cooldown).toBeGreaterThanOrEqual(0);
+    // Held down through most of one cooldown: nothing.
+    let early = 0;
+    for (let i = 0; i < (FIRE_COOLDOWN - 3 * DT) / DT; i++) {
+      sim.update(DT, FIRE);
+      early += count(sim.state, 'fire', 'player');
+    }
+    expect(early).toBe(0);
+
+    // And the shot lands as the cooldown lapses.
+    let next = 0;
+    for (let i = 0; i < 4; i++) {
+      sim.update(DT, FIRE);
+      next += count(sim.state, 'fire', 'player');
+    }
+    expect(next).toBe(1);
+  });
+
+  it('fires at the advertised rate for as long as the key is held', () => {
+    const sim = createBattleSim(mulberry32(0xf1e), CALM);
+    const state = mutable(sim.state);
+    const seconds = 20;
+    let shots = 0;
+    for (let i = 0; i < seconds / DT; i++) {
+      // The AI's gun held down. Twenty seconds of a gunner firing three a
+      // second would decide this fight long before the count was finished,
+      // and the count is the point of the case.
+      state.ai.cooldown = 1;
+      sim.update(DT, FIRE);
+      shots += count(sim.state, 'fire', 'player');
+      // Nothing may end this fight early and cut the count short.
+      expect(sim.state.outcome).toBe(null);
+    }
+    // Three a second at FIRE_COOLDOWN = 1/3. The floor is a tenth under the
+    // nominal rather than exact, because the cooldown is not a whole number
+    // of frames: at 60fps it lapses on the 21st tick rather than the 20th, so
+    // a gun held down flat out runs a few per cent slow. What the case is
+    // actually pinning is that it never stops -- ten rounds would have ended
+    // this at 10.
+    const expected = seconds / FIRE_COOLDOWN;
+    expect(shots).toBeGreaterThan(expected * 0.9);
+    expect(shots).toBeLessThanOrEqual(expected + 1);
   });
 });
 
@@ -163,25 +196,29 @@ describe('battle: the outcome', () => {
     const before = { x: draw.state.player.x, z: draw.state.player.z };
     run(draw, 2, FIRE);
     expect(draw.state.outcome).toBe('draw');
-    expect(draw.state.player.rounds).toBe(ROUNDS);
+    expect(count(draw.state, 'fire', 'player')).toBe(0);
     expect(draw.state.player.x === before.x && draw.state.player.z === before.z).toBe(false);
   });
 
-  it('calls two empty lockers a draw, and the timeout a draw', () => {
-    const empty = createBattleSim(mulberry32(5));
-    const emptyState = mutable(empty.state);
-    emptyState.player.rounds = 0;
-    emptyState.ai.rounds = 0;
-    empty.update(DT, FIRE);
-    expect(empty.state.outcome).toBe('draw');
-
-    // A player who never fires holds a full locker, so only the clock can end
-    // this one. The AI's is emptied so that it cannot win it instead.
-    const slow = createBattleSim(mulberry32(6));
-    mutable(slow.state).ai.rounds = 0;
-    run(slow, BATTLE_TIMEOUT - 1, IDLE);
+  it('calls the timeout a draw, which is now the only way a stand-off ends', () => {
+    // There used to be a rule above this one: both lockers empty and no ball
+    // in the air was a draw. With unlimited rounds it can never be true, and
+    // `settle` no longer asks. The clock is what is left.
+    //
+    // Neither side may score, or the fight ends on hits instead: the player
+    // never fires, and the AI is held fouled, which is `battlesea.ts`'s own
+    // way of silencing a gun.
+    const slow = createBattleSim(mulberry32(6), CALM);
+    const state = mutable(slow.state);
+    for (let i = 0; i < (BATTLE_TIMEOUT - 1) / DT; i++) {
+      state.ai.cooldown = 1;
+      slow.update(DT, IDLE);
+    }
     expect(slow.state.outcome).toBe(null);
-    run(slow, 1.5, IDLE);
+    for (let i = 0; i < 1.5 / DT; i++) {
+      state.ai.cooldown = 1;
+      slow.update(DT, IDLE);
+    }
     expect(slow.state.outcome).toBe('draw');
   });
 });

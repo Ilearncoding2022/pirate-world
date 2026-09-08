@@ -30,7 +30,7 @@ the first frame you are handed does not stutter.
 | on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds |
 | on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
-| `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. One a second, ten rounds |
+| `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. Up to three a second, and the locker never runs out |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
 | `Esc` | Open the menu — and the controls guide inside it. Also ends a fishing session or closes any panel; it will not get you out of a battle |
 
@@ -201,8 +201,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   speed you up and slow you down on the circle, and that is the whole helm,
   because the guns fire **straight out of the inboard beam**: the ring is what
   makes the firing windows, and pulling ahead or dropping back is how you open
-  yours and close theirs. `Space` fires, one round a second, ten rounds, and
-  the ball only hits if the other boat is on the line when it gets there.
+  yours and close theirs. `Space` fires **up to three times a second and never
+  runs out**, and the ball only hits if the other boat is on the line when it
+  gets there — so the limit on a broadside is the aim, not the ammunition.
   **Three hits lose it.** The other captain is reading you **two seconds
   late**, and telegraphs every shot before it goes: a warm light on the hull
   and a bar on the strip, lit a second and a half before the ball leaves, so a
