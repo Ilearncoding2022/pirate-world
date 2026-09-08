@@ -347,7 +347,7 @@ const HEIGHT_GROWTH = 0.05;
  * `hazardfield.ts` used to hand every wave the same 5-unit width, and a sea
  * of identical waves is a sea a player reads once. One unit is a wave a hull
  * is through before it has finished heeling -- a slap rather than a wall --
- * and twelve is four hull lengths of water to cross, which at CREST_SPEED is
+ * and twelve is four hull lengths of water to cross, which at CREST_SPEED_REF is
  * two full seconds under it. Both ends are deliberately past what reads as
  * "a wave": the point is the spread, and the ordinary middle of the range is
  * still about the five units this always was.
@@ -1221,7 +1221,7 @@ export function createHazards(deps: HazardsDeps): Hazards {
    *     half of CREST_WIDTH_MAX) but only its own centre line is probed, so a
    *     wave's face may overlap a beach for a fraction of a second before the
    *     line does. A second row of probes would double the cost to move the
-   *     moment of breaking by under a second at CREST_SPEED, and the widest
+   *     moment of breaking by under a second at CREST_SPEED_REF, and the widest
    *     wave this can roll is the only one for which it is even that.
    */
   function clipToWater(h: MutableHazard): boolean {

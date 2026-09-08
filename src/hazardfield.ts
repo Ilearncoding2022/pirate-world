@@ -59,7 +59,7 @@ export const MAX_HAZARDS = 3;
  *
  * Six hull lengths of front against one and a half of depth: long enough that
  * dodging one means a real course change rather than a flick of the helm,
- * narrow enough that it passes over in about a second at CREST_SPEED and
+ * narrow enough that it passes over in about a second at CREST_SPEED_REF and
  * reads as a wave rather than as the sea rising.
  */
 export const CREST_HALF_LENGTH = 10;
