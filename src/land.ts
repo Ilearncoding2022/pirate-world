@@ -84,9 +84,9 @@ export interface Land {
  * Finite-difference step for slope, curvature and the per-pixel normal.
  *
  * Ship-scale (a fixed world-unit distance, not a fraction of the globe):
- * well under LAND_DETAIL's ~2.2 unit triangle, so the derivative reads the
- * height field's own detail rather than averaging across a whole facet, but
- * not so small that it degenerates to the map's own texel noise.
+ * well under the ~2.2 unit triangle `landDetail` builds, so the derivative
+ * reads the height field's own detail rather than averaging across a whole
+ * facet, but not so small that it degenerates to the map's own texel noise.
  */
 const SLOPE_STEP_WORLD = 1.2;
 
@@ -602,9 +602,37 @@ const VERTEX_BEGIN_INJECT = [
  * the ship's length -- which is the low-poly look the world is built around.
  * It is quadratic in cost, both in triangles and in the terrain samples taken
  * to build them, so it tracks the radius rather than being fixed: at
- * GLOBE_RADIUS 100 this is 96, the value the look was tuned at.
+ * GLOBE_RADIUS 100 the high tier is 96, the value the look was tuned at.
+ *
+ * The 96 is the quality table's `landDetail` now, because until this became a
+ * row there was no tier that could say anything about it at all: one icosphere
+ * of 745k source triangles, filtered to 289k that survive the cull below, on
+ * every machine that could open the page. That is the largest single vertex
+ * buffer the game allocates and it is paid at startup, before a frame is ever
+ * drawn. High keeps the 96 exactly -- `world-golden.json` pins the surviving
+ * vertex count at that tier -- and low and medium buy back a mesh two thirds
+ * and five sixths as fine.
+ *
+ * What the lower tiers do NOT give up is which islands exist. All 93 of the
+ * world's landmasses still carry icosphere vertices above sea level at two
+ * thirds of this, and at a third of it: none of them vanishes. What a coarser
+ * sphere costs is how wide the beach triangle straddling the waterline is,
+ * and that does show on the smallest. The smallest islet in the world is 25
+ * square units, about six across; `high` draws it with 50 triangles, 16 of
+ * them wholly above water, and `low` with 28, of which 6 are. Its drawn
+ * footprint grows about a quarter in the trade, against 3% for the world's
+ * land taken together. So a small island's outline softens on `low`, and
+ * nobody has yet checked that by eye.
+ *
+ * The shape the player steers around is not this mesh in any case. Collision
+ * asks `terrain.isLand`, and the coastline the eye reads -- the foam line,
+ * the shallow ramp, this file's own per-pixel slope and wetness -- comes from
+ * the height map at full resolution whatever the geometry underneath it is
+ * doing.
  */
-const LAND_DETAIL = Math.round((96 * GLOBE_RADIUS) / 100);
+function landDetail(quality: Quality): number {
+  return Math.round((quality.landDetail * GLOBE_RADIUS) / 100);
+}
 
 /**
  * Land-only mesh.
@@ -634,7 +662,7 @@ const LAND_DETAIL = Math.round((96 * GLOBE_RADIUS) / 100);
  * chains on top untouched.
  */
 export function createLand(terrain: Terrain, heightMap: HeightMap, quality: Quality): Land {
-  const source = new THREE.IcosahedronGeometry(GLOBE_RADIUS, LAND_DETAIL);
+  const source = new THREE.IcosahedronGeometry(GLOBE_RADIUS, landDetail(quality));
   const srcPos = source.attributes.position as THREE.BufferAttribute;
   const faceCount = srcPos.count / 3;
 

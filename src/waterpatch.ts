@@ -71,6 +71,43 @@ const _east = new THREE.Vector3();
 export function createWaterPatch(water: Water, quality: Quality): WaterPatch {
   const sphereMaterial = water.mesh.material as THREE.ShaderMaterial;
 
+  /*
+   * `patchSegments` is 96/128/160, so a vertex every 0.84/0.63/0.50 world
+   * units across PATCH_EXTENT. docs/TEXTURE_PLAN.md's Wave 3 held a row to
+   * take the high tier to 192 -- 0.42 units -- once the shader work had
+   * landed and the maelstrom's rim could be judged again. It landed; this is
+   * the answer, written here rather than left as a number nobody can account
+   * for.
+   *
+   * The two features the rise was for are the maelstrom's lip, 3.6 units
+   * wide (hazardfield.ts's HAZ_RIM_C +/- 1/HAZ_RIM_INV, on a radius of 10),
+   * and the great wave's front face, 2.0 units (CREST_HALF_WIDTH *
+   * CREST_FRONT_RATIO). At 160 the lip gets 3.6 vertices from crown to outer
+   * edge and the face about 4 quads; at 192, 4.3 and 4.8. That is the whole
+   * purchase: one more sample on each, for 25,600 vertices a frame becoming
+   * 36,864 -- 44% more vertex shading, every frame, each invocation carrying
+   * two simplex octaves and a hazardHeight over three slots.
+   *
+   * And it buys nothing in the lighting, which is where both features
+   * actually read. The patch hands the fragment stage a position and two
+   * varyings and no normal at all: `waterglsl.ts` finite-differences its own
+   * `N` per PIXEL at NORMAL_STEP, and the hazard's slope comes from three
+   * taps at HAZ_STEP_WORLD. Neither knows how finely the grid under it was
+   * cut. A denser patch can only sharpen the silhouette and clip a little
+   * less off the lip's crown -- and the crown falls between vertices at
+   * either resolution, since the grid snaps to the ship and the maelstrom
+   * sits where it sits, so that is a phase accident, not something 192 fixes.
+   *
+   * Left at 160. RENDER_PLAN.md's budget names patch segments as the third
+   * thing to drop when a frame runs over; growing it 44% for one sample on a
+   * shape whose shading is resolution-blind is the wrong direction.
+   *
+   * That is an argument from arithmetic, and it is the only kind that was
+   * available: nobody has yet put a photograph of the rim at 192 beside one
+   * at 160. If the owner looks at a real GPU and finds the lip reading as a
+   * polygon after all, this is the number to move, and the reasoning above is
+   * what it has to argue with.
+   */
   const segments = Math.max(2, quality.patchSegments);
   const geometry = new THREE.PlaneGeometry(PATCH_EXTENT, PATCH_EXTENT, segments - 1, segments - 1);
 
