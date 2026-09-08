@@ -739,30 +739,35 @@ export interface Cannonball {
  * about. An `east` crest at `at = -6` is the line `x = -6` sweeping toward
  * +x. A `west` crest at `at = -6` is the line `x = +6` sweeping toward -x.
  * The crest itself is drawn perpendicular to its travel.
+ *
+ * A crest is a SEGMENT of that line and not the whole of it. `length` is how
+ * much of it there is and `offset` is where its middle sits, both measured
+ * along the crest's own line — the perpendicular to `axis`, taken as
+ * `(travel.z, -travel.x)`, so a `north` crest is measured in +x and an `east`
+ * one in -z. A hull is only shoved if its track falls inside that segment,
+ * which is the whole difference between three short waves crossing an arena
+ * and one wall of water that cannot be dodged.
  */
 export interface ArenaCrest {
   readonly axis: 'north' | 'south' | 'east' | 'west';
   /** Coordinate along the direction of travel, arena units. Runs negative to positive. */
   readonly at: number;
+  /** How much of its own line this crest occupies, arena units. */
+  readonly length: number;
+  /** Where the middle of that segment sits along the line, arena units, signed. */
+  readonly offset: number;
+  /** Units per second along `axis`. Rolled per crest, so no two run together. */
+  readonly speed: number;
 }
 
 /**
- * A shoal or a wreck standing inside the ring, rolled once per fight.
+ * A raft of debris drifting across the arena.
  *
- * It is a circle for every purpose the sim has: a ball whose sweep passes
- * within `radius` of the centre is lost on it. Every obstacle sits well
- * inside the track at every radius the ring ever has, so no hull meets one.
+ * A circle for every purpose the sim has: a hull that reaches one is fouled,
+ * a ball swept through one sinks it. Several are adrift at once and no two
+ * are alike — each carries its own `radius` and its own velocity, rolled when
+ * it was launched.
  */
-export interface ArenaObstacle {
-  readonly kind: 'shoal' | 'wreck';
-  readonly x: number;
-  readonly z: number;
-  readonly radius: number;
-  /** Radians, the heel a wreck is drawn at. Meaningless for a shoal. */
-  readonly yaw: number;
-}
-
-/** A raft of debris drifting across the arena, or null while there is none. */
 export interface ArenaFlotsam {
   readonly x: number;
   readonly z: number;
@@ -772,15 +777,18 @@ export interface ArenaFlotsam {
 }
 
 /**
- * Which of the sea's three systems are running.
+ * Which of the sea's two systems are running.
  *
- * All three on in the game; all three off under `?calm=1` and in the unit
- * cases that measure the gunner, which has to be pinned on a sea that is not
- * moving the answer underneath it.
+ * Both on in the game; both off under `?calm=1` and in the unit cases that
+ * measure the gunner, which has to be pinned on a sea that is not moving the
+ * answer underneath it.
+ *
+ * There were three. `shoals` — the rocks and wrecks that stood still inside
+ * the ring — is gone: everything in the water now drifts, and what used to be
+ * a fixed blind spot is a raft that has to be watched.
  */
 export interface BattleOptions {
   readonly waves: boolean;
-  readonly shoals: boolean;
   readonly flotsam: boolean;
 }
 
@@ -789,9 +797,9 @@ export interface BattleEvent {
   /**
    * `fire`, `hit` and `splash` are as they always were. The three added by
    * the rework: `aim` is the AI committing to a shot, at its own hull, one
-   * fuse before the gun goes; `strike` is a ball lost on an obstacle or a
-   * raft, at the point it met it; `foul` is a hull running into a raft, and
-   * its `owner` is the hull that was fouled rather than anyone who fired.
+   * fuse before the gun goes; `strike` is a ball lost on a raft, at the point
+   * it met it; `foul` is a hull running into a raft, and its `owner` is the
+   * hull that was fouled rather than anyone who fired.
    */
   readonly kind: 'fire' | 'hit' | 'splash' | 'aim' | 'strike' | 'foul';
   readonly owner: 'player' | 'ai';
@@ -823,12 +831,10 @@ export interface BattleState {
    * `aim` event themselves.
    */
   readonly fuse: number | null;
-  /** The crest rolling across the arena, if there is one. */
-  readonly crest: ArenaCrest | null;
-  /** The shoals and wrecks inside the ring. Rolled once; never changes. */
-  readonly obstacles: readonly ArenaObstacle[];
-  /** The raft drifting across the arena, if there is one. */
-  readonly flotsam: ArenaFlotsam | null;
+  /** The crests rolling across the arena, up to CREST_MAX of them at once. */
+  readonly crests: readonly ArenaCrest[];
+  /** The rafts drifting across the arena. */
+  readonly flotsam: readonly ArenaFlotsam[];
 }
 
 /** What the player is asking for this tick. Written by `battleui.ts`. */

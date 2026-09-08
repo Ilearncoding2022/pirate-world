@@ -1,7 +1,6 @@
 import {
   BoxGeometry,
   Color,
-  CylinderGeometry,
   DirectionalLight,
   DoubleSide,
   Group,
@@ -32,6 +31,7 @@ import {
   crestFragment,
   seaFragment,
 } from './battlewave';
+import { CREST_MAX, FLOTSAM_COUNT_MAX } from './battlesea';
 import { GLOBE_RADIUS } from './geo';
 import { HULL_OFFSET } from './ship';
 
@@ -252,9 +252,9 @@ const FLASH_Y = 0.9;
 
 /**
  * A brief, dim, spray-coloured pop from the flash pool, thrown at the point
- * a ball meets a `strike` rather than a splash -- an obstacle or the raft.
+ * a ball meets a `strike` rather than a splash -- a raft got in the way.
  * Dimmer than the muzzle and shorter than the hit flash, on purpose: it
- * marks a ROUND LOST, not a shot fired or a hull struck, and must not be
+ * marks a SHOT EATEN, not a shot fired or a hull struck, and must not be
  * mistaken for either at a glance. `MAX_FLASHES` is not raised for it; a
  * strike shares the same three-light pool the muzzle and the hit already
  * round-robin through.
@@ -293,9 +293,15 @@ const FUSE_HIGH = 48;
  * The crest: how long and how deep it is drawn, and how hard it shoves a
  * hull's bob when it passes one.
  *
- * `CREST_LENGTH` has to read as a wave crossing the whole arena, and the
- * ring is 40 units across at its widest, so 60 clears that with margin at
- * either end and never shows a hard tip at the frame's edge. `CREST_WIDTH`
+ * `CREST_LENGTH` is the GEOMETRY's length and no longer the wave's. A crest
+ * now carries its own `length`, anywhere from a fifth of the arena to all of
+ * it, and that is fed to the shader as `uHalfLength` -- the coordinate the
+ * ridge profile tapers to nothing at. So the plane stays 60 units at all
+ * times, comfortably longer than the widest wave the sim can roll, and the
+ * part of it beyond the crest's own ends carries exactly zero height and
+ * zero alpha. Scaling the mesh instead would have squeezed the foam noise
+ * along with it and made a short crest a differently-textured wave rather
+ * than a shorter one. `CREST_WIDTH`
  * is about a hull length, and it is now doing THREE jobs rather than two: it
  * is the distance `update` uses to decide when a hull is "under" the crest
  * for the heave and roll below, and it is also the half-width the wave is
@@ -342,15 +348,29 @@ const CREST_ROLL = 0.2;
  * Y that sends the mesh's local +z (the way the wave travels, and the axis
  * the asymmetric profile is written about) onto that vector, so a rotation of
  * theta sends local +z to (sin theta, 0, cos theta).
+ *
+ * `alongX`/`alongZ` is the crest's own line -- `(travel.z, -travel.x)`, the
+ * same formula `ArenaCrest` and `battlesea.ts` write out -- and it is where
+ * `offset` is measured. It has to be the SAME perpendicular the sim chose or
+ * a short crest would be drawn on the opposite side of the ring from the
+ * hulls it shoves, which is why the formula is pinned in three places rather
+ * than derived in one and trusted in the others. It is also the mesh's own
+ * local +x after the yaw, so it is what `offset` slides the mesh along.
  */
 const CREST_TRAVEL: Record<
   ArenaCrest['axis'],
-  { readonly x: number; readonly z: number; readonly yaw: number }
+  {
+    readonly x: number;
+    readonly z: number;
+    readonly yaw: number;
+    readonly alongX: number;
+    readonly alongZ: number;
+  }
 > = {
-  north: { x: 0, z: 1, yaw: 0 },
-  south: { x: 0, z: -1, yaw: Math.PI },
-  east: { x: 1, z: 0, yaw: Math.PI / 2 },
-  west: { x: -1, z: 0, yaw: -Math.PI / 2 },
+  north: { x: 0, z: 1, yaw: 0, alongX: 1, alongZ: 0 },
+  south: { x: 0, z: -1, yaw: Math.PI, alongX: -1, alongZ: 0 },
+  east: { x: 1, z: 0, yaw: Math.PI / 2, alongX: 0, alongZ: -1 },
+  west: { x: -1, z: 0, yaw: -Math.PI / 2, alongX: 0, alongZ: 1 },
 };
 
 /**
@@ -377,65 +397,32 @@ const CREST_FOOTPRINT_BACK = CREST_BACK_RATIO;
  */
 const FOULED_LIST = 0.1;
 
-/**
- * The pool of shoals and wrecks: how many slots, and the shapes both kinds
- * are built from.
- *
- * Three slots because decision 6 rolls one to three obstacles a fight and
- * nothing here may allocate on demand; a slot past `state.obstacles.length`
- * is simply hidden. Both a shoal and a wreck live in every slot from
- * construction on and only one is ever shown, so choosing which an
- * obstacle is costs a visibility flag, not a mesh.
- *
- * Every size below is authored at `radius = 1` and the whole slot is
- * uniformly scaled by the obstacle's own `radius` (1.0 to 1.5) at
- * placement, so a bigger obstacle is a bigger version of the same shape
- * rather than a different one.
- *
- * The shoal is a flattened sphere sunk mostly below the water --
- * `OBSTACLE_SHOAL_FLATTEN` squashes it to under a third of its own radius
- * tall, and `OBSTACLE_SHOAL_SINK` drops its centre far enough that only
- * about a sixth of that flattened height (0.05 of 0.32) still pokes above
- * the surface -- with a ring of foam sitting right at the waterline,
- * `OBSTACLE_FOAM_SCALE` sized a little past the mound's own footprint so the
- * foam reads as surf breaking on it rather than a halo floating over it.
- *
- * The wreck is a broken box hull, sized against the 3.1-unit hull like
- * everything else in this file -- `WRECK_LENGTH` at radius 1 is a little
- * over half a hull length, so the biggest rolled wreck (radius 1.5) is
- * close to a full hull's worth of broken timber -- heeled onto its side by
- * `ArenaObstacle.yaw`, with a short stub of mast, `WRECK_MAST_HEIGHT` tall,
- * planted toward one end and fixed at `WRECK_MAST_TILT` off true, since a
- * mast still standing straight on a hull lying on its side would read as
- * wrong rather than as wrecked.
- */
-const OBSTACLE_SLOTS = 3;
-const OBSTACLE_SHOAL_FLATTEN = 0.32;
-const OBSTACLE_SHOAL_SINK = 0.27;
-const OBSTACLE_FOAM_SCALE = 1.15;
-const OBSTACLE_FOAM_OPACITY = 0.55;
-const WRECK_LENGTH = 1.9;
-const WRECK_HEIGHT = 0.42;
-const WRECK_WIDTH = 0.5;
-const WRECK_MAST_RADIUS = 0.05;
-const WRECK_MAST_HEIGHT = 0.9;
-const WRECK_MAST_OFFSET_X = 0.5;
-const WRECK_MAST_OFFSET_Y = 0.55;
-const WRECK_MAST_TILT = 0.35;
-/** Murky rock-and-mud colour for the shoal's mound. Dark, and never the wreck's wood. */
-const SHOAL_COLOR = '#2c2620';
-/** Dark weathered-wood colour shared by the wreck's hull, its mast stub, and the raft's own debris -- all three are lost timber, not three different materials. */
+/** Dark weathered-wood colour for the rafts' debris: lost timber, and nothing else in the arena is made of it. */
 const HAZARD_COLOR = '#181410';
+
+/**
+ * The radius `RAFT_PIECES` below is authored against, arena units.
+ *
+ * The rafts used to be one size -- `battlesea.ts`'s old flat `FLOTSAM_RADIUS`
+ * of 1.2 -- and the pile was drawn to fit it. Now every raft rolls its own
+ * radius, so the group is scaled by `radius / RAFT_NOMINAL_R` and the pieces
+ * keep the proportions they were drawn with. Written as its own named
+ * constant rather than imported, because it describes THIS pile of boxes and
+ * not the sim's range: change the boxes and this moves; change the range and
+ * it does not.
+ */
+const RAFT_NOMINAL_R = 1.2;
 
 /**
  * The raft's own small cluster of debris, one box per entry: its offset
  * from the raft's centre and height above the water, its half-extents, and
  * a fixed tilt and heading baked in at construction so no two pieces read
  * as the same crate. Four pieces, kept within a unit or so of the centre --
- * well inside `battlesea.ts`'s own `FLOTSAM_RADIUS` (1.2), copied here only
- * as a comment -- so the pile never reads bigger than the hazard it actually
- * is. Placement itself is one line: the whole group moves to
- * `state.flotsam.x`/`z` and every box keeps the offset it was built with.
+ * inside `RAFT_NOMINAL_R`, the radius they are drawn against -- so the pile
+ * never reads bigger than the hazard it actually is. Placement itself is two
+ * lines: the group moves to its raft's `x`/`z` and takes that raft's own
+ * radius as a uniform scale, and every box keeps the offset it was built
+ * with.
  */
 const RAFT_PIECES: ReadonlyArray<{
   readonly x: number;
@@ -661,115 +648,97 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
     (CREST_WIDTH * (CREST_FOOTPRINT_FRONT - CREST_FOOTPRINT_BACK)) / 2,
   );
 
-  const crestUniforms = {
-    ...seaUniforms,
-    uCrestHeight: { value: ARENA_CREST_HEIGHT },
-    uHalfLength: { value: CREST_LENGTH / 2 },
-    uHalfWidth: { value: CREST_WIDTH },
-    uCrestAlong: { value: new Vector3(1, 0, 0) },
-    uCrestAcross: { value: new Vector3(0, 0, 1) },
-  };
-
-  const crest = new Mesh(
-    crestGeometry,
-    new ShaderMaterial({
-      uniforms: crestUniforms,
-      vertexShader: CREST_VERTEX,
-      fragmentShader: crestFragment(quality.waveChop),
-      // Transparent for its skirt alone: the body of the wave is solid and
-      // has to occlude a hull on the far side of it, which is the whole
-      // point of a wall of water. Depth is tested so a nearer hull covers it
-      // and not written so its own faded edge cannot punch a hole in one.
-      transparent: true,
-      depthWrite: false,
-      side: DoubleSide,
-    }),
-  );
-  crest.name = 'arena-crest';
-  crest.position.y = SPLASH_Y;
-  crest.visible = false;
-  // It is 60 units long and crosses the whole ring; the corners of the grid
-  // leave the frustum constantly while the middle of the wave is dead centre.
-  crest.frustumCulled = false;
-  root.add(crest);
-
-  /* ---- the obstacles: a pool of three, each a shoal and a wreck in one ---- */
-
-  interface ObstacleSlot {
-    readonly group: Group;
-    readonly shoal: Group;
-    readonly wreck: Group;
+  /*
+   * One slot per crest the sim may run, built up front. Each carries its own
+   * uniforms because each is a different wave: its own length, its own place
+   * on its own line, its own axis. The `seaUniforms` spread shares the
+   * OBJECTS behind time, light and fog, so those still move for every slot
+   * from one write a frame, and only the four crest-specific ones are
+   * per-slot.
+   *
+   * The geometry is shared. It is the same 60-unit plane in every slot and
+   * nothing about a crest's own dimensions is baked into it -- see
+   * CREST_LENGTH on why the wave's length is a uniform rather than a scale.
+   */
+  interface CrestSlot {
+    readonly mesh: Mesh;
+    readonly uniforms: {
+      uHalfLength: { value: number };
+      uCrestAlong: { value: Vector3 };
+      uCrestAcross: { value: Vector3 };
+    };
   }
 
-  const shoalMoundGeometry = new SphereGeometry(1, 16, 10);
-  const shoalMoundMaterial = new MeshStandardMaterial({ color: SHOAL_COLOR, roughness: 0.95, metalness: 0 });
-  const shoalFoamMaterial = new MeshBasicMaterial({
-    color: SPRAY_COLOR,
-    transparent: true,
-    opacity: OBSTACLE_FOAM_OPACITY,
-    depthWrite: false,
-    side: DoubleSide,
-  });
-  const wreckHullGeometry = new BoxGeometry(WRECK_LENGTH, WRECK_HEIGHT, WRECK_WIDTH);
-  const wreckMastGeometry = new CylinderGeometry(WRECK_MAST_RADIUS * 0.6, WRECK_MAST_RADIUS, WRECK_MAST_HEIGHT, 6);
-  const wreckMaterial = new MeshStandardMaterial({ color: HAZARD_COLOR, roughness: 0.9, metalness: 0.05 });
-
-  const obstacleSlots: ObstacleSlot[] = [];
-  for (let i = 0; i < OBSTACLE_SLOTS; i++) {
-    const group = new Group();
-    group.name = `arena-obstacle-${i}`;
-    group.visible = false;
-
-    const shoal = new Group();
-    shoal.name = `arena-obstacle-${i}-shoal`;
-    const mound = new Mesh(shoalMoundGeometry, shoalMoundMaterial);
-    mound.scale.y = OBSTACLE_SHOAL_FLATTEN;
-    mound.position.y = -OBSTACLE_SHOAL_SINK;
-    shoal.add(mound);
-    // The same ring geometry the splashes use, at a fixed size rather than
-    // an animated one: this foam does not grow or fade, it just sits at
-    // the shoal's own waterline for as long as the shoal exists.
-    const foam = new Mesh(ringGeometry, shoalFoamMaterial);
-    foam.rotation.x = -Math.PI / 2;
-    foam.position.y = SPLASH_Y;
-    foam.scale.setScalar(OBSTACLE_FOAM_SCALE);
-    shoal.add(foam);
-    group.add(shoal);
-
-    const wreck = new Group();
-    wreck.name = `arena-obstacle-${i}-wreck`;
-    // A fixed heading per slot, purely so three wrecks rolled into one
-    // fight do not all point the same way. There is no compass data for a
-    // wreck, only the heel `ArenaObstacle.yaw` supplies, which `update`
-    // writes to `wreck.rotation.x` every frame instead of here.
-    wreck.rotation.y = (i * Math.PI * 2) / OBSTACLE_SLOTS;
-    const hull = new Mesh(wreckHullGeometry, wreckMaterial);
-    wreck.add(hull);
-    const mast = new Mesh(wreckMastGeometry, wreckMaterial);
-    mast.position.set(WRECK_MAST_OFFSET_X, WRECK_MAST_OFFSET_Y, 0);
-    mast.rotation.z = WRECK_MAST_TILT;
-    wreck.add(mast);
-    group.add(wreck);
-
-    root.add(group);
-    obstacleSlots.push({ group, shoal, wreck });
+  const crestSlots: CrestSlot[] = [];
+  for (let i = 0; i < CREST_MAX; i++) {
+    const uniforms = {
+      ...seaUniforms,
+      uCrestHeight: { value: ARENA_CREST_HEIGHT },
+      uHalfLength: { value: CREST_LENGTH / 2 },
+      uHalfWidth: { value: CREST_WIDTH },
+      uCrestAlong: { value: new Vector3(1, 0, 0) },
+      uCrestAcross: { value: new Vector3(0, 0, 1) },
+    };
+    const mesh = new Mesh(
+      crestGeometry,
+      new ShaderMaterial({
+        uniforms,
+        vertexShader: CREST_VERTEX,
+        fragmentShader: crestFragment(quality.waveChop),
+        // Transparent for its skirt alone: the body of the wave is solid and
+        // has to occlude a hull on the far side of it, which is the whole
+        // point of a wall of water. Depth is tested so a nearer hull covers
+        // it and not written so its own faded edge cannot punch a hole in
+        // one -- which also lets two crests overlap without either one
+        // carving a hole in the other.
+        transparent: true,
+        depthWrite: false,
+        side: DoubleSide,
+      }),
+    );
+    mesh.name = `arena-crest-${i}`;
+    mesh.position.y = SPLASH_Y;
+    mesh.visible = false;
+    // The plane is 60 units long; its corners leave the frustum constantly
+    // while the middle of the wave is dead centre.
+    mesh.frustumCulled = false;
+    root.add(mesh);
+    crestSlots.push({ mesh, uniforms });
   }
 
-  /* ---- the raft ---- */
+  /* ---- the rafts: one pool slot per raft the sim may float ---- */
 
   const raftGeometry = new BoxGeometry(1, 1, 1);
   const raftMaterial = new MeshStandardMaterial({ color: HAZARD_COLOR, roughness: 0.85, metalness: 0 });
-  const raft = new Group();
-  raft.name = 'arena-raft';
-  raft.visible = false;
-  for (const piece of RAFT_PIECES) {
-    const box = new Mesh(raftGeometry, raftMaterial);
-    box.scale.set(piece.w, piece.h, piece.d);
-    box.position.set(piece.x, piece.y, piece.z);
-    box.rotation.set(piece.tilt, piece.yaw, 0);
-    raft.add(box);
+
+  /*
+   * `FLOTSAM_COUNT_MAX` slots, because that is the most the sim can ever roll
+   * and nothing in this file may allocate on demand: a slot past
+   * `state.flotsam.length` is simply hidden, exactly as the pool of shoals
+   * this replaces did.
+   *
+   * Each slot is turned to its own fixed heading at construction. The sim has
+   * no bearing for a raft -- a floating pile of timber has no bow -- so this
+   * is here only so that six rafts on the water are not six copies of one
+   * silhouette. Scale is the one thing `update` writes, off the raft's own
+   * rolled radius.
+   */
+  const raftSlots: Group[] = [];
+  for (let i = 0; i < FLOTSAM_COUNT_MAX; i++) {
+    const raft = new Group();
+    raft.name = `arena-raft-${i}`;
+    raft.visible = false;
+    raft.rotation.y = (i * Math.PI * 2) / FLOTSAM_COUNT_MAX;
+    for (const piece of RAFT_PIECES) {
+      const box = new Mesh(raftGeometry, raftMaterial);
+      box.scale.set(piece.w, piece.h, piece.d);
+      box.position.set(piece.x, piece.y, piece.z);
+      box.rotation.set(piece.tilt, piece.yaw, 0);
+      raft.add(box);
+    }
+    root.add(raft);
+    raftSlots.push(raft);
   }
-  root.add(raft);
 
   /** Every transient in the arena, back to nothing. Both ends of a fight. */
   function resetTransient(): void {
@@ -784,8 +753,8 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
       flash.light.intensity = 0;
     }
     fuseLight.intensity = 0;
-    crest.visible = false;
-    raft.visible = false;
+    for (const slot of crestSlots) slot.mesh.visible = false;
+    for (const raft of raftSlots) raft.visible = false;
   }
 
   function pop(x: number, z: number, colour: string, peak: number, span: number): void {
@@ -843,19 +812,43 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
   }
 
   /**
-   * A hull's signed distance from the crest's line, divided by
-   * `CREST_WIDTH`: `-1` as the crest arrives, `0` exactly under it, `+1` as
-   * it recedes, clamped to that range outside it so the heave and roll it
-   * drives are exactly zero once the crest is out of reach. Reads the
-   * `ArenaCrest` convention pinned in `types.ts`: `axis` is both the
-   * direction of travel and the coordinate it is measured along, and `at`
-   * is signed onto the world by that axis (`north`/`east` positive,
-   * `south`/`west` negative).
+   * A hull's signed distance from one crest's line, divided by `CREST_WIDTH`:
+   * `-1` as the crest arrives, `0` exactly under it, `+1` as it recedes,
+   * clamped to that range outside it so the heave and roll it drives are
+   * exactly zero once the crest is out of reach. Reads the `ArenaCrest`
+   * convention pinned in `types.ts`: `axis` is both the direction of travel
+   * and the coordinate it is measured along, and `at` is signed onto the
+   * world by that axis (`north`/`east` positive, `south`/`west` negative).
+   *
+   * Returns `null` for a hull past the ENDS of the crest. A short wave rocks
+   * only what it actually passes over, which is the same test `battlesea.ts`
+   * shoves on -- run here against the hull's drawn position rather than its
+   * track, because this is what the eye is checking against the picture.
    */
-  function crestProximity(crest: ArenaCrest, x: number, z: number): number {
-    const sign = crest.axis === 'north' || crest.axis === 'east' ? 1 : -1;
-    const along = crest.axis === 'north' || crest.axis === 'south' ? z : x;
-    return Math.min(1, Math.max(-1, (along - sign * crest.at) / CREST_WIDTH));
+  function crestProximity(crest: ArenaCrest, x: number, z: number): number | null {
+    const travel = CREST_TRAVEL[crest.axis];
+    const across = x * travel.alongX + z * travel.alongZ;
+    if (Math.abs(across - crest.offset) > crest.length / 2) return null;
+    const along = x * travel.x + z * travel.z;
+    return Math.min(1, Math.max(-1, (along - crest.at) / CREST_WIDTH));
+  }
+
+  /**
+   * The crest a hull is most under, as a proximity, or `null` under none.
+   *
+   * The NEAREST and not the sum. Three crests overlapping one hull would lift
+   * it by three heaves and bank it by three rolls, which is a hull launched
+   * out of the water rather than a sea running -- and it would disagree with
+   * the sim, which also hands a hull one shove at a time however many waves
+   * are running. So the picture and the physics both pick a single wave.
+   */
+  function nearestCrest(state: BattleState, x: number, z: number): number | null {
+    let best: number | null = null;
+    for (const crest of state.crests) {
+      const prox = crestProximity(crest, x, z);
+      if (prox !== null && (best === null || Math.abs(prox) < Math.abs(best))) best = prox;
+    }
+    return best;
   }
 
   return {
@@ -942,11 +935,13 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
       let playerHeave = 0;
       let aiRoll = state.ai.fouled > 0 ? FOULED_LIST : 0;
       let aiHeave = 0;
-      if (state.crest !== null) {
-        const pProx = crestProximity(state.crest, state.player.x, state.player.z);
+      const pProx = nearestCrest(state, state.player.x, state.player.z);
+      if (pProx !== null) {
         playerHeave += CREST_HEAVE * (1 - pProx * pProx);
         playerRoll += CREST_ROLL * pProx * (1 - Math.abs(pProx));
-        const aProx = crestProximity(state.crest, state.ai.x, state.ai.z);
+      }
+      const aProx = nearestCrest(state, state.ai.x, state.ai.z);
+      if (aProx !== null) {
         aiHeave += CREST_HEAVE * (1 - aProx * aProx);
         aiRoll += CREST_ROLL * aProx * (1 - Math.abs(aProx));
       }
@@ -965,52 +960,49 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
         fuseLight.intensity = FUSE_LOW + (FUSE_HIGH - FUSE_LOW) * t * t;
       }
 
-      // The crest: a wall of water yawed onto its own axis, hidden while
-      // nothing is rolling.
-      if (state.crest === null) {
-        crest.visible = false;
-      } else {
-        const travel = CREST_TRAVEL[state.crest.axis];
-        crest.visible = true;
-        // `at` is the crest's coordinate along its own travel direction, so
-        // the centre of the wave is that far out along it and nowhere else.
-        crest.position.x = travel.x * state.crest.at;
-        crest.position.z = travel.z * state.crest.at;
-        crest.rotation.y = travel.yaw;
+      // The crests: each a wall of water yawed onto its own axis and slid
+      // along its own line, with its own length handed to the shader. Slots
+      // past the count are hidden rather than moved out of sight.
+      for (let i = 0; i < crestSlots.length; i++) {
+        const slot = crestSlots[i];
+        const crest = state.crests[i];
+        if (crest === undefined) {
+          slot.mesh.visible = false;
+          continue;
+        }
+        const travel = CREST_TRAVEL[crest.axis];
+        slot.mesh.visible = true;
+        // `at` is the crest's coordinate along its own travel direction and
+        // `offset` its place along the line it lies on, so the centre of the
+        // wave is the sum of the two and nowhere else.
+        slot.mesh.position.x = travel.x * crest.at + travel.alongX * crest.offset;
+        slot.mesh.position.z = travel.z * crest.at + travel.alongZ * crest.offset;
+        slot.mesh.rotation.y = travel.yaw;
+        // Half the wave's own length, which is where the ridge profile
+        // tapers to nothing: this is what makes a short crest short. The
+        // geometry never changes -- see CREST_LENGTH.
+        slot.uniforms.uHalfLength.value = crest.length / 2;
         // The same frame, in world space, for the fragment shader: it has to
         // turn the profile's local gradient into a world horizontal and has
         // no model matrix of its own to do it with. Rotating about Y by
         // `yaw` sends local +z to `travel` and local +x to its starboard,
         // which is the pair written out here.
-        crestUniforms.uCrestAcross.value.set(travel.x, 0, travel.z);
-        crestUniforms.uCrestAlong.value.set(travel.z, 0, -travel.x);
+        slot.uniforms.uCrestAcross.value.set(travel.x, 0, travel.z);
+        slot.uniforms.uCrestAlong.value.set(travel.z, 0, -travel.x);
       }
 
-      // The obstacles: rolled once at the sim's construction and never
-      // moved again, so this is three cheap writes a frame rather than
-      // three meshes built the moment the fight learns where they are.
-      for (let i = 0; i < obstacleSlots.length; i++) {
-        const obstacle = state.obstacles[i];
-        const slot = obstacleSlots[i];
-        if (obstacle === undefined) {
-          slot.group.visible = false;
+      // The rafts: a position and a scale each, and the slots past the
+      // fleet's own count hidden.
+      for (let i = 0; i < raftSlots.length; i++) {
+        const raft = raftSlots[i];
+        const piece = state.flotsam[i];
+        if (piece === undefined) {
+          raft.visible = false;
           continue;
         }
-        slot.group.visible = true;
-        slot.group.position.set(obstacle.x, 0, obstacle.z);
-        slot.group.scale.setScalar(obstacle.radius);
-        const isWreck = obstacle.kind === 'wreck';
-        slot.wreck.visible = isWreck;
-        slot.shoal.visible = !isWreck;
-        if (isWreck) slot.wreck.rotation.x = obstacle.yaw;
-      }
-
-      // The raft: one cluster, hidden while there is none.
-      if (state.flotsam === null) {
-        raft.visible = false;
-      } else {
         raft.visible = true;
-        raft.position.set(state.flotsam.x, 0, state.flotsam.z);
+        raft.position.set(piece.x, 0, piece.z);
+        raft.scale.setScalar(piece.radius / RAFT_NOMINAL_R);
       }
 
       for (let i = 0; i < balls.length; i++) {
@@ -1062,15 +1054,15 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
           splash.mesh.scale.set(SPLASH_R0, SPLASH_R0, 1);
           splash.material.opacity = 1;
           splash.mesh.visible = true;
-          // A strike is a ball the sea ate -- an obstacle or the raft --
+          // A strike is a ball the sea ate -- a raft got in the way --
           // rather than one that simply fell short. Same ring, plus a
           // brief spray-coloured pop so the two are told apart at a glance
-          // instead of only by counting rounds left in the locker.
+          // rather than by watching which way the ball was going.
           if (event.kind === 'strike') pop(event.x, event.z, SPRAY_COLOR, STRIKE_INTENSITY, STRIKE_LIFE);
         }
         // 'aim' needs nothing here: the fuse light above already reads
         // `state.fuse` directly. 'foul' needs nothing beyond the raft
-        // vanishing, which `state.flotsam` becoming null already shows.
+        // vanishing, which its slot dropping out of `state.flotsam` shows.
       }
     },
 

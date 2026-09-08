@@ -75,7 +75,7 @@ describe('battle: the ball', () => {
   function shoot(delay: number, lead: number): { hits: number; splashes: number } {
     // CALM, because this case is about the lead a diameter owes and nothing
     // else. On a rough sea a crest would shove the scripted enemy off the
-    // track this function has just written for it, and a shoal standing on
+    // track this function has just written for it, and a raft drifting across
     // the diameter would eat the one ball the case is watching -- both of
     // which are the sea working correctly and would still read here as the
     // geometry being wrong.
@@ -187,7 +187,7 @@ describe('battle: the outcome', () => {
 });
 
 /**
- * Measured 2026-09-08, on a calm sea (CALM: no crests, no shoals, no raft, so
+ * Measured 2026-09-08, on a calm sea (CALM: no crests, no rafts, so
  * nothing but the gunner itself can move the answer) against a player who
  * never touches the throttle, 200 fights, seeds 0x1000 through 0x10c7:
  * **596 hits out of 896 shots, 66.5%**. Pinned at plus or minus ten points
@@ -250,30 +250,37 @@ describe('battle: the gunner rolls its own dice', () => {
    * through the water actually moving something.
    *
    * The two modules take one seeded source between them, and the sea draws
-   * from it in its own constructor: five numbers per obstacle, none at all
-   * when the shoals are off. Shared, that would leave the gunner reading from
-   * a different offset in a rough fight than a calm one, and its coin flips
-   * would diverge for no reason to do with the sea. `battle.ts` splits the
-   * source into two streams up front, in a fixed order, before it has looked
-   * at the options at all.
+   * from it in its own constructor: a first crest delay, a raft count, and
+   * six numbers per raft -- or none at all for a system that is off. Shared,
+   * that would leave the gunner reading from a different offset in a rough
+   * fight than a calm one, and its coin flips would diverge for no reason to
+   * do with the sea. `battle.ts` splits the source into two streams up front,
+   * in a fixed order, before it has looked at the options at all.
    *
-   * Shoals are the system that proves it, because they are the one that
-   * touches no hull: they eat cannonballs and nothing else. So a fight with
-   * shoals on and a fight with the sea flat must put both boats through
-   * exactly the same motions, tick for tick, forever. Before the split they
-   * diverged within a few helm periods.
+   * The rafts are the system that proves it. They are the one that moves no
+   * hull until it actually runs into one, so two fights that differ only by
+   * whether rafts are on must put both boats through the same motions until
+   * the first foul -- and a hull travelling the ring at the base rate takes
+   * some seconds to find one. Before the split they diverged within a few
+   * helm periods, which is far sooner than any raft could explain.
    */
-  it('steers identically with the shoals on, since a shoal moves no hull', () => {
+  it('steers identically with the rafts on, until one of them actually fouls a hull', () => {
     const flat = createBattleSim(mulberry32(0x5ea), CALM);
-    const rocks = createBattleSim(mulberry32(0x5ea), { waves: false, shoals: true, flotsam: false });
-    expect(rocks.state.obstacles.length).toBeGreaterThan(0);
+    const rafts = createBattleSim(mulberry32(0x5ea), { waves: false, flotsam: true });
+    expect(rafts.state.flotsam.length).toBeGreaterThan(0);
 
+    let ticks = 0;
     for (let i = 0; i < 30 / DT; i++) {
       flat.update(DT, IDLE);
-      rocks.update(DT, IDLE);
-      expect(rocks.state.ai.angle).toBe(flat.state.ai.angle);
-      expect(rocks.state.player.angle).toBe(flat.state.player.angle);
+      rafts.update(DT, IDLE);
+      if (rafts.state.player.fouled > 0 || rafts.state.ai.fouled > 0) break;
+      expect(rafts.state.ai.angle).toBe(flat.state.ai.angle);
+      expect(rafts.state.player.angle).toBe(flat.state.player.angle);
+      ticks++;
     }
+    // A handful of ticks agreeing would prove nothing; the divergence this
+    // guards against showed up inside a couple of seconds.
+    expect(ticks * DT).toBeGreaterThan(4);
   });
 });
 
@@ -286,7 +293,7 @@ describe('battle: the gunner rolls its own dice', () => {
  * plays on a calm sea: `?calm=1` is a dev query, and every real battle runs
  * `ROUGH`.
  *
- * With the crests, the shoals and the raft switched on, the same gunner
+ * With the crests and the rafts switched on, the same gunner
  * against the same idle player measures **31.3%** (476 of 1519, seeds 0x1000
  * through 0x10c7, 2026-09-08), and takes 120 of the 200 fights. The sea is
  * doing two thirds of the work of making this fight fair: it shoves the AI off

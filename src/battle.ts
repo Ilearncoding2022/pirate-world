@@ -170,7 +170,7 @@ function combatant(angle: number): MutableCombatant {
 /**
  * @param rng the one seeded source for the whole fight. The gunner and the
  *   sea both draw from it, so one seed is one repeatable battle.
- * @param options which of the sea's three systems run. Defaults to all of
+ * @param options which of the sea's two systems run. Defaults to both of
  *   them; `main.ts` passes CALM under `?calm=1`, and every unit case that
  *   measures the gunner passes CALM so the sea cannot move the answer.
  */
@@ -182,8 +182,8 @@ export function createBattleSim(
   // module exists and before `options` has been looked at.
   //
   // Handing both modules the same `rng` looked equivalent and is not. The sea
-  // draws in its own constructor -- `rollObstacles` alone takes five numbers
-  // per obstacle -- and how many it takes depends on which systems are
+  // draws in its own constructor -- the opening fleet alone takes six numbers
+  // per raft -- and how many it takes depends on which systems are
   // switched on, so a shared stream leaves the gunner reading from a
   // different offset in a rough fight than in a calm one. Its coin flips and
   // its solutions would then differ between the two for no reason connected
@@ -206,14 +206,11 @@ export function createBattleSim(
     outcome: null,
     events: [],
     fuse: null,
-    // The sea's own three, exposed as getters rather than copied every tick:
-    // they are the SAME objects `battlesea.ts` is mutating, so nothing here
-    // can hand the scene a stale crest or a raft that has already sunk.
-    get crest() {
-      return sea.state.crest;
-    },
-    get obstacles() {
-      return sea.state.obstacles;
+    // The sea's own two, exposed as getters rather than copied every tick:
+    // they are the SAME arrays `battlesea.ts` is mutating, so nothing here
+    // can hand the scene a crest that has passed or a raft that has sunk.
+    get crests() {
+      return sea.state.crests;
     },
     get flotsam() {
       return sea.state.flotsam;

@@ -6,6 +6,24 @@ seven decisions actually produced is measured in **What it measured, once it
 was built** at the foot of this file; those figures are a robot's, and no
 human has played the reworked fight yet.
 
+**Three of the seven have since been retuned or withdrawn** (2026-09-08, the
+owner's call, after this plan shipped). This file is the record of what was
+decided then and is left as it was written; `docs/ARCHITECTURE.md` is the
+description of what the fight now is. The differences:
+
+- **Decision 5, crests.** One full-width crest at a time at a fixed 7 units/s
+  became up to three at once, each a fifth to all of the arena's width, each
+  at its own 3-10. A hull the crest does not actually pass over is no longer
+  shoved by it.
+- **Decision 6, shoals and wreckage — withdrawn.** The static obstacles are
+  gone entirely, along with `BattleOptions.shoals` and `ArenaObstacle`. A
+  blind spot that never moves is learned once and then costs nothing to
+  respect. What they did is done by the rafts instead.
+- **Decision 7, flotsam.** One raft at a time became a fleet of three to six,
+  each with its own size and its own speed, kept up to strength as they are
+  sunk, fouled on or carried out of the ring.
+
+
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially
 **AI boats and the battle**, **Frame loop** and **Units, pinned**, then

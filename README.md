@@ -210,16 +210,23 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   tap of the throttle in that window and it lands on water you have left.
   Their helm is not flawless either; one decision in four is a coin flip
   rather than a solved course, so watch it long enough and it visibly picks
-  the wrong way. And the sea is not still under either of you: a crest rolls
-  through every so often and shoves a hull a few units off its line before it
-  settles back — a real wall of water now, the same wave the open ocean
-  raises, with a steep front, a lip that breaks into froth and streaks running
-  down the face, standing on a sea built from the same three ridged layers you
-  sail on outside the fight. One to three shoals or wrecks sit inside the ring and
-  swallow a ball that crosses one, and a raft of flotsam drifts through and
-  fouls whatever hull runs into it — half speed and a dead gun for a couple of
-  seconds. The other captain does not see any of that and does nothing about
-  it; it is shoved and fouled exactly as you are.
+  the wrong way. And the sea is not still under either of you. **Up to three
+  crests run at once**, from three directions and at their own speeds — three
+  knots to ten — and each one is only as long as it happens to be rolled: a
+  fifth of the ring at the shortest, the whole width at the longest. A short
+  one you can be on the far side of, and a full-width one cannot be dodged at
+  all, so the sea is something to read rather than a beat to count. Whatever
+  passes over you shoves the hull a few units off its line before it settles
+  back — a real wall of water, the same wave the open ocean raises, with a
+  steep front, a lip that breaks into froth and streaks running down the face,
+  standing on a sea built from the same three ridged layers you sail on outside
+  the fight. **Three to six rafts of flotsam drift through**, no two the same
+  size or the same speed, and they are the only obstacle now: one will swallow
+  a ball that crosses it, and fouls whatever hull runs into it — half speed and
+  a dead gun for a couple of seconds. As one is sunk or carried out the far
+  side another comes along, so the water is never empty for long. The other
+  captain does not see any of it and does nothing about it; it is shoved,
+  blocked and fouled exactly as you are.
   Win and you take gold from a tiered purse: five hundred most of the time,
   twenty thousand once in a very long while. Lose and the main tank goes to
   zero, the backup cell is stripped to a tenth of a tank if it held more than a

@@ -69,9 +69,8 @@ function fakeState(overrides: {
     outcome: null,
     events: [],
     fuse: null,
-    crest: null,
-    obstacles: [],
-    flotsam: null,
+    crests: [],
+    flotsam: [],
   } as BattleState;
 }
 

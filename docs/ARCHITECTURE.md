@@ -283,7 +283,7 @@ shader.
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `ROUNDS`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the rounds, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
 | `battleconstants.ts` | `ARENA_R`, `ARENA_R_MIN`, `ARENA_SHRINK`, `ARENA_OMEGA`, `THROTTLE_GAIN`, `ROUNDS`, `HITS_TO_LOSE`, `FIRE_COOLDOWN`, `BALL_SPEED`, `HIT_RADIUS`, `BATTLE_TIMEOUT` | the numbers the cannon fight is built out of, split out of `battle.ts` by the rework so that `battleai.ts` and `battlesea.ts` can read the ring's dimensions without importing the module that imports them. No logic, only tuning decisions with the reasoning attached; `battle.ts` re-exports the lot so every existing importer keeps working. The AI's own constants deliberately do NOT live here — they describe a gunner rather than an arena, and sit in `battleai.ts` |
 | `battleai.ts` | `createBattleAi(rng)`, `BattleAi`, `AiView`, `AI_LAG`, `AI_HELM_PERIOD`, `AI_HELM_COIN`, `AI_FUSE`, `AI_SOLUTION_TOLERANCE` | the enemy gunner and the enemy helm, and nothing else: it knows nothing of the sea, the ring's shrink or the locker's bookkeeping. A two-second delay line (`observe` records every tick, `throttle`/`gun` read it `AI_LAG` later, so every decision is aimed at the player of two seconds ago), a coin flip in one helm decision in four, and a fuse that commits a shot `AI_FUSE` before it fires — which is what makes it dodgeable. Decisions 1, 2 and 4 of `docs/BATTLE_REWORK_PLAN.md` |
-| `battlesea.ts` | `createBattleSea(rng, options)`, `BattleSea`, `BattleSeaState`, `SwayTarget`, `CALM`, `ROUGH`, the crest/sway/flotsam constants, `FOUL_SECONDS` | the three seeded systems that put something in the arena, each switched independently by `BattleOptions`: crests rolling in from one of the four cardinal directions that shove a hull along their own travel as a closed-form pulse (nothing to integrate, so nothing that can go unstable at a capped `dt`), one to three static shoals rolled in the constructor that swallow a ball crossing them, and a flotsam raft whose touch fouls a hull for `FOUL_SECONDS`. `CALM` turns all three off and is what every unit case measuring the gunner is pinned against; `ROUGH` is the shipping default. Decisions 5, 6 and 7 |
+| `battlesea.ts` | `createBattleSea(rng, options)`, `BattleSea`, `BattleSeaState`, `SwayTarget`, `CALM`, `ROUGH`, the crest/sway/flotsam constants, `FOUL_SECONDS` | the two seeded systems that put something in the arena, each switched independently by `BattleOptions`: up to `CREST_MAX` crests at once, each a finite length of a line perpendicular to one of the four cardinal directions, rolling across the ring at its own speed and shoving the hulls it actually passes over as a closed-form pulse (nothing to integrate, so nothing that can go unstable at a capped `dt`); and a fleet of three to six flotsam rafts, each its own size and speed, that swallow a ball crossing them and foul a hull they touch for `FOUL_SECONDS`. `CALM` turns both off and is what every unit case measuring the gunner is pinned against; `ROUGH` is the shipping default. Decisions 5 and 7 |
 | `bounty.ts` | `WIN_TIERS`, `rollWinGold(rng)`, `lossGold(purse)`, `rollDrawGold(rng, purse)`, `LOSS_SHARE`/`LOSS_MIN`/`LOSS_MAX`, `DRAW_SWING` | data and pure functions for the three gold outcomes; every roll takes the caller's `rng` |
 | `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the arena: a SECOND `Scene` with its own sea, lights, fixed camera, cannonballs, splashes and the wall of water crossing the ring. It is not the globe water and must never import `water.ts`; see **AI boats and the battle** |
 | `battlewave.ts` | `SEA_VERTEX`, `seaFragment(fine)`, `CREST_VERTEX`, `crestFragment(fine)`, `ARENA_CREST_HEIGHT`, `CREST_GRID` | the arena's water as GLSL, split out of `battlescene.ts` the way `hazardcrest.ts` was split out of `waterhazard.ts`. Compiles `waterglsl.ts`'s ridged field on a plane, `hazardfield.ts`'s crest profile as shared characters and `hazardcrest.ts`'s art constants, so the fight is fought on the same wave the world raises — see **The arena sea is not the globe water, but it is the same wave** |
@@ -1834,22 +1834,31 @@ owner's sign-off — not folded into unrelated work because the fight felt too
 easy while it was being tested.
 
 ### The sea is switched, and the gunner is measured without it
-Three systems — rolling crests that shove a hull off its track, seeded shoals
-and wreckage that block a diameter, and drifting flotsam that fouls whatever
-it touches — all live in `battlesea.ts`, all draw from the sim's own seeded
-`rng` and nothing else, and all three are switched together by one
-`BattleOptions` value handed to `createBattleSim`. There is no way to turn on
-one and not the others; the plan treats them as one "the sea is rough" toggle
-rather than three independent ones, because the question the toggle answers
-is always the same one — is the arena moving today, or not.
+Two systems — crests that shove a hull off its track, and drifting rafts that
+block a diameter and foul whatever they touch — live in `battlesea.ts`, draw
+from the sim's own seeded `rng` and nothing else, and are switched together by
+one `BattleOptions` value handed to `createBattleSim`. There is no way to turn
+on one and not the other; the plan treats them as one "the sea is rough"
+toggle, because the question the toggle answers is always the same one — is
+the arena moving today, or not.
 
-All three are **off** under the dev query `?calm=1`, which `main.ts` reads
-once and hands to both `createBattleSim` call sites as `CALM` in place of the
-default `ROUGH`, and all three are off in **every unit case that measures the
-gunner**, for the same reason: a hit rate measured while the target is also
-being shoved, foiled by an obstacle, or slowed by a raft is not a measurement
-of the gunner, it is a measurement of the gunner plus whatever the sea did to
-that one seeded run. `docs/BATTLE_REWORK_PLAN.md`'s own pinned gunner case
+There were three. **Shoals and wreckage are gone**: rocks that stood still
+inside the ring for a whole fight, at a fixed place rolled once. A blind spot
+that never moves is learned in the first ten seconds and costs nothing to
+respect after that, so it stopped being a decision almost as soon as it was
+made. The rafts took over the job of eating a shot, and there are three to six
+of them now instead of one, each its own size and its own speed. The crests
+were made finite in the same pass and for the same reason: one wave spanning
+the whole arena was a metronome, and up to three shorter ones at three speeds
+from three directions have to be read rather than counted.
+
+Both are **off** under the dev query `?calm=1`, which `main.ts` reads once and
+hands to both `createBattleSim` call sites as `CALM` in place of the default
+`ROUGH`, and both are off in **every unit case that measures the gunner**, for
+the same reason: a hit rate measured while the target is also being shoved,
+having its shots eaten, or slowed by a raft is not a measurement of the
+gunner, it is a measurement of the gunner plus whatever the sea did to that
+one seeded run. `docs/BATTLE_REWORK_PLAN.md`'s own pinned gunner case
 runs on `CALM` for exactly this reason, and any future test that wants to say
 something specific about `battleai.ts` should reach for `CALM` rather than
 accept `ROUGH`'s default and hope the noise averages out.
