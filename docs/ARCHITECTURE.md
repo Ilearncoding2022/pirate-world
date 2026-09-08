@@ -2229,6 +2229,17 @@ are about the PANEL and not about any one offer:
   `max-height`, with `.shop__body` doing the scrolling — the Fish Book's own
   `.fishbook__panel`/`.fishbook__body` split, copied rather than reinvented,
   because five offers to a tab is already taller than a panel sized for two.
+- **The tabs shipped doing nothing, and it was the trap two sections up.**
+  `.shop__panel-group` sets `display: flex` and had no `[hidden]` guard, so
+  both groups painted whatever `paintTabs` wrote: the panel showed all ten
+  offers in one list, and clicking a tab moved the highlight and nothing else.
+  `shop.ts` was never wrong — it sets `panelFishing.hidden` correctly and
+  always did — the CSS was ignoring it, exactly as it ignored `.shop__dev`'s.
+  Every other component in `style.css` carries the guard (`.shop[hidden]`,
+  `.shop__dev[hidden]`, `.menu[hidden]`, `.fishcover[hidden]`, six more); the
+  panel groups were the one place it was missed. Verified the way that section
+  says to verify it: computed `display` per group off the renderer with the
+  panel forced open, before the tab click and after it, never `el.hidden`.
 
 ## The ship model
 `assets/pirateship_beginner.glb` is built by `tools/build_ship.py` (headless

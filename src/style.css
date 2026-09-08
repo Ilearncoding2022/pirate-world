@@ -2866,6 +2866,14 @@ kbd {
   gap: 10px;
 }
 
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat -- the same trap .shop[hidden] and .shop__dev[hidden] guard
+   against. Without this the tabs paint but both groups stay on screen, so the
+   panel shows all ten offers at once and the tabs do nothing. */
+.shop__panel-group[hidden] {
+  display: none;
+}
+
 /* ---- one offer ------------------------------------------------------ */
 
 /*
