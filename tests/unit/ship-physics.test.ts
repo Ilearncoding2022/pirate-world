@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
 import type { Material } from 'three';
 import { createShip, MAX_FORWARD, MODEL_SCALE } from '../../src/ship';
-import type { HazardState, InputState, EnergyState, WindState } from '../../src/types';
+import type {
+  HazardState,
+  InputState,
+  EnergyState,
+  PropulsionState,
+  WindState,
+} from '../../src/types';
 import { createStubTerrain } from './support/stub-terrain';
 import { tangentFrame } from '../../src/geo';
 
@@ -233,5 +239,51 @@ describe('ship-physics', () => {
     // The player's own material is untouched by any of it, which is the whole
     // reason a raider's recolour can never reach the ship.
     expect(shared.userData['pirate-world/srgb-self-encode']).toBe(true);
+  });
+
+  it('a PropulsionState with a higher maxForward raises the reached top speed', () => {
+    const ship = createShip(createStubTerrain());
+    const dt = 1 / 60;
+    const thrust = input({ forward: true });
+    const canThrust = energy(true);
+    // Trim & Sheathing Mk III, in trim.ts's own terms.
+    const trimmed: PropulsionState = { maxForward: 13, anchored: false };
+
+    for (let i = 0; i < 30 / dt; i++) {
+      ship.update(dt, thrust, canThrust, NO_WIND, undefined, undefined, trimmed);
+    }
+    expect(ship.state.speed).toBeCloseTo(13, 1);
+    expect(ship.state.speed).toBeGreaterThan(MAX_FORWARD);
+  });
+
+  it('a Sea Anchor refuses thrust and kills way in about a second', () => {
+    const ship = createShip(createStubTerrain());
+    const dt = 1 / 60;
+    const canThrust = energy(true);
+
+    // Real way on first, unmodified -- 30s to actually converge on
+    // MAX_FORWARD, the same budget the first test in this file uses.
+    for (let i = 0; i < 30 / dt; i++) {
+      ship.update(dt, input({ forward: true }), canThrust, NO_WIND);
+    }
+    const speedBefore = ship.state.speed;
+    expect(speedBefore).toBeCloseTo(MAX_FORWARD, 2);
+
+    // Anchor over the side, throttle held wide open regardless -- the anchor
+    // must win even against a player still holding forward.
+    const anchored: PropulsionState = { maxForward: MAX_FORWARD, anchored: true };
+    for (let i = 0; i < 1 / dt; i++) {
+      ship.update(dt, input({ forward: true }), canThrust, NO_WIND, undefined, undefined, anchored);
+    }
+    // Under 5% of the speed it had a second ago -- see seaanchor.ts's own
+    // comment on the three time constants this is pinning.
+    expect(Math.abs(ship.state.speed)).toBeLessThan(speedBefore * 0.05);
+
+    // Released: the ship answers the helm again from wherever it was left.
+    const wasAnchored = ship.state.speed;
+    for (let i = 0; i < 5 / dt; i++) {
+      ship.update(dt, input({ forward: true }), canThrust, NO_WIND);
+    }
+    expect(ship.state.speed).toBeGreaterThan(wasAnchored);
   });
 });

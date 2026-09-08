@@ -2,6 +2,7 @@ import type { Dock, EnergyMode, EnergyState, ShipState, Towns } from './types';
 import type { WorldEnv } from './env';
 import type { Battery } from './battery';
 import { MAX_FORWARD } from './ship';
+import { OVERDRIVE_BURN_MULTIPLIER } from './overdrive';
 
 export interface Energy {
   /** Live, mutated in place. Hold the reference; never copy it. */
@@ -10,8 +11,22 @@ export interface Energy {
    * Runs before `ship.update`, so it sees last frame's speed. That is a frame
    * of lag on the burn and it is the right trade: the alternative is the ship
    * spending power it turns out not to have.
+   *
+   * `overdriveActive` and `moonNightFraction` are `main.ts`'s per-frame read
+   * of two Navigation offers, both optional and both defaulting to "not
+   * bought": an Overdrive Coil bills a flat multiple of `FULL_BURN` for the
+   * whole window rather than the ordinary speed-squared curve (see
+   * `overdrive.ts`), and a Moonglass Array's tier is the share of
+   * `SOLAR_PEAK` it reaches at night, off `env.moonIllumination` (see
+   * `moonglass.ts`).
    */
-  update(dt: number, ship: ShipState, env: WorldEnv): void;
+  update(
+    dt: number,
+    ship: ShipState,
+    env: WorldEnv,
+    overdriveActive?: boolean,
+    moonNightFraction?: number,
+  ): void;
   /**
    * Takes `level` off the plant in one go, if it is there to take.
    *
@@ -170,6 +185,18 @@ const IDLE_DRAIN = 1 / IDLE_ENDURANCE;
  * astern costs 0.0027 level/s and would take about 6 minutes to empty.
  */
 const FULL_BURN = 1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN;
+
+/**
+ * The Overdrive Coil's flat propulsion draw, level/s, while it burns.
+ *
+ * `overdrive.ts`: "an escape that costs the fuel to get home is still a
+ * decision." `OVERDRIVE_BURN_MULTIPLIER` (4) times `FULL_BURN` rather than
+ * the ordinary `speedFrac^2` curve continued out to 16 kn — a flat rate
+ * charged for the whole window whether or not the ship is actually holding
+ * 16 kn, because the coil is being fed regardless of how fast the hull
+ * happens to be moving at any one instant of it.
+ */
+const OVERDRIVE_BURN = OVERDRIVE_BURN_MULTIPLIER * FULL_BURN;
 
 /**
  * Solar with the sun in the zenith, level/s. 1/185 + IDLE_DRAIN = 0.005802.
@@ -350,7 +377,13 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
   /** The ring the clock is counting for, or null when the ship is in none. */
   let dwellBerth: Dock | null = null;
 
-  function update(dt: number, ship: ShipState, env: WorldEnv): void {
+  function update(
+    dt: number,
+    ship: ShipState,
+    env: WorldEnv,
+    overdriveActive = false,
+    moonNightFraction = 0,
+  ): void {
     // A frame that advanced no time moves no charge. Returning leaves the last
     // true reading standing; falling through would rewrite `rate` to a 0 the
     // HUD prints for a frame, which reads as a hiccup in the plant.
@@ -362,8 +395,14 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     // Quadratic, so doubling the speed quadruples the propulsion draw. Note it
     // is the *committed* speed and not the throttle: a ship coasting down from
     // full ahead is still moving water and is still paying for it.
+    //
+    // An Overdrive Coil replaces this curve outright rather than extending it
+    // past 1.0 -- see OVERDRIVE_BURN's own comment for why the bill is flat
+    // for the whole window instead of tracking the instantaneous speed.
     const speedFrac = speed / MAX_FORWARD;
-    const burn = IDLE_DRAIN + FULL_BURN * speedFrac * speedFrac;
+    const burn = overdriveActive
+      ? IDLE_DRAIN + OVERDRIVE_BURN
+      : IDLE_DRAIN + FULL_BURN * speedFrac * speedFrac;
 
     // A berth overrides the panels rather than stacking with them. Shore power
     // is over four times the best the sun ever manages, so the sum would beat
@@ -395,7 +434,17 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
       // STOP_EPSILON to a dead stop. Inventing a second epsilon here would
       // give the game two different definitions of "stopped" to keep in sync,
       // and the panels would light while the hull was still visibly making way.
-      charge = SOLAR_PEAK * Math.max(0, ship.up.dot(env.sunDirection));
+      const sunElevation = ship.up.dot(env.sunDirection);
+      charge = SOLAR_PEAK * Math.max(0, sunElevation);
+
+      // A Moonglass Array's own tier fraction of SOLAR_PEAK, gated to hours
+      // the sun contributes nothing at all -- see `moonglass.ts`. Added
+      // rather than left to compete with the sun, because the two can never
+      // both be positive: `sunElevation` is non-positive exactly when this
+      // fires.
+      if (sunElevation <= 0 && moonNightFraction > 0) {
+        charge += SOLAR_PEAK * moonNightFraction * env.moonIllumination;
+      }
     }
 
     const before = state.level;

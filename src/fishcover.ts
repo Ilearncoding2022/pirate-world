@@ -1,5 +1,7 @@
 import type { Energy } from './energy';
-import { SESSION_COST } from './fishing';
+import type { GovernorStore } from './governor';
+import type { ChumDrumStore } from './chumdrum';
+import type { BarbedHeadsStore } from './barbedheads';
 
 /**
  * fishcover.ts — the fishing activity's cover screen.
@@ -20,15 +22,32 @@ import { SESSION_COST } from './fishing';
  * a player with a flat battery is exactly the player who wants to look at
  * their record. START FISHING carries the gate instead, which is where the
  * charge is actually made.
+ *
+ * A second thing it owns now: arming a Chum Drum or a Barbed Heads bundle for
+ * the session about to start. `shop.ts` sells the stock; this screen is the
+ * only place either is ever spent, because it is the only screen a player
+ * sees between deciding to fish and the session actually charging their tank.
+ * Both toggles reset to off every time the screen opens — an armed choice is
+ * for the session it was made in front of, never a standing preference that
+ * silently spends the locker down on some later visit.
  */
 
 export interface FishCoverDeps {
   readonly energy: Energy;
+  /** The Efficiency Governor. Read for the price on START FISHING's own label. */
+  readonly governor: GovernorStore;
+  /** The Chum Drum locker. This screen is the only place one is ever armed. */
+  readonly chumDrum: ChumDrumStore;
+  /** The Barbed Heads locker. This screen is the only place one is ever armed. */
+  readonly barbedHeads: BarbedHeadsStore;
   /**
    * Starts a session. Returns whether one actually began, so a refusal at the
    * far end leaves this screen up rather than closing onto nothing.
+   *
+   * Carries this screen's two toggles — whether a Chum Drum and/or a Barbed
+   * Heads bundle should be spent on the session about to start.
    */
-  readonly onStart: () => boolean;
+  readonly onStart: (useChumDrum: boolean, useBarbedHeads: boolean) => boolean;
   /** Opens the record. This screen deliberately stays up behind it. */
   readonly onRecord: () => void;
   /** Called when the screen opens, so `main.ts` can freeze the world. */
@@ -53,9 +72,61 @@ export interface FishCover {
  */
 const HARBOUR_CLASS = 'fishcover--harbour';
 
-/** "-50% POWER" — the session's price, off the one constant that sets it. */
-function costLabel(): string {
-  return `-${Math.round(SESSION_COST * 100)}% POWER`;
+/** "-50% POWER" off whatever the Efficiency Governor's current tier charges. */
+function costLabel(sessionCost: number): string {
+  return `-${Math.round(sessionCost * 100)}% POWER`;
+}
+
+/**
+ * Wires one loadout toggle (Chum Drum or Barbed Heads) to its stock.
+ *
+ * Hidden entirely at zero stock rather than merely disabled: a player who has
+ * never bought either consumable should see a screen with no loadout row at
+ * all, on the same terms the shop's own dev row stays both hidden and unwired
+ * outside `?dev`. Returns a `read()` the caller polls each `refresh()` for
+ * the armed flag, and a `reset()` `setOpen` calls on the way in.
+ */
+function createToggle(
+  button: HTMLElement | null,
+  stockEl: HTMLElement | null,
+): { read(): boolean; reset(): void; sync(count: number): void } {
+  let armed = false;
+  let lastCount: number | null = null;
+
+  function paint(): void {
+    if (button === null) return;
+    button.classList.toggle('is-armed', armed);
+    button.setAttribute('aria-pressed', String(armed));
+  }
+
+  button?.addEventListener('click', () => {
+    if (button.hidden) return;
+    armed = !armed;
+    paint();
+  });
+
+  return {
+    read(): boolean {
+      return armed;
+    },
+    reset(): void {
+      armed = false;
+      paint();
+    },
+    sync(count: number): void {
+      if (count === lastCount) return;
+      lastCount = count;
+      if (button !== null) button.hidden = count <= 0;
+      if (stockEl !== null) stockEl.textContent = `×${count}`;
+      // A toggle that just ran out of stock cannot stay armed — there is
+      // nothing left for `fishing.ts` to spend, and a button the player can
+      // no longer see must not silently keep affecting the session.
+      if (count <= 0 && armed) {
+        armed = false;
+        paint();
+      }
+    },
+  };
 }
 
 export function createFishCover(deps: FishCoverDeps): FishCover {
@@ -65,6 +136,10 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
   const startButton = document.getElementById('fishcover-start');
   const recordButton = document.getElementById('fishcover-record');
   const costEl = document.getElementById('fishcover-cost');
+  const chumButton = document.getElementById('fishcover-chum');
+  const chumStockEl = document.getElementById('fishcover-chum-stock');
+  const barbedButton = document.getElementById('fishcover-barbed');
+  const barbedStockEl = document.getElementById('fishcover-barbed-stock');
 
   if (
     root === null ||
@@ -87,32 +162,46 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
   const start: HTMLButtonElement = startButton;
   const record: HTMLButtonElement = recordButton;
 
-  // The price is written from `SESSION_COST` rather than typed into the
-  // markup, so a retune of what a session costs moves the label with it
-  // instead of leaving the screen advertising the old price.
-  if (costEl !== null) costEl.textContent = costLabel();
+  const chum = createToggle(chumButton, chumStockEl);
+  const barbed = createToggle(barbedButton, barbedStockEl);
 
   let open = false;
   /** Write-through cache on the gate, the same pattern `hud.ts` uses. */
   let lastAffordable: boolean | null = null;
+  /** Write-through cache on the price label, since the Governor's tier can move. */
+  let lastCostLabel: string | null = null;
 
   /**
-   * Arms or dims START FISHING against the plant.
+   * Arms or dims START FISHING against the plant, and keeps the price and the
+   * two loadout toggles in step with the stores behind them.
    *
    * Re-read every frame the screen is up rather than once when it opens: the
    * world is frozen but the power plant is not, so a player who opens this at
-   * a berth on 40% watches the button come alive without touching anything.
+   * a berth on 40% watches the button come alive without touching anything —
+   * and a berth is also the only place the Governor or either locker can
+   * change, so this is where a purchase made moments ago has to show up.
    *
    * Both tanks, because `energy.spend` will draw on both — see `energy.ts`.
    */
   function refresh(): void {
+    const sessionCost = deps.governor.sessionCost;
+    const label = costLabel(sessionCost);
+    if (label !== lastCostLabel) {
+      lastCostLabel = label;
+      if (costEl !== null) costEl.textContent = label;
+    }
+
     const state = deps.energy.state;
-    const affordable = state.level + state.reserve >= SESSION_COST;
-    if (affordable === lastAffordable) return;
-    lastAffordable = affordable;
-    start.disabled = !affordable;
-    if (affordable) start.removeAttribute('title');
-    else start.setAttribute('title', `Needs ${Math.round(SESSION_COST * 100)}% power`);
+    const affordable = state.level + state.reserve >= sessionCost;
+    if (affordable !== lastAffordable) {
+      lastAffordable = affordable;
+      start.disabled = !affordable;
+      if (affordable) start.removeAttribute('title');
+      else start.setAttribute('title', `Needs ${Math.round(sessionCost * 100)}% power`);
+    }
+
+    chum.sync(deps.chumDrum.count);
+    barbed.sync(deps.barbedHeads.count);
   }
 
   function setOpen(next: boolean): void {
@@ -139,6 +228,11 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
      */
     overlay.classList.toggle(HARBOUR_CLASS, deps.energy.state.mode === 'docked');
     lastAffordable = null;
+    lastCostLabel = null;
+    // Both toggles reset to off on every open — see the file comment on why
+    // an armed choice never survives to a later visit.
+    chum.reset();
+    barbed.reset();
     refresh();
     // The button the player came for, unless they cannot afford it.
     (start.disabled ? record : start).focus();
@@ -150,7 +244,7 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
     // disabled attribute above is an affordance, never the lock — and closing
     // first would drop the player back into the world with nothing to show for
     // the click.
-    if (deps.onStart()) setOpen(false);
+    if (deps.onStart(chum.read(), barbed.read())) setOpen(false);
     else refresh();
   }
 

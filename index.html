@@ -228,6 +228,37 @@
             <span class="dock__key">SHOP</span>
           </button>
         </div>
+        <!-- Two Navigation consumables, the first things in the chandlery a
+             player actually PRESSES rather than merely owns. Both ship
+             disabled -- a new ship has stowed neither -- and both carry a
+             stock count `hud.ts` writes from `seaanchor.ts`/`overdrive.ts`,
+             the same live-count pattern the backup cell's HUD row uses. -->
+        <div class="dock__row">
+          <button
+            id="btn-anchor"
+            class="dbtn dock__btn"
+            type="button"
+            aria-label="Deploy Sea Anchor"
+            disabled
+            title="None stowed"
+          >
+            <span class="dock__key">ANCHOR</span>
+            <span class="dock__count" id="hud-anchor-count"></span>
+          </button>
+        </div>
+        <div class="dock__row">
+          <button
+            id="btn-overdrive"
+            class="dbtn dock__btn"
+            type="button"
+            aria-label="Engage Overdrive Coil"
+            disabled
+            title="None stowed"
+          >
+            <span class="dock__key">COIL</span>
+            <span class="dock__count" id="hud-overdrive-count"></span>
+          </button>
+        </div>
       </nav>
       <!-- END HUD DOCK -->
 
@@ -429,6 +460,34 @@
             Thirty seconds, ten harpoons, and whatever the deep water sends up.
           </p>
 
+          <!-- Two Fishing consumables, armed here rather than in the chandlery:
+               `shop.ts` sells the stock, this screen spends it. Both ship
+               hidden and unlabelled; `fishcover.ts` unhides whichever one the
+               locker actually holds and writes its own stock count, so a
+               player who has never bought either sees neither button. -->
+          <div class="fishcover__loadout" id="fishcover-loadout">
+            <button
+              class="fbtn fbtn--toggle fishcover__toggle"
+              id="fishcover-chum"
+              type="button"
+              aria-pressed="false"
+              hidden
+            >
+              <span class="fishcover__toggle-name">Chum Drum</span>
+              <span class="fishcover__toggle-stock" id="fishcover-chum-stock"></span>
+            </button>
+            <button
+              class="fbtn fbtn--toggle fishcover__toggle"
+              id="fishcover-barbed"
+              type="button"
+              aria-pressed="false"
+              hidden
+            >
+              <span class="fishcover__toggle-name">Barbed Heads</span>
+              <span class="fishcover__toggle-stock" id="fishcover-barbed-stock"></span>
+            </button>
+          </div>
+
           <div class="fishcover__actions">
             <button class="fbtn fbtn--go fishcover__btn" id="fishcover-start" type="button">
               Start fishing <span class="fbtn__cost" id="fishcover-cost"></span>
@@ -545,11 +604,19 @@
          overlays are: .hud is pointer-events:none and this needs the pointer.
          Ships hidden, and only ever opened alongside a berth.
 
-         Every figure in it -- the two prices, the cell's size, the bundle's
-         size -- ships EMPTY and is written by shop.ts from the constants in
-         `shop.ts` and `harpoons.ts`. A price typed into this file would be a
-         price that goes stale the first time the balance is touched, and the
-         shop would advertise a deal it does not honour. -->
+         Two tabs, NAVIGATION and FISHING, per docs/SHOP_PLAN.md's "Three
+         things to settle" #3: fourteen offers do not fit a flat column sized
+         for two. Battle stays out of both -- see the plan's own three
+         prerequisites for it, none of which this build takes on.
+
+         Every figure in it -- every price, every stock cap, every tier's
+         effect -- ships EMPTY and is written by shop.ts from the constants
+         in the item's own file (`battery.ts`, `harpoons.ts`, `seaanchor.ts`,
+         `overdrive.ts`, `trim.ts`, `moonglass.ts`, `chumdrum.ts`,
+         `barbedheads.ts`, `arclamp.ts`, `governor.ts`). A price typed into
+         this file would be a price that goes stale the first time the
+         balance is touched, and the shop would advertise a deal it does not
+         honour. -->
     <!-- SHOP -->
     <div class="shop" id="shop" hidden aria-hidden="true">
       <div class="shop__backdrop" id="shop-backdrop"></div>
@@ -568,41 +635,236 @@
           </button>
         </header>
 
-        <div class="shop__body">
-          <!-- Backup cell -->
-          <article class="offer offer--cell">
-            <div class="offer__text">
-              <h3 class="offer__name">BACKUP CELL</h3>
-              <p class="offer__detail" id="shop-battery-detail"></p>
-              <p class="offer__warn">
-                Spent only once the main tank is dry. No berth and no sun will
-                put it back.
-              </p>
-            </div>
-            <div class="offer__side">
-              <span class="offer__stock" id="shop-battery-stock"></span>
-              <button class="fbtn offer__buy" id="shop-battery-buy" type="button">
-                Buy <span class="fbtn__cost" id="shop-battery-price"></span>
-              </button>
-            </div>
-          </article>
+        <!-- role="tablist" per the two panels below: `shop.ts` is the only
+             thing that ever shows or hides either `.shop__panel-group`, on
+             the same terms it owns every other piece of state in here. -->
+        <div class="shop__tabs" role="tablist" aria-label="Chandlery categories">
+          <button
+            class="shop__tab"
+            id="shop-tab-navigation"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="shop-panel-navigation"
+          >
+            Navigation
+          </button>
+          <button
+            class="shop__tab"
+            id="shop-tab-fishing"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="shop-panel-fishing"
+          >
+            Fishing
+          </button>
+        </div>
 
-          <!-- Spare harpoons -->
-          <article class="offer offer--harpoon">
-            <div class="offer__text">
-              <h3 class="offer__name">SPARE HARPOONS</h3>
-              <p class="offer__detail" id="shop-harpoon-detail"></p>
-              <p class="offer__warn">
-                Fired only after a session's own ten are gone.
-              </p>
-            </div>
-            <div class="offer__side">
-              <span class="offer__stock" id="shop-harpoon-stock"></span>
-              <button class="fbtn offer__buy" id="shop-harpoon-buy" type="button">
-                Buy <span class="fbtn__cost" id="shop-harpoon-price"></span>
-              </button>
-            </div>
-          </article>
+        <div class="shop__body">
+          <!-- ============ NAVIGATION ============ -->
+          <div
+            class="shop__panel-group"
+            id="shop-panel-navigation"
+            role="tabpanel"
+            aria-labelledby="shop-tab-navigation"
+          >
+            <!-- Backup cell -->
+            <article class="offer offer--cell">
+              <div class="offer__text">
+                <h3 class="offer__name">BACKUP CELL</h3>
+                <p class="offer__detail" id="shop-battery-detail"></p>
+                <p class="offer__warn">
+                  Spent only once the main tank is dry. No berth and no sun will
+                  put it back.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-battery-stock"></span>
+                <button class="fbtn offer__buy" id="shop-battery-buy" type="button">
+                  Buy <span class="fbtn__cost" id="shop-battery-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Sea Anchor -->
+            <article class="offer offer--anchor">
+              <div class="offer__text">
+                <h3 class="offer__name">SEA ANCHOR</h3>
+                <p class="offer__detail" id="shop-anchor-detail"></p>
+                <p class="offer__warn">
+                  Deployed from the dock, not sold here. Kills the ship's way
+                  fast, then holds it a few seconds — a reading of a chaser
+                  that steers at where the ship is, not where it is going.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-anchor-stock"></span>
+                <button class="fbtn offer__buy" id="shop-anchor-buy" type="button">
+                  Buy <span class="fbtn__cost" id="shop-anchor-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Overdrive Coil -->
+            <article class="offer offer--overdrive">
+              <div class="offer__text">
+                <h3 class="offer__name">OVERDRIVE COIL</h3>
+                <p class="offer__detail" id="shop-overdrive-detail"></p>
+                <p class="offer__warn">
+                  Burns hard the whole window, whether or not the ship is
+                  actually holding top speed. An escape that costs the fuel
+                  to get home is still a decision.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-overdrive-stock"></span>
+                <button class="fbtn offer__buy" id="shop-overdrive-buy" type="button">
+                  Buy <span class="fbtn__cost" id="shop-overdrive-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Trim & Sheathing -->
+            <article class="offer offer--trim">
+              <div class="offer__text">
+                <h3 class="offer__name">TRIM &amp; SHEATHING</h3>
+                <p class="offer__detail" id="shop-trim-detail"></p>
+                <p class="offer__warn">
+                  Every tier buys acceleration along with the extra knot —
+                  the same ratio, not a separate cost — but the raiders stay
+                  faster in a straight line at every tier this sells.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-trim-tier"></span>
+                <button class="fbtn offer__buy" id="shop-trim-buy" type="button">
+                  Upgrade <span class="fbtn__cost" id="shop-trim-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Moonglass Array -->
+            <article class="offer offer--moonglass">
+              <div class="offer__text">
+                <h3 class="offer__name">MOONGLASS ARRAY</h3>
+                <p class="offer__detail" id="shop-moonglass-detail"></p>
+                <p class="offer__warn">
+                  Only ever fires at night, at rest, and only for what the
+                  sun leaves on the table — a full moon trickles the tank
+                  home; a new moon does nothing at all.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-moonglass-tier"></span>
+                <button class="fbtn offer__buy" id="shop-moonglass-buy" type="button">
+                  Upgrade <span class="fbtn__cost" id="shop-moonglass-price"></span>
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <!-- ============ FISHING ============ -->
+          <div
+            class="shop__panel-group"
+            id="shop-panel-fishing"
+            role="tabpanel"
+            aria-labelledby="shop-tab-fishing"
+            hidden
+          >
+            <!-- Spare harpoons -->
+            <article class="offer offer--harpoon">
+              <div class="offer__text">
+                <h3 class="offer__name">SPARE HARPOONS</h3>
+                <p class="offer__detail" id="shop-harpoon-detail"></p>
+                <p class="offer__warn">
+                  Fired only after a session's own ten are gone.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-harpoon-stock"></span>
+                <button class="fbtn offer__buy" id="shop-harpoon-buy" type="button">
+                  Buy <span class="fbtn__cost" id="shop-harpoon-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Chum Drum -->
+            <article class="offer offer--chum">
+              <div class="offer__text">
+                <h3 class="offer__name">CHUM DRUM</h3>
+                <p class="offer__detail" id="shop-chum-detail"></p>
+                <p class="offer__warn">
+                  Armed on the fishing cover screen, not sold here. Changes
+                  what a session's spawns CAN be, not merely what they are
+                  likely to be.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-chum-stock"></span>
+                <button class="fbtn offer__buy" id="shop-chum-buy" type="button">
+                  Buy <span class="fbtn__cost" id="shop-chum-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Barbed Heads -->
+            <article class="offer offer--barbed">
+              <div class="offer__text">
+                <h3 class="offer__name">BARBED HEADS</h3>
+                <p class="offer__detail" id="shop-barbed-detail"></p>
+                <p class="offer__warn">
+                  Armed on the fishing cover screen, not sold here. Targets
+                  the two hardest fish specifically — the ones that drain a
+                  line faster than a press can refill it.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-barbed-stock"></span>
+                <button class="fbtn offer__buy" id="shop-barbed-buy" type="button">
+                  Buy <span class="fbtn__cost" id="shop-barbed-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Arc-Lamp Rig -->
+            <article class="offer offer--arclamp">
+              <div class="offer__text">
+                <h3 class="offer__name">ARC-LAMP RIG</h3>
+                <p class="offer__detail" id="shop-arclamp-detail"></p>
+                <p class="offer__warn">
+                  The same ten shots, over more time. It buys patience —
+                  the room to decline a sardine and wait for the epic —
+                  rather than more fish.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-arclamp-tier"></span>
+                <button class="fbtn offer__buy" id="shop-arclamp-buy" type="button">
+                  Upgrade <span class="fbtn__cost" id="shop-arclamp-price"></span>
+                </button>
+              </div>
+            </article>
+
+            <!-- Efficiency Governor -->
+            <article class="offer offer--governor">
+              <div class="offer__text">
+                <h3 class="offer__name">EFFICIENCY GOVERNOR</h3>
+                <p class="offer__detail" id="shop-governor-detail"></p>
+                <p class="offer__warn">
+                  Compounds over a whole run rather than paying off in one
+                  session — at its last tier it nearly doubles how many
+                  sessions a tank holds.
+                </p>
+              </div>
+              <div class="offer__side">
+                <span class="offer__stock" id="shop-governor-tier"></span>
+                <button class="fbtn offer__buy" id="shop-governor-buy" type="button">
+                  Upgrade <span class="fbtn__cost" id="shop-governor-price"></span>
+                </button>
+              </div>
+            </article>
+          </div>
         </div>
 
         <!-- Dev only. Ships HIDDEN and stays hidden unless `?dev` is on the

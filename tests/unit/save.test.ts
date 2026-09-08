@@ -52,6 +52,14 @@ describe('save', () => {
       fishBook: { 'grey-mullet': 3, eel: 1 },
       reserve: 32,
       harpoons: 15,
+      seaAnchors: 2,
+      overdriveCoils: 1,
+      chumDrums: 3,
+      barbedHeads: 4,
+      trimTier: 2,
+      moonglassTier: 1,
+      arcLampTier: 3,
+      governorTier: 2,
     };
     writeSave(data);
     const loaded = loadSave();
@@ -104,9 +112,7 @@ describe('save', () => {
     });
     expect(() => loadSave()).not.toThrow();
     expect(loadSave()).toEqual(EMPTY_SAVE);
-    expect(() =>
-      writeSave({ version: 1, gold: 1, fishBook: {}, reserve: 0, harpoons: 0 }),
-    ).not.toThrow();
+    expect(() => writeSave(EMPTY_SAVE)).not.toThrow();
   });
 
   it('createRecords wires the wallet and the fish book to persistence', () => {
@@ -133,6 +139,16 @@ describe('save', () => {
     expect(loaded.reserve).toBe(0);
     expect(loaded.harpoons).toBe(0);
     expect(loaded.gold).toBe(40);
+    // Same rule for every one of the eight fields docs/SHOP_PLAN.md added:
+    // absent means never bought, not damage.
+    expect(loaded.seaAnchors).toBe(0);
+    expect(loaded.overdriveCoils).toBe(0);
+    expect(loaded.chumDrums).toBe(0);
+    expect(loaded.barbedHeads).toBe(0);
+    expect(loaded.trimTier).toBe(0);
+    expect(loaded.moonglassTier).toBe(0);
+    expect(loaded.arcLampTier).toBe(0);
+    expect(loaded.governorTier).toBe(0);
   });
 
   it('clamps a backup charge and a harpoon count to their ceilings', () => {
@@ -143,6 +159,34 @@ describe('save', () => {
     const loaded = loadSave();
     expect(loaded.reserve).toBe(100);
     expect(loaded.harpoons).toBe(100);
+  });
+
+  it('clamps every new stock and tier field to its own ceiling', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        version: 1,
+        gold: 0,
+        fishBook: {},
+        seaAnchors: 999,
+        overdriveCoils: 999,
+        chumDrums: 999,
+        barbedHeads: 999,
+        trimTier: 999,
+        moonglassTier: 999,
+        arcLampTier: 999,
+        governorTier: 999,
+      }),
+    );
+    const loaded = loadSave();
+    expect(loaded.seaAnchors).toBe(5);
+    expect(loaded.overdriveCoils).toBe(3);
+    expect(loaded.chumDrums).toBe(5);
+    expect(loaded.barbedHeads).toBe(5);
+    expect(loaded.trimTier).toBe(3);
+    expect(loaded.moonglassTier).toBe(3);
+    expect(loaded.arcLampTier).toBe(3);
+    expect(loaded.governorTier).toBe(3);
   });
 
   it('keeps the rest of a save whose shop fields are unreadable', () => {
@@ -161,10 +205,26 @@ describe('save', () => {
     const records = createRecords();
     records.battery.charge();
     records.harpoons.buy();
+    records.seaAnchor.buy();
+    records.trim.buy();
 
     const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
     // Whole percent of a MAIN tank, which is the file's own unit for the cell.
     expect(persisted.reserve).toBe(50);
     expect(persisted.harpoons).toBe(5);
+    expect(persisted.seaAnchors).toBe(1);
+    expect(persisted.trimTier).toBe(1);
+  });
+
+  it('createRecords persists a Sea Anchor deploy as one fewer in stock', () => {
+    // deploy() spends through the stock the same way buy() fills it -- the
+    // save file only ever sees the count, never the deploy timer.
+    const records = createRecords();
+    records.seaAnchor.buy();
+    records.seaAnchor.buy();
+    records.seaAnchor.deploy();
+
+    const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
+    expect(persisted.seaAnchors).toBe(1);
   });
 });
