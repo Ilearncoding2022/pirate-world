@@ -11,6 +11,13 @@ import type { AiBoatKind, BattleInput, BattleOutcome, BattleState, InputState } 
  * it was handed. The arena underneath keeps running the whole time, card
  * included, which is why nothing here hides the scene.
  *
+ * Two more figures joined the strip with the sea: the fuse bar on the FOE
+ * side, which reads `state.fuse` and nothing else -- no timer of its own, and
+ * no opinion about how long a fuse runs, which is `battleai.ts`'s constant
+ * and not an import this file makes -- and the FOULED word over the player's
+ * side, which reads `state.player.fouled` the same way. Both are exactly the
+ * figures they were handed, on the same rule as the rest of the strip.
+ *
  * `isOpen` is a LIVE GETTER, not a latched flag, for the same reason the
  * fishing card's is: `main.ts` derives the frozen world from it every frame,
  * and a stale `false` would strand the game stopped. See **The pause
@@ -104,6 +111,9 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   const foePipsEl = document.getElementById('battle-foe-pips');
   const promptEl = document.getElementById('battle-prompt');
   const fireEl = document.getElementById('battle-fire');
+  const fuseEl = document.getElementById('battle-fuse');
+  const fuseFillEl = document.getElementById('battle-fuse-fill');
+  const fouledEl = document.getElementById('battle-fouled');
   const cardEl = document.getElementById('battle-card');
   const titleEl = document.getElementById('battle-title');
   const goldEl = document.getElementById('battle-gold');
@@ -134,6 +144,9 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     !foePipsEl ||
     !promptEl ||
     !(fireEl instanceof HTMLButtonElement) ||
+    !fuseEl ||
+    !fuseFillEl ||
+    !fouledEl ||
     !cardEl ||
     !titleEl ||
     !goldEl ||
@@ -173,6 +186,9 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   const overlay: HTMLElement = root;
   const prompt: HTMLElement = promptEl;
   const fire: HTMLButtonElement = fireEl;
+  const fuse: HTMLElement = fuseEl;
+  const fuseFill: HTMLElement = fuseFillEl;
+  const fouled: HTMLElement = fouledEl;
   const card: HTMLElement = cardEl;
   const title: HTMLElement = titleEl;
   const goldLine: HTMLElement = goldEl;
@@ -217,6 +233,27 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
 
   /** Whether the prompt is currently down. Null until the first paint. */
   let lastPromptHidden: boolean | null = null;
+
+  /**
+   * The fuse bar's own write-through cache.
+   *
+   * `fuseSpan` is the length the CURRENT commit was lit at, learned rather
+   * than imported: `AI_FUSE` belongs to `battleai.ts`, a file this module
+   * does not import, and the plan's own rule is "read `state.fuse` and
+   * nothing else". The tick `state.fuse` turns from null into a number IS
+   * that number's own top -- a fuse only ever counts down -- so the first
+   * live reading after a null is banked as the span and every later percentage
+   * is read off it. `lastPct` and `lastHidden` are the diff caches every other
+   * paint in this file keeps; `null` on both means "never painted", which
+   * forces the first `update()` after `open()` to write regardless of what it
+   * finds.
+   */
+  let fuseSpan: number | null = null;
+  let lastFusePct = -1;
+  let lastFuseHidden: boolean | null = null;
+
+  /** The FOULED word's own diff cache. Null until the first paint. */
+  let lastFouledHidden: boolean | null = null;
 
   /** The colour class on the root, so it can be taken off again on close. */
   let kindClass = '';
@@ -332,6 +369,16 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     youSide.hits = -1;
     foeSide.rounds = '';
     foeSide.hits = -1;
+    // The fuse and the FOULED word both ship hidden, and both diff caches go
+    // back to "never painted" so the first frame of the new fight repaints
+    // them regardless of whether they happen to match a stale value.
+    fuse.hidden = true;
+    fuseFill.style.width = '0%';
+    fuseSpan = null;
+    lastFusePct = -1;
+    lastFuseHidden = null;
+    fouled.hidden = true;
+    lastFouledHidden = null;
     overlay.hidden = false;
     overlay.removeAttribute('aria-hidden');
     attach();
@@ -379,25 +426,79 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     }
 
     /*
-     * A ball on own hull, felt at the edge of the frame.
+     * The fuse bar. Hidden while `state.fuse` is null; while it is live, a
+     * bar draining in the FOE's own colour, on `--foe`, the same custom
+     * property the rest of that side of the strip already reads -- there is
+     * no hue of this element's own to keep in step with `battle--red` versus
+     * `battle--orange`.
      *
-     * `owner` is who FIRED, so the AI's hits are the player's. The flash is a
-     * CSS animation restarted by taking the class off, forcing a reflow and
-     * putting it back: that is the whole timer, and it means this file holds
-     * no clock of its own for an effect that has to be able to fire twice in
-     * a second. `state.events` is THIS TICK's only, rebuilt by `battle.ts`
-     * every update, so there is nothing here to remember or to clear.
+     * `fuseSpan` is what turns a raw second count into a percentage: see the
+     * comment on its declaration for why it is learned rather than imported.
+     * The width is written in whole percent so a `dt` that jitters by a
+     * fraction of a millisecond does not turn into a fraction-of-a-pixel
+     * style write sixty times a second; `lastFusePct` is the diff that skips
+     * the write entirely when the rounded value has not moved.
      */
+    const fuseHidden = state.fuse === null;
+    if (fuseHidden !== lastFuseHidden) {
+      lastFuseHidden = fuseHidden;
+      fuse.hidden = fuseHidden;
+      if (fuseHidden) fuseSpan = null;
+    }
+    if (!fuseHidden && state.fuse !== null) {
+      // The tick a null becomes a number, that number IS the span: a fuse
+      // only ever counts down from the moment it is lit.
+      if (fuseSpan === null) fuseSpan = state.fuse;
+      const pct = fuseSpan > 0 ? Math.round((state.fuse / fuseSpan) * 100) : 0;
+      if (pct !== lastFusePct) {
+        lastFusePct = pct;
+        fuseFill.style.width = pct + '%';
+      }
+    }
+
+    // The FOULED word, over the player's side, gone the instant the sim clears
+    // it. One word because it has to explain, on its own, why the helm has
+    // gone sluggish and the FIRE key has gone quiet -- nothing else on this
+    // overlay says either.
+    const fouledHidden = state.player.fouled <= 0;
+    if (fouledHidden !== lastFouledHidden) {
+      lastFouledHidden = fouledHidden;
+      fouled.hidden = fouledHidden;
+    }
+
+    /*
+     * A ball on own hull, felt at the edge of the frame; the enemy's shot
+     * lighting, felt on the fuse bar.
+     *
+     * `owner` is who FIRED, so the AI's hits are the player's and the AI's own
+     * `aim` is what lights its fuse. Both flashes are a CSS animation
+     * restarted by taking the class off, forcing a reflow and putting it back:
+     * that is the whole timer, and it means this file holds no clock of its
+     * own for an effect that has to be able to fire twice in a second.
+     * `state.events` is THIS TICK's only, rebuilt by `battle.ts` every update,
+     * so there is nothing here to remember or to clear. The two flags let one
+     * pass over the list catch both events without either one's `break`
+     * starving the other.
+     */
+    let hitSeen = false;
+    let aimSeen = false;
     for (const event of state.events) {
-      if (event.kind !== 'hit' || event.owner !== 'ai') continue;
-      hitFlash.classList.remove('battle__hit--on');
-      // Reading a layout property is what commits the removal, so the class
-      // going back on starts a new animation instead of continuing the old
-      // one. Deleting this line makes a second hit inside one animation do
-      // nothing at all, silently.
-      void hitFlash.offsetWidth;
-      hitFlash.classList.add('battle__hit--on');
-      break;
+      if (!hitSeen && event.kind === 'hit' && event.owner === 'ai') {
+        hitSeen = true;
+        hitFlash.classList.remove('battle__hit--on');
+        // Reading a layout property is what commits the removal, so the class
+        // going back on starts a new animation instead of continuing the old
+        // one. Deleting this line makes a second hit inside one animation do
+        // nothing at all, silently.
+        void hitFlash.offsetWidth;
+        hitFlash.classList.add('battle__hit--on');
+      } else if (!aimSeen && event.kind === 'aim' && event.owner === 'ai') {
+        aimSeen = true;
+        fuse.classList.remove('bfuse--lit');
+        void fuse.offsetWidth;
+        fuse.classList.add('bfuse--lit');
+      }
+      if (hitSeen && aimSeen) break;
     }
   }
 

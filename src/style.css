@@ -3045,6 +3045,100 @@ kbd {
   box-shadow: 0 0 10px currentcolor;
 }
 
+/* ---- the fuse bar ------------------------------------------------------ */
+
+/*
+ * The enemy's telegraph, on the FOE side of the strip. `battleui.ts` toggles
+ * `[hidden]` off `state.fuse` alone and writes `battle-fuse-fill`'s width as a
+ * percentage of the span it learns the first live tick provides; nothing here
+ * or in that file invents a duration of its own.
+ *
+ * Coloured off `--foe` rather than a hue of its own, on the same rule
+ * `.bside--foe` is: red and orange are one property, set once on the overlay
+ * root, and every rule that paints the FOE side reads it rather than keeping
+ * a second opinion that could drift from it.
+ */
+.bside__fuse {
+  flex-shrink: 0;
+  width: 34px;
+  height: 5px;
+  border: 1px solid color-mix(in srgb, var(--foe) 40%, transparent);
+  border-radius: 3px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--foe) 14%, transparent);
+}
+
+.bside__fuse[hidden] {
+  display: none;
+}
+
+/* The drain itself. `battleui.ts` writes only `width`; height and position
+   fill the track it sits in. */
+.bside__fuse-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--foe);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--foe) 70%, transparent);
+  transition: width 90ms linear;
+}
+
+/*
+ * The one-frame pulse on the tick the shot is committed -- the `aim` event,
+ * read exactly once, the same tick the bar first appears. Restarted the same
+ * way `.battle__hit--on` is: `battleui.ts` removes the class, forces a
+ * reflow and puts it back, so two commits inside one animation's length still
+ * each get their own flash.
+ */
+.bfuse--lit {
+  animation: bfuse-pulse 260ms ease-out 1;
+}
+
+@keyframes bfuse-pulse {
+  0% {
+    box-shadow: 0 0 0 color-mix(in srgb, var(--foe) 0%, transparent);
+  }
+  25% {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--foe) 85%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 color-mix(in srgb, var(--foe) 0%, transparent);
+  }
+}
+
+/* ---- the FOULED word --------------------------------------------------- */
+
+/*
+ * The one word that explains a helm gone sluggish and a FIRE key gone quiet.
+ * `battle.player.fouled` costs the player both at once and nothing else on
+ * this overlay says why, so it has to say it alone: over the player's own
+ * side, where the eye that just noticed the ship answering late already is.
+ *
+ * `--red` rather than `--foe`, on purpose: this is not the raider's colour,
+ * it is a warning about the player's own hull, and a red raider's fuse bar
+ * must never be mistaken for the reason the player cannot fire back.
+ */
+.bside--you {
+  position: relative;
+}
+
+.bside__fouled {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  background: rgba(10, 4, 4, 0.82);
+  color: var(--red);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-shadow: 0 0 12px currentcolor;
+}
+
+.bside__fouled[hidden] {
+  display: none;
+}
+
 /* ---- the hit flash --------------------------------------------------- */
 
 /*
@@ -3283,6 +3377,16 @@ kbd {
      about. Its peak is softened instead. */
   .battle__hit--on {
     animation-name: battle-hit-soft;
+  }
+  /* The fuse bar's own drain is the information -- `[hidden]` and its width
+     say everything the fuse bar knows -- so only the DECORATIVE parts of it
+     go here: the smoothing transition between two widths, and the glow pulse
+     on commit, which is a flourish over a bar that is already visible. */
+  .bside__fuse-fill {
+    transition: none;
+  }
+  .bfuse--lit {
+    animation: none;
   }
 }
 

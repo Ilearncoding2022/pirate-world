@@ -111,19 +111,29 @@ const KIND_LABEL: Record<AiBoatKind, string> = {
 };
 
 /**
- * The rules, in one sentence, off the constants that actually enforce them.
+ * The rules, off the constants that actually enforce them.
  *
  * Written from `ROUNDS` and `HITS_TO_LOSE` rather than typed into the markup,
  * on the house rule index.html states for every other figure in an overlay: a
  * number spelled out in HTML is a number that goes stale the first time the
  * fight is retuned, and a screen whose whole job is to teach the rules is the
  * worst possible place to advertise the old ones.
+ *
+ * The added sentence about the sea is deliberately NOT built from a constant
+ * the same way. `battlesea.ts`'s numbers — how far a crest shoves, how long a
+ * foul lasts — are arena units nobody reading this card has a feel for yet,
+ * unlike ROUNDS and HITS_TO_LOSE, which the player is about to watch tick
+ * down on the strip a second later. Naming one here would teach a figure
+ * instead of the fact the player actually needs before the first shot: the
+ * ring shoves you off your mark, and the water can eat a ball meant for the
+ * enemy.
  */
 function blurbText(): string {
   return (
     `${ROUNDS} rounds, one a second, fired straight out of the inboard beam. ` +
     `${HITS_TO_LOSE} hits lose it. W and S are your place on the ring — ` +
-    `there is no helm in a fight.`
+    `there is no helm in a fight. The sea will shove you off it, and the ` +
+    `wreckage in it will eat a shot meant for the enemy.`
   );
 }
 

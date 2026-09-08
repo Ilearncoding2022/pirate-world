@@ -31,6 +31,7 @@ import { createAiBoats } from './aiboats';
 import { createAiHulls } from './aihulls';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
+import { CALM, ROUGH } from './battlesea';
 import { createBattleUi } from './battleui';
 import { createBattleCover } from './battlecover';
 import { createMenu } from './menu';
@@ -342,6 +343,67 @@ async function startGame(): Promise<void> {
   });
 
   /*
+   * `?boat=red|orange`, `?battle=1` and `?calm=1`, the three battle dev
+   * queries.
+   *
+   * Read through URLSearchParams and never through `import.meta.env.MODE`, on
+   * exactly the same terms as `?quality=` and `?hazard=` above: `vite preview`
+   * serves a genuine production build and all three of these are meant to be
+   * used against one. An ordinary player's session sets no query, so nothing
+   * below ever fires for them.
+   *
+   * The first two exist because the spawn is a 16%-and-24%-per-ten-seconds
+   * draw. Waiting for one is a vigil rather than a test, and the budget in
+   * docs/TESTING.md does not have a vigil in it. `?calm=1` exists for the
+   * opposite reason: once a fight is up, the sea is three more seeded systems
+   * on top of the gunner, and tuning the gunner against a hull that is also
+   * being shoved, fouled and blocked is tuning it against noise. It switches
+   * all three off — the same `CALM` every unit case that measures the gunner
+   * is pinned against — so the fight can be watched, or fought, with nothing
+   * moving the boats but the throttle.
+   *
+   * Read here, ahead of the fight it governs, because the very first
+   * `battleSim` below is built on this same beat: both `createBattleSim`
+   * call sites take whatever this resolves to, and there is only one of it to
+   * keep in step.
+   */
+  const battleParams = new URLSearchParams(window.location.search);
+  const boatQuery = battleParams.get('boat');
+  let forcedBoat: AiBoatKind | null =
+    boatQuery === 'red' || boatQuery === 'orange' ? boatQuery : null;
+  /** `?battle=1`: an orange boat put ON the hull, so the fight starts at once. */
+  let forcedBattle = battleParams.get('battle') === '1';
+  /** Seconds of sailing before either fires. The same beat the forced hazard waits. */
+  let boatCountdown = 3;
+  /**
+   * `?calm=1`: every fight this session plays on a flat sea. Read once, into
+   * the same `BattleOptions` both `createBattleSim` call sites are handed —
+   * there is nothing to plumb onto `state` for this, since the scene and the
+   * strip already read whatever the sim hands them.
+   */
+  const battleOptions = battleParams.get('calm') === '1' ? CALM : ROUGH;
+
+  /**
+   * How far ahead `?boat=` puts its raider, world units.
+   *
+   * 45 is inside the scope's 50 and outside the red boat's own 40-to-60 spawn
+   * band's lower half, so the mark is on the plot from the first frame and the
+   * chase is still a chase. A boat spawned at its natural 60 would be
+   * invisible until it had already closed most of the way, which is the
+   * owner's intent in a real session and useless in a tuning one.
+   */
+  const BOAT_FORCE_DISTANCE = 45;
+
+  /**
+   * And how far ahead `?battle=1` puts its, world units.
+   *
+   * One unit: well inside `aiboats.ts`'s CONTACT_RADIUS, so the very next
+   * `aiBoats.update` registers the touch and the arena comes up without a
+   * chase in front of it. The fight is what this query is for.
+   */
+  const BATTLE_FORCE_DISTANCE = 1;
+
+  /*
    * The fight in progress. Replaced wholesale at every contact rather than
    * reset, which is why `battle.ts` has no reset to call: one sim is built per
    * battle and thrown away with it, exactly as `fishing.ts` builds one sim per
@@ -352,7 +414,7 @@ async function startGame(): Promise<void> {
    * false until a real fight starts, so this first one is only ever read by
    * the type checker.
    */
-  let battleSim = createBattleSim();
+  let battleSim = createBattleSim(undefined, battleOptions);
 
   /** The boat a fight is being fought with, and its hull, for the fade home. */
   let contactBoat: AiBoat | null = null;
@@ -449,7 +511,7 @@ async function startGame(): Promise<void> {
       battleCover.close();
       return;
     }
-    battleSim = createBattleSim();
+    battleSim = createBattleSim(undefined, battleOptions);
     outcomeSettled = false;
     battleUi.open(boat.kind);
     blackout.run(() => {
@@ -785,48 +847,6 @@ async function startGame(): Promise<void> {
     if (!aimAtShip(FORCE_DISTANCE)) return;
     hazards.force(kind, _forceCentre, _forceNorth);
   }
-
-  /*
-   * `?boat=red|orange` and `?battle=1`, the two raider dev queries.
-   *
-   * Read through URLSearchParams and never through `import.meta.env.MODE`, on
-   * exactly the same terms as `?quality=` and `?hazard=` above: `vite preview`
-   * serves a genuine production build and both of these are meant to be used
-   * against one. An ordinary player's session sets no query, so nothing below
-   * ever fires for them.
-   *
-   * They exist because the spawn is a 16%-and-24%-per-ten-seconds draw. Waiting
-   * for one is a vigil rather than a test, and the budget in docs/TESTING.md
-   * does not have a vigil in it.
-   */
-  const battleParams = new URLSearchParams(window.location.search);
-  const boatQuery = battleParams.get('boat');
-  let forcedBoat: AiBoatKind | null =
-    boatQuery === 'red' || boatQuery === 'orange' ? boatQuery : null;
-  /** `?battle=1`: an orange boat put ON the hull, so the fight starts at once. */
-  let forcedBattle = battleParams.get('battle') === '1';
-  /** Seconds of sailing before either fires. The same beat the forced hazard waits. */
-  let boatCountdown = 3;
-
-  /**
-   * How far ahead `?boat=` puts its raider, world units.
-   *
-   * 45 is inside the scope's 50 and outside the red boat's own 40-to-60 spawn
-   * band's lower half, so the mark is on the plot from the first frame and the
-   * chase is still a chase. A boat spawned at its natural 60 would be
-   * invisible until it had already closed most of the way, which is the
-   * owner's intent in a real session and useless in a tuning one.
-   */
-  const BOAT_FORCE_DISTANCE = 45;
-
-  /**
-   * And how far ahead `?battle=1` puts its, world units.
-   *
-   * One unit: well inside `aiboats.ts`'s CONTACT_RADIUS, so the very next
-   * `aiBoats.update` registers the touch and the arena comes up without a
-   * chase in front of it. The fight is what this query is for.
-   */
-  const BATTLE_FORCE_DISTANCE = 1;
 
   const clock = new THREE.Clock();
 

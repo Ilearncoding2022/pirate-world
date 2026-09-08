@@ -185,9 +185,20 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   makes the firing windows, and pulling ahead or dropping back is how you open
   yours and close theirs. `Space` fires, one round a second, ten rounds, and
   the ball only hits if the other boat is on the line when it gets there.
-  **Three hits lose it.** The other captain shoots the same way you do, with a
-  reaction and a wobble, so their misses come out of the same geometry as
-  yours and you can dodge a ball already in the air by changing speed.
+  **Three hits lose it.** The other captain is reading you **two seconds
+  late**, and telegraphs every shot before it goes: a warm light on the hull
+  and a bar on the strip, lit a second and a half before the ball leaves, so a
+  shot you see coming is one you can already be moving out from under — one
+  tap of the throttle in that window and it lands on water you have left.
+  Their helm is not flawless either; one decision in four is a coin flip
+  rather than a solved course, so watch it long enough and it visibly picks
+  the wrong way. And the sea is not still under either of you: a crest rolls
+  through every so often and shoves a hull a few units off its line before it
+  settles back, one to three shoals or wrecks sit inside the ring and
+  swallow a ball that crosses one, and a raft of flotsam drifts through and
+  fouls whatever hull runs into it — half speed and a dead gun for a couple of
+  seconds. The other captain does not see any of that and does nothing about
+  it; it is shoved and fouled exactly as you are.
   Win and you take gold from a tiered purse: five hundred most of the time,
   twenty thousand once in a very long while. Lose and the main tank goes to
   zero, the backup cell is stripped to a tenth of a tank if it held more than a
