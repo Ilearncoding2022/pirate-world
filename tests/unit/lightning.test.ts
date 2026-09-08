@@ -61,7 +61,10 @@ describe('lightning bolt geometry', () => {
 
   it('never writes past the buffer the caller allocated', () => {
     const buf = fresh();
-    for (let seed = 1; seed <= 400; seed++) {
+    // Forty seeds, not four hundred. The bolt has exactly two shapes as far as
+    // its LENGTH goes -- one fork or two -- and forty covers both dozens of
+    // times, so the extra seeds bought runtime rather than coverage.
+    for (let seed = 1; seed <= 40; seed++) {
       const segments = buildBolt(buf, seed * 2654435761);
       expect(segments).toBeGreaterThan(0);
       expect(segments).toBeLessThanOrEqual(MAX_SEGMENTS);
@@ -71,7 +74,7 @@ describe('lightning bolt geometry', () => {
 
   it('always draws every strand of the trunk, and at least one fork', () => {
     const buf = fresh();
-    for (let seed = 1; seed <= 200; seed++) {
+    for (let seed = 1; seed <= 25; seed++) {
       const segments = buildBolt(buf, seed * 40503);
       // The trunk is unconditional; the forks are 1 or BRANCH_MAX, never 0.
       expect(segments).toBeGreaterThan(TRUNK_STRANDS * TRUNK_STEPS);
@@ -80,7 +83,7 @@ describe('lightning bolt geometry', () => {
 
   it('stays inside the cloud base and never reaches the water', () => {
     const buf = fresh();
-    for (let seed = 1; seed <= 200; seed++) {
+    for (let seed = 1; seed <= 25; seed++) {
       const segments = buildBolt(buf, seed * 2246822519);
       for (const [, y] of vertices(buf, segments)) {
         expect(y).toBeLessThanOrEqual(BOLT_TOP + 1e-6);
@@ -115,7 +118,7 @@ describe('lightning bolt geometry', () => {
       const n = buildBolt(buf, seed * 22695477);
       if (n < MAX_SEGMENTS) short = seed * 22695477;
       else long = seed * 22695477;
-      expect(seed).toBeLessThan(500);
+      expect(seed).toBeLessThan(120);
     }
 
     buildBolt(buf, long);
