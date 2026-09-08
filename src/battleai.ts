@@ -1,5 +1,5 @@
 import type { BattleState, Combatant } from './types';
-import { BALL_SPEED } from './battleconstants';
+import { ARENA_OMEGA, ARENA_R_MIN, ARENA_SHRINK, BALL_SPEED, THROTTLE_GAIN } from './battleconstants';
 
 /**
  * battleai.ts — the enemy gunner and the enemy helm.
@@ -208,11 +208,30 @@ export function createBattleAi(rng: () => number = Math.random): BattleAi {
    * stale) plus the view's sway, carried forward unchanged because the AI has
    * no way to predict what the sea will do next.
    *
-   * The AI's own beam is drawn from its ACTUAL position — `state.ai.x/z`,
-   * which include its own sway, because a gunner knows where his own ship is
-   * even if he cannot see the enemy's — along its TRACK's inboard beam,
-   * exactly the line `battle.ts`'s `fire()` throws a ball down. Using any
-   * other line would aim the AI somewhere it cannot shoot.
+   * **The AI's own beam is NOT the one it is on right now.** `battle.ts`'s
+   * `fire()` throws the ball down whatever beam the hull is actually on the
+   * tick it fires, and that tick is `AI_FUSE` seconds after this is solved —
+   * every bit as far in the future as the ball's own flight. A gunner who
+   * ignored that would be aiming down a line he is about to leave: on a real
+   * fight this measured as a ~0.3-0.68 rad gap between the beam a shot was
+   * solved against and the one it actually left on, several times
+   * `AI_SOLUTION_TOLERANCE`'s own width, and it alone was most of why the
+   * gunner missed almost everything even against a player who never touched
+   * the helm. So the beam is built from the AI's own PREDICTED angle at fire
+   * time, `AI_FUSE` seconds of its own current throttle further round the
+   * circle — the same throttle `throttle()` is about to re-roll, so this is a
+   * guess at the AI's own near future and not knowledge of anything outside
+   * itself. It stays imperfect on purpose: the helm can re-decide before the
+   * fuse burns out and can never see its own next coin flip, and that
+   * residual error is exactly what decisions 1, 2 and 4 ask for. The AI's own
+   * sway is carried forward UNCHANGED, same reasoning as the target's: it
+   * cannot predict the sea either. The ring's own shrink over `AI_FUSE`
+   * seconds (under a unit, at `ARENA_SHRINK`'s rate) is cheap enough to
+   * predict too, so the AI's own future radius is advanced the same way
+   * `battle.ts` advances it, clamped the same floor. The TARGET's radius
+   * above is deliberately left where it was already decided — current, not
+   * predicted forward by the fuse — since re-deriving that approximation is
+   * no part of this fix.
    *
    * Returns null only when nothing has been observed yet, which in practice
    * cannot happen once a fight has run a single tick: `observe` always runs
@@ -226,17 +245,29 @@ export function createBattleAi(rng: () => number = Math.random): BattleAi {
     const targetX = state.radius * Math.cos(predictedAngle) + view.swayX;
     const targetZ = state.radius * Math.sin(predictedAngle) + view.swayZ;
 
-    const dx = targetX - state.ai.x;
-    const dz = targetZ - state.ai.z;
-    // The track's inboard beam: the way the centre lies from the AI's point
-    // ON THE CIRCLE, the same direction `fire()` sends a ball down.
-    const beamX = -Math.cos(state.ai.angle);
-    const beamZ = -Math.sin(state.ai.angle);
+    // The AI's own position AI_FUSE seconds from now, on the throttle it is
+    // currently holding — `battle.ts`'s own formula for omega, halved while
+    // fouled to match it exactly.
+    let omegaAiNow = ARENA_OMEGA * (1 + THROTTLE_GAIN * throttleValue);
+    if (state.ai.fouled > 0) omegaAiNow *= 0.5;
+    const aiAngleAtFire = state.ai.angle + omegaAiNow * AI_FUSE;
+    const aiRadiusAtFire = Math.max(ARENA_R_MIN, state.radius - ARENA_SHRINK * AI_FUSE);
+    const aiX = aiRadiusAtFire * Math.cos(aiAngleAtFire) + state.ai.swayX;
+    const aiZ = aiRadiusAtFire * Math.sin(aiAngleAtFire) + state.ai.swayZ;
+
+    const dx = targetX - aiX;
+    const dz = targetZ - aiZ;
+    // The track's inboard beam AT FIRE TIME: the way the centre lies from
+    // where the AI's point ON THE CIRCLE will be, not where it is now.
+    const beamX = -Math.cos(aiAngleAtFire);
+    const beamZ = -Math.sin(aiAngleAtFire);
     const downRange = dx * beamX + dz * beamZ;
-    // Perpendicular to the beam, rotated 90 degrees: (-beamZ, beamX). Its
-    // sign matches the old gunner's `solutionError` exactly (proved in
-    // battleai.test.ts): positive means the player is running ahead of the
-    // point the ball is going to, and the AI has to speed up to catch them.
+    // Perpendicular to the beam, rotated 90 degrees: (-beamZ, beamX). Positive
+    // still means the AI needs more speed to bring its future beam onto the
+    // target — proved in battleai.test.ts — though since the beam itself now
+    // moves with the throttle, this is no longer an exact match for the old
+    // gunner's `solutionError`; it agrees with it only in the limit where the
+    // AI's own predicted motion is zero.
     const lateral = dx * -beamZ + dz * beamX;
     return { downRange, lateral };
   }

@@ -10,7 +10,7 @@ import {
   THROTTLE_GAIN,
   createBattleSim,
 } from '../../src/battle';
-import { CALM } from '../../src/battlesea';
+import { CALM, ROUGH } from '../../src/battlesea';
 import { mulberry32 } from '../../src/towns';
 import type { BattleInput, BattleState, Combatant } from '../../src/types';
 
@@ -183,36 +183,41 @@ describe('battle: the outcome', () => {
 /**
  * Measured 2026-09-08, on a calm sea (CALM: no crests, no shoals, no raft, so
  * nothing but the gunner itself can move the answer) against a player who
- * never touches the throttle, 200 fights, seeds 0x1000 through 0x10c7: **65
- * hits out of 1997 shots, 3.25%**. Pinned at plus or minus ten points around
- * that, clamped at zero because a rate cannot go negative.
+ * never touches the throttle, 200 fights, seeds 0x1000 through 0x10c7:
+ * **596 hits out of 896 shots, 66.5%**. Pinned at plus or minus ten points
+ * around that.
  *
- * This is not the 35% to 55% the old gunner (perfect reading, a 0.2-0.6 s
- * reaction, a 0.35 s jitter) landed, and the gap is bigger than decisions 1
- * and 2 alone explain. Against a player who does nothing, the two-second-old
- * reading costs the AI nothing — the extrapolation is exact against a
- * constant rate — and the coin only spoils a quarter of the AI's OWN helm
- * decisions. What actually empties the locker is decision 4's fixed 1.5 s
- * fuse: the AI's own hull keeps travelling its circle for the whole of that
- * window (ARENA_OMEGA times up to 1+THROTTLE_GAIN, over 1.5 s, is up to about
- * 0.68 rad — three times AI_SOLUTION_TOLERANCE's own angular width at a
- * mid-fight radius), and `battle.ts`'s `fire()` throws the ball down whatever
- * beam the hull is actually on the tick it fires, not the one the solution
- * was solved against at commit. A solved shot is routinely stale by the time
- * it goes even when the PLAYER never moves at all. See
- * docs/BATTLE_REWORK_PLAN.md, "The prediction horizon, and the risk in it" —
- * this is the same horizon, just driven by the AI's own helm rather than the
- * player's.
+ * An earlier pass of this file measured 3.25% and very nearly pinned it.
+ * That number was real but it was measuring a bug: `solve()` aimed the AI's
+ * own beam from `state.ai.angle` — where the hull was AT THE MOMENT the shot
+ * was solved — while `battle.ts`'s `fire()` throws the ball from wherever the
+ * hull actually is on the tick it fires, `AI_FUSE` (1.5 s) later. The AI's
+ * own helm keeps travelling that whole time (up to about 0.68 rad, several
+ * times `AI_SOLUTION_TOLERANCE`'s own width at a mid-fight radius), so the
+ * committed shot was routinely thrown down a line the hull had already left,
+ * even against a player who never moved at all. That is not what decisions 1
+ * and 4 ask for — the AI is supposed to be shooting at a stale picture of the
+ * PLAYER, not down a line it is no longer on — so it was fixed in
+ * `battleai.ts`'s `solve`: the AI now predicts its own angle, radius and beam
+ * forward across `AI_FUSE` on the throttle it currently holds (which
+ * `throttle()` is about to re-roll, so it is still only a guess at its own
+ * near future, not knowledge of the player), and builds both the aim and the
+ * commit test from that. Decisions 1, 2 and 4 are unchanged; `AI_FUSE` itself
+ * was not touched, per the plan's own note not to retune it before the owner
+ * has played the result.
  *
- * The owner should know this before playing it: on a calm sea, an idle
- * player is hit roughly one round in thirty. Decisions 1, 2 and 4 are
- * implemented exactly as specified; this is what they come to together, and
- * shortening AI_FUSE is the lever that would move it, per the plan's own
- * closing note that AI_FUSE is not to be retuned before the owner has played
- * the result.
+ * The owner should know this before playing it: 66.5% against a fully idle
+ * player is HIGHER than the pre-rework gunner's own 46.5%, because the fixed
+ * fuse now times out with no reaction or jitter to blur it and the AI's own
+ * motion is correctly led rather than fought. This is the ceiling, not the
+ * typical case — decisions 1 and 2 only cost the AI anything once the player
+ * actually touches the throttle or the AI's own coin comes up wrong, neither
+ * of which an idle player exercises — but an idle player is exactly the
+ * player who never gives the AI a reason to miss, and 66.5% is what is left
+ * once the AI stops missing for a reason nothing asked for.
  */
 describe('battle: the AI gunner', () => {
-  it('lands about 3.25% of its shots on a calm sea against a player who does nothing', () => {
+  it('lands about 66.5% of its shots on a calm sea against a player who does nothing', () => {
     let shots = 0;
     let hits = 0;
     for (let fight = 0; fight < 200; fight++) {
@@ -226,9 +231,57 @@ describe('battle: the AI gunner', () => {
     }
     expect(shots).toBeGreaterThan(200 * HITS_TO_LOSE);
     const rate = hits / shots;
-    // Measured 3.25%; the old 35%-55% band described a gunner that no longer
-    // exists and must not be kept out of habit.
-    expect(rate).toBeGreaterThan(0);
-    expect(rate).toBeLessThan(0.1325);
+    // Measured 66.5%; neither the pre-rework 35%-55% band nor this file's own
+    // earlier (buggy) 3.25% measurement describes the gunner as it now is.
+    expect(rate).toBeGreaterThan(0.565);
+    expect(rate).toBeLessThan(0.765);
+  });
+});
+
+/**
+ * The whole system, on the sea the game is actually played on.
+ *
+ * The case above measures the GUNNER, and to do that honestly it has to run on
+ * a sea that is not shoving anybody, so `CALM` is the right setting there and
+ * its 66.5% is a laboratory number. It is not what a fight looks like. Nobody
+ * plays on a calm sea: `?calm=1` is a dev query, and every real battle runs
+ * `ROUGH`.
+ *
+ * With the crests, the shoals and the raft switched on, the same gunner
+ * against the same idle player measures **31.3%** (476 of 1519, seeds 0x1000
+ * through 0x10c7, 2026-09-08), and takes 120 of the 200 fights. The sea is
+ * doing two thirds of the work of making this fight fair: it shoves the AI off
+ * its own solution, it eats shots on the wreckage, and it fouls the gunner
+ * outright now and again.
+ *
+ * The floor below is the one the rework has to keep. An AI that lands nothing
+ * cannot lose a fight to the player either, and a battle where the enemy never
+ * scores is not a battle. If a later change drops this under about a fifth,
+ * the fight has stopped being one; if it climbs back over about a half, the
+ * gunner is the thing the owner asked to have fixed all over again.
+ */
+describe('battle: the whole system, on the sea the game is played on', () => {
+  it('reaches an outcome every time, and the AI lands enough to be a threat', () => {
+    let shots = 0;
+    let hits = 0;
+    let decided = 0;
+    for (let fight = 0; fight < 200; fight++) {
+      const sim = createBattleSim(mulberry32(0x1000 + fight), ROUGH);
+      for (let i = 0; i < (BATTLE_TIMEOUT + 1) / DT; i++) {
+        sim.update(DT, IDLE);
+        shots += count(sim.state, 'fire', 'ai');
+        hits += count(sim.state, 'hit', 'ai');
+        if (sim.state.outcome !== null) break;
+      }
+      // The timeout is itself an outcome, so a fight that hangs is the only
+      // way this can fail — and it is exactly what a sim that stopped
+      // advancing, or a raft that fouled a hull forever, would look like.
+      if (sim.state.outcome !== null) decided++;
+    }
+    expect(decided).toBe(200);
+    expect(shots).toBeGreaterThan(200 * HITS_TO_LOSE);
+    const rate = hits / shots;
+    expect(rate).toBeGreaterThan(0.2);
+    expect(rate).toBeLessThan(0.45);
   });
 });
