@@ -1743,6 +1743,23 @@ is the sim and `aihulls.ts` is what puts meshes where it says; `battle.ts` is
 the ruleset and `battlescene.ts` is what draws it. Both sims are DOM-free and
 scene-free, which is what makes them the modules the unit tests exercise.
 
+### An orange boat is weather; a red one is an event
+`P_ORANGE` is 0.24 a roll and `P_RED` is 0.032 — an order of magnitude apart,
+on a `ROLL_PERIOD` of ten seconds. That gap is the whole shape of meeting a
+raider. An orange boat wanders a track drawn once and never revised: it is
+scenery that can be sailed around, and meeting one is the normal condition of
+being at sea. A red one steers at the player every frame and ends in a fight
+unless it is out-turned, so it interrupts whatever was being done, and an
+interruption that arrives every minute is a chore rather than an event.
+
+`P_RED` was cut by four fifths on 2026-09-08 (0.16 to 0.032, the owner's
+call), having been doubled from 0.08 the day before. That puts an aggressive
+raider at roughly one every five minutes of sailing. Both figures are
+ceilings the sea does not deliver in full — the odds are per roll and per
+COLOUR, and a colour already on the water is drawn for and skipped — but the
+correction bites almost entirely on orange, which is far more often already
+out; at 3.2% red is hardly ever the colour being skipped.
+
 ### Both raiders run at the same speed
 `RED_SPEED` and `ORANGE_SPEED` are both 15, against the player's `MAX_FORWARD`
 of 10. The aggressor is deliberately NOT the faster hull: what separates the two

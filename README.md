@@ -171,12 +171,14 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   bow-down. A berth is immune to all of it, and the scope marks both in magenta
   while there is still time to steer around them. The rolls are seeded, so the
   same world throws up the same weather.
-- **Raiders.** You are not alone out here, and not by a small margin. Every ten
-  seconds the sea rolls for a boat — 16% for a red one and 24% for an orange —
-  so meeting one is the normal condition of being at sea rather than an event.
-  Only one of each colour is ever on the water, which is the real brake on it:
-  what the odds actually buy is that the next one is up almost as soon as the
-  last one has gone. There are two kinds. A **red** one spawns forty to sixty units
+- **Raiders.** You are not alone out here. Every ten seconds the sea rolls for
+  a boat, and the two colours are an order of magnitude apart: **24% for an
+  orange one and 3.2% for a red**. An orange boat is weather — it is out there
+  most of the time and you sail around it. A red one comes for you and ends in
+  a fight unless you turn it, so it is an event, at roughly one every five
+  minutes rather than one a minute. Only one of each colour is ever on the
+  water, which is the real brake on the orange sort: what its odds actually buy
+  is that the next one is up almost as soon as the last one has gone. There are two kinds. A **red** one spawns forty to sixty units
   off on any bearing, runs half again your top speed — fifteen knots to your ten,
   the same pace as the orange sort — and comes straight for you, and it has five
   to eight seconds to get there. What makes it dangerous is that it is aimed,
