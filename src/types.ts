@@ -620,13 +620,21 @@ export interface Cannonball {
 /**
  * A wave crest rolling across the arena, or null while the sea is quiet.
  *
- * It travels along one of the four cardinals and shoves each hull it passes.
- * `at` is its position along that axis, so a crest on the `east` axis is the
- * line `x = at` sweeping toward +x.
+ * `axis` is the direction the crest TRAVELS, and it is also the direction it
+ * shoves the hulls it passes: `north` is +z, `south` is -z, `east` is +x,
+ * `west` is -x. `at` is the crest's coordinate along that direction of
+ * travel and always runs from negative to positive, so a crest's world
+ * position is `travel * at` whichever way it is going and every crest is born
+ * at the same `at` and dies at the same one.
+ *
+ * A worked pair, since the sign is the one thing two modules could disagree
+ * about. An `east` crest at `at = -6` is the line `x = -6` sweeping toward
+ * +x. A `west` crest at `at = -6` is the line `x = +6` sweeping toward -x.
+ * The crest itself is drawn perpendicular to its travel.
  */
 export interface ArenaCrest {
   readonly axis: 'north' | 'south' | 'east' | 'west';
-  /** Position along the axis, arena units. */
+  /** Coordinate along the direction of travel, arena units. Runs negative to positive. */
   readonly at: number;
 }
 
