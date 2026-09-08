@@ -1,6 +1,8 @@
 import type { EnergyMode, EnergyState, ShipState, WindState } from './types';
 import type { Wallet } from './wallet';
 import type { GpuFrameStats } from './postfx';
+import type { SeaAnchorStore } from './seaanchor';
+import type { OverdriveStore } from './overdrive';
 import { BATTERY_CAPACITY } from './battery';
 
 /**
@@ -71,6 +73,34 @@ function gateWriter(el: HTMLElement | null, reason: string): (armed: boolean) =>
   return (armed: boolean): void => {
     if (el === null || armed === last) return;
     last = armed;
+    if (armed) {
+      el.removeAttribute('disabled');
+      el.removeAttribute('title');
+    } else {
+      el.setAttribute('disabled', '');
+      el.setAttribute('title', reason);
+    }
+  };
+}
+
+/**
+ * Returns a setter that arms or dims a button with a reason chosen anew each
+ * call, rather than fixed at construction the way `gateWriter` bakes its
+ * `reason` in.
+ *
+ * ANCHOR and COIL have two different ways to be dead -- nothing stowed, or
+ * already deployed/burning -- and `gateWriter`'s one reason cannot say which.
+ * The same pairing `shop.ts`'s `offerWriter` keeps, for the same reason: a
+ * dead button that does not say why is worse than one that never explains
+ * itself, and this one has more than one thing it might be saying.
+ */
+function reasonGateWriter(el: HTMLElement | null): (armed: boolean, reason: string) => void {
+  let lastArmed: boolean | null = el === null ? null : !el.hasAttribute('disabled');
+  let lastReason: string | null = null;
+  return (armed: boolean, reason: string): void => {
+    if (el === null || (armed === lastArmed && reason === lastReason)) return;
+    lastArmed = armed;
+    lastReason = reason;
     if (armed) {
       el.removeAttribute('disabled');
       el.removeAttribute('title');
@@ -415,7 +445,11 @@ function createDevReadout(): { setVisible(visible: boolean): void; setStats(stat
  * as the page does, so an unsubscribe would only ever be dead code — and a
  * `dispose` nobody calls is a promise nobody keeps.
  */
-export function createHud(wallet: Wallet): {
+export function createHud(
+  wallet: Wallet,
+  seaAnchor: SeaAnchorStore,
+  overdrive: OverdriveStore,
+): {
   update(ship: ShipState, energy: EnergyState, wind: WindState): void;
   /** Shows or hides the GPU/CPU/draw-call line. Off by default; main.ts calls this from its Backquote listener. */
   setDevTimingVisible(visible: boolean): void;
@@ -482,6 +516,21 @@ export function createHud(wallet: Wallet): {
     document.getElementById('btn-shop'),
     'Only alongside a berth',
   );
+
+  // ANCHOR and COIL. Their stock count pushes off the store the same way the
+  // purse does off the wallet -- `seaanchor.ts`/`overdrive.ts` notify on
+  // every buy and every spend, and a HUD readout that only redrew on its own
+  // per-frame poll would show a bought Sea Anchor a frame late. The gate
+  // beneath the count is read every frame instead, because `canDeploy`/
+  // `canEngage` also depend on the deploy timer, which moves every frame and
+  // fires no event of its own.
+  const writeAnchorCount = textWriter(document.getElementById('hud-anchor-count'));
+  seaAnchor.onChange((count) => writeAnchorCount(`×${count}`));
+  const writeAnchorGate = reasonGateWriter(document.getElementById('btn-anchor'));
+
+  const writeOverdriveCount = textWriter(document.getElementById('hud-overdrive-count'));
+  overdrive.onChange((count) => writeOverdriveCount(`×${count}`));
+  const writeOverdriveGate = reasonGateWriter(document.getElementById('btn-overdrive'));
 
   return {
     update(ship: ShipState, energy: EnergyState, wind: WindState): void {
@@ -553,6 +602,9 @@ export function createHud(wallet: Wallet): {
       // `energy.canThrust` is deliberately not read: `empty` holds for exactly
       // as long as thrust is refused, so a second indicator would say the same
       // thing twice and could only ever contradict the tag.
+
+      writeAnchorGate(seaAnchor.canDeploy, seaAnchor.isDeployed ? 'Already deployed' : 'None stowed');
+      writeOverdriveGate(overdrive.canEngage, overdrive.isActive ? 'Already burning' : 'None stowed');
     },
 
     setDevTimingVisible(visible: boolean): void {

@@ -9,6 +9,12 @@ import type { FishingSim } from './fishsim';
 import { tierInfo } from './species';
 import type { FishingState, Species } from './types';
 import type { Wallet } from './wallet';
+import type { GovernorStore } from './governor';
+import type { ArcLampStore } from './arclamp';
+import type { ChumDrumStore } from './chumdrum';
+import { CHUM_DRUM_MIN_TIER } from './chumdrum';
+import type { BarbedHeadsStore } from './barbedheads';
+import { BARBED_HEADS_DRAIN_SCALE } from './barbedheads';
 
 /**
  * fishing.ts — the overlay controller.
@@ -23,7 +29,17 @@ import type { Wallet } from './wallet';
  * come from" has exactly one answer.
  */
 
-/** Share of the tank one session costs. See FISHING_PLAN.md. */
+/**
+ * Share of the tank one session costs, before any Efficiency Governor.
+ * See FISHING_PLAN.md.
+ *
+ * `deps.governor.sessionCost` is what `open()` actually charges — this
+ * constant is `governor.ts`'s own tier-0 figure, kept here because
+ * `fishcover.ts` and this file both need a price to fall back to before a
+ * `GovernorStore` exists at all (`tests/unit`, the module's own default
+ * construction). See `governor.ts`'s comment on why that constant retypes
+ * this one instead of importing it.
+ */
 export const SESSION_COST = 0.5;
 
 export interface FishingDeps {
@@ -33,6 +49,14 @@ export interface FishingDeps {
   /** The spare-harpoon locker. Read at the start of every session, debited as
    *  the spares are actually fired. */
   readonly harpoons: HarpoonStore;
+  /** The Efficiency Governor. `open()` charges its current tier's `sessionCost`. */
+  readonly governor: GovernorStore;
+  /** The Arc-Lamp Rig. `open()` reads its current tier's `sessionSeconds`. */
+  readonly arcLamp: ArcLampStore;
+  /** The Chum Drum locker. Spent, at most one, when `open()` is told to arm it. */
+  readonly chumDrum: ChumDrumStore;
+  /** The Barbed Heads locker. Spent, at most one, when `open()` is told to arm it. */
+  readonly barbedHeads: BarbedHeadsStore;
   /** Called when the card opens, so `main.ts` can freeze the world. */
   readonly onOpen: () => void;
   /** Called when it closes, so `main.ts` can thaw it. */
@@ -42,10 +66,19 @@ export interface FishingDeps {
 export interface Fishing {
   readonly isOpen: boolean;
   /**
-   * Charges SESSION_COST and opens, or returns false and does nothing.
-   * A refusal must leave the tank untouched.
+   * Charges the current Efficiency Governor tier's session price and opens,
+   * or returns false and does nothing. A refusal must leave the tank
+   * untouched.
+   *
+   * `useChumDrum`/`useBarbedHeads` are `fishcover.ts`'s own toggles — whether
+   * the player chose to spend one of each stocked consumable on THIS
+   * session. Both default to false, so a caller that says nothing gets a
+   * session exactly as it was before either offer existed. A true that finds
+   * nothing in stock is silently the same as a false: arming a consumable
+   * you do not have is not a purchase and not a refusal, it is simply
+   * nothing.
    */
-  open(): boolean;
+  open(useChumDrum?: boolean, useBarbedHeads?: boolean): boolean;
   close(): void;
   /** Steps the sim and paints. Called only while open. */
   update(dt: number): void;
@@ -230,12 +263,13 @@ export function createFishing(deps: FishingDeps): Fishing {
    */
   function refreshAgain(): void {
     const state = deps.energy.state;
-    const affordable = state.level + state.reserve >= SESSION_COST;
+    const sessionCost = deps.governor.sessionCost;
+    const affordable = state.level + state.reserve >= sessionCost;
     if (lastAgainDisabled === !affordable) return;
     lastAgainDisabled = !affordable;
     again.disabled = !affordable;
     if (affordable) again.removeAttribute('title');
-    else again.setAttribute('title', 'Needs 50% power');
+    else again.setAttribute('title', `Needs ${Math.round(sessionCost * 100)}% power`);
   }
 
   /* ---------------------------------------------------------------- */
@@ -247,10 +281,21 @@ export function createFishing(deps: FishingDeps): Fishing {
    *
    * The charge is the first thing that happens and its refusal is the last
    * word: `energy.spend` is all-or-nothing, so there is no state in which the
-   * power has gone and the session has not started.
+   * power has gone and the session has not started. The current Efficiency
+   * Governor tier's own price, not the tier-0 `SESSION_COST` — see
+   * `governor.ts`.
+   *
+   * `useChumDrum`/`useBarbedHeads` are spent AFTER the charge succeeds, on
+   * the same ordering `shop.ts`'s `buy` uses for the opposite direction:
+   * nothing here is taken from a locker before the session it is for is
+   * actually going to happen. Either can fail silently — an armed toggle
+   * with nothing in stock is not a refusal of the session, only of the
+   * bonus — which is why `deps.chumDrum.use()`'s result is read into a local
+   * rather than propagated.
    */
-  function startSession(): boolean {
-    if (!deps.energy.spend(SESSION_COST)) return false;
+  function startSession(useChumDrum = false, useBarbedHeads = false): boolean {
+    const sessionCost = deps.governor.sessionCost;
+    if (!deps.energy.spend(sessionCost)) return false;
     // Read AFTER the power has been paid for, so a refused session cannot
     // have looked at the locker at all, and capped at the per-session ceiling
     // rather than at whatever is in it: the locker is a hundred harpoons deep
@@ -258,7 +303,16 @@ export function createFishing(deps: FishingDeps): Fishing {
     // ceilings.
     extraGranted = Math.min(HARPOON_PER_SESSION_MAX, deps.harpoons.count);
     extraDebited = 0;
-    sim = createFishingSim(Math.random, extraGranted);
+
+    const chumArmed = useChumDrum && deps.chumDrum.use();
+    const barbedArmed = useBarbedHeads && deps.barbedHeads.use();
+    sim = createFishingSim(
+      Math.random,
+      extraGranted,
+      deps.arcLamp.sessionSeconds,
+      chumArmed ? CHUM_DRUM_MIN_TIER : 1,
+      barbedArmed ? BARBED_HEADS_DRAIN_SCALE : 1,
+    );
     sessionCatches.length = 0;
     sessionGold = 0;
     pressed = false;
@@ -416,6 +470,9 @@ export function createFishing(deps: FishingDeps): Fishing {
   }
 
   function onAgain(): void {
+    // Deliberately no consumables re-armed: FISH AGAIN skips `fishcover.ts`'s
+    // toggles entirely, so there is no fresh choice here to honour, only the
+    // stale one from a screen the player is not looking at.
     if (!startSession()) refreshAgain();
   }
 
@@ -443,9 +500,9 @@ export function createFishing(deps: FishingDeps): Fishing {
   /* Surface                                                           */
   /* ---------------------------------------------------------------- */
 
-  function openCard(): boolean {
+  function openCard(useChumDrum = false, useBarbedHeads = false): boolean {
     if (open) return true;
-    if (!startSession()) return false;
+    if (!startSession(useChumDrum, useBarbedHeads)) return false;
 
     open = true;
     overlay.hidden = false;

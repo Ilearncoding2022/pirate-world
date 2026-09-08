@@ -384,10 +384,20 @@ interface MutableFishingState {
  * ceiling on it, the price of it and the debiting of it all belong to the
  * caller. Zero — the default — is a session exactly as it was before anything
  * was for sale.
+ *
+ * The three parameters after it are the same shape of thing, one per
+ * Fishing offer this sim itself has to know about: `sessionSeconds` is an
+ * Arc-Lamp Rig's tier (`arclamp.ts`), `minSpawnTier` a Chum Drum's floor on
+ * `rollSpecies` (`chumdrum.ts`), and `tensionDrainScale` a Barbed Heads
+ * multiplier on every row's `TENSION_DRAIN` (`barbedheads.ts`). All three
+ * default to "nothing bought", exactly as `extraShots` does.
  */
 export function createFishingSim(
   rng: () => number = Math.random,
   extraShots = 0,
+  sessionSeconds: number = SESSION_SECONDS,
+  minSpawnTier: Tier = 1,
+  tensionDrainScale = 1,
 ): FishingSim {
   const harpoon: MutableHarpoon = {
     phase: 'swinging',
@@ -400,7 +410,7 @@ export function createFishingSim(
   };
 
   const state: MutableFishingState = {
-    timeLeft: SESSION_SECONDS,
+    timeLeft: sessionSeconds,
     shotsLeft: SESSION_SHOTS,
     // Floored at zero rather than trusted: a negative grant would make the
     // "both budgets spent" test below never fire and the session never end.
@@ -508,7 +518,7 @@ export function createFishingSim(
    * row under its minimum refills the instant there is room for it.
    */
   function trySpawn(row: number): boolean {
-    const species = rollSpecies(row, rng);
+    const species = rollSpecies(row, rng, minSpawnTier);
     const off = halfLength(species);
     const x = ROW_DIRS[row] === 1 ? -off : 1 + off;
     if (!hasRoom(row, x)) return false;
@@ -521,7 +531,7 @@ export function createFishingSim(
     for (let row = 0; row < ROW_COUNT; row++) {
       for (let i = 0; i < ROW_MAX[row]; i++) {
         for (let attempt = 0; attempt < SEED_TRIES; attempt++) {
-          const species = rollSpecies(row, rng);
+          const species = rollSpecies(row, rng, minSpawnTier);
           const x = rng();
           if (!hasRoom(row, x)) continue;
           addFish(row, x, species);
@@ -718,7 +728,9 @@ export function createFishingSim(
       // charging them for the order the sim happens to run in is a loss they
       // cannot see coming.
       if (press) harpoon.tension = Math.min(1, harpoon.tension + TENSION_GAIN);
-      harpoon.tension -= TENSION_DRAIN[f.species.tier] * dt;
+      // Barbed Heads' own multiplier, 1 when none is armed. See
+      // `barbedheads.ts`'s comment on what 0.7 does to the two hardest fish.
+      harpoon.tension -= TENSION_DRAIN[f.species.tier] * tensionDrainScale * dt;
       if (harpoon.tension <= 0) {
         harpoon.tension = 0;
         snap(f);

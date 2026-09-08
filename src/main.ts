@@ -35,8 +35,9 @@ import { createBattleUi } from './battleui';
 import { createBattleCover } from './battlecover';
 import { createMenu } from './menu';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
-import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, ShipState } from './types';
+import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, PropulsionState, ShipState } from './types';
 import { GLOBE_RADIUS } from './geo';
+import { OVERDRIVE_MAX_FORWARD } from './overdrive';
 
 /*
  * `?probe=wave` and `?probe=hazard` are the only entry points into
@@ -272,7 +273,7 @@ async function startGame(): Promise<void> {
 
   await loading.step(0.90, 'LIGHTING THE INSTRUMENTS');
 
-  const hud = createHud(records.wallet);
+  const hud = createHud(records.wallet, records.seaAnchor, records.overdrive);
   const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
   const timeDialCanvas = document.getElementById('hud-timedial');
   const timeDial =
@@ -540,6 +541,10 @@ async function startGame(): Promise<void> {
     wallet: records.wallet,
     book: records.book,
     harpoons: records.harpoons,
+    governor: records.governor,
+    arcLamp: records.arcLamp,
+    chumDrum: records.chumDrum,
+    barbedHeads: records.barbedHeads,
     onOpen: () => {
       // The hull stops before the first frozen frame runs. `open()` flips its
       // own flag and calls this synchronously inside the click, so no frame of
@@ -580,7 +585,10 @@ async function startGame(): Promise<void> {
    */
   const fishCover = createFishCover({
     energy,
-    onStart: () => fishing.open(),
+    governor: records.governor,
+    chumDrum: records.chumDrum,
+    barbedHeads: records.barbedHeads,
+    onStart: (useChumDrum, useBarbedHeads) => fishing.open(useChumDrum, useBarbedHeads),
     onRecord: () => fishBook.open(),
     // Same halt, and the same reason, as the fishing card's own: the hull
     // stops before the first frozen frame runs, so the world resumes from
@@ -593,6 +601,14 @@ async function startGame(): Promise<void> {
     wallet: records.wallet,
     battery: records.battery,
     harpoons: records.harpoons,
+    seaAnchor: records.seaAnchor,
+    overdrive: records.overdrive,
+    chumDrum: records.chumDrum,
+    barbedHeads: records.barbedHeads,
+    trim: records.trim,
+    moonglass: records.moonglass,
+    arcLamp: records.arcLamp,
+    governor: records.governor,
   });
 
   // hud.ts owns whether [FISH] looks pressable; this owns what pressing it does.
@@ -640,6 +656,28 @@ async function startGame(): Promise<void> {
     // as well as of the fishing card.
     ship.halt();
     shop.open();
+  });
+
+  // ANCHOR and COIL: unlike [FISH] and [SHOP], neither opens an overlay --
+  // both act on the world directly, so there is no `ship.halt()` and no
+  // `onOpen`/`onClose` pair here. The guard is the same set of "the world is
+  // not the player's right now" tests as the two above, minus the berth
+  // test neither of these needs. `hud.ts` writes the disabled attribute as
+  // an affordance; the stores' own `canDeploy`/`canEngage` are the lock.
+  document.getElementById('btn-anchor')?.addEventListener('click', () => {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (menu.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
+    records.seaAnchor.deploy();
+  });
+
+  document.getElementById('btn-overdrive')?.addEventListener('click', () => {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (menu.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
+    records.overdrive.engage();
   });
 
   /*
@@ -849,6 +887,24 @@ async function startGame(): Promise<void> {
   function frame(): void {
     const dt = Math.min(clock.getDelta(), 0.1);
 
+    // Both deploy timers count down on the wall clock every frame this loop
+    // runs at all, battle and frozen branches included -- a Sea Anchor's
+    // three-second hold or an Overdrive Coil's twenty-second burn is a
+    // promise about elapsed time, not about how the world happens to be
+    // spending it, and gating the tick on which branch runs below would
+    // let opening a menu pause a burn already under way for free.
+    records.seaAnchor.tick(dt);
+    records.overdrive.tick(dt);
+
+    // Read once and threaded into every `energy.update` call below, battle
+    // and frozen branches included: a Moonglass Array charges a hull at
+    // anchor exactly as readily under an open shop as at sea, and an
+    // Overdrive Coil already burning does not refund itself just because a
+    // menu came up over it -- see the tick comment above for the same
+    // argument about the timers these two numbers come from.
+    const overdriveActive = records.overdrive.isActive;
+    const moonNightFraction = records.moonglass.nightFraction;
+
     /*
      * The battle branch, tested BEFORE the overlay branch.
      *
@@ -869,7 +925,7 @@ async function startGame(): Promise<void> {
       // reasons: the sun is still up, the ship may be at a berth, and a fight
       // is long enough that a tank frozen through one would be a lie about
       // where the power went.
-      energy.update(dt, restingSnapshot(), env);
+      energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction);
       // Only once the arena is actually on screen. Through the first fade the
       // world is still what is being drawn, and a fight that had started
       // behind it would be a second of shooting the player never saw.
@@ -930,7 +986,7 @@ async function startGame(): Promise<void> {
       // hull; see `restingSnapshot`. It also keeps the berth alive under the
       // shop: a chandlery that disconnected the ship the moment it opened
       // would make browsing cost the charge the visit was for.
-      energy.update(dt, restingSnapshot(), env);
+      energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction);
       if (fishing.isOpen) fishing.update(dt);
       // The plant is still running under the cover screen, so START FISHING
       // has to be re-read against it: a player who opens this at a berth on
@@ -973,7 +1029,7 @@ async function startGame(): Promise<void> {
     // Power first, on last frame's speed: the ship must not spend energy it
     // turns out not to have. `globe.update` is what writes `env`, so the sun the
     // solar panels see is also one frame old -- 16 ms of a 10-minute day.
-    energy.update(dt, ship.state, env);
+    energy.update(dt, ship.state, env, overdriveActive, moonNightFraction);
     // Wind sits between the two: it needs this frame's docked verdict to know
     // whether the ship is in shelter, and the ship needs this frame's push.
     wind.update(dt, ship.state, energy.state);
@@ -1018,7 +1074,23 @@ async function startGame(): Promise<void> {
     // happens: `onContact` calls `ship.halt()` and flips the overlay, and the
     // `ship.update` below then runs on a hull that is already stopped.
     aiBoats.update(dt, ship.state, energy.state, hazards.state, suppressed());
-    ship.update(dt, controls.input, energy.state, wind.state, globe.waveOffsets, hazards.state);
+    // The Navigation offers' one read this frame: the higher of Trim &
+    // Sheathing's tier and an Overdrive Coil's burn speed -- never their sum,
+    // see `types.ts`'s `PropulsionState` -- and whether a Sea Anchor is still
+    // in its kill-and-hold window.
+    const propulsion: PropulsionState = {
+      maxForward: overdriveActive ? OVERDRIVE_MAX_FORWARD : records.trim.maxForward,
+      anchored: records.seaAnchor.isDeployed,
+    };
+    ship.update(
+      dt,
+      controls.input,
+      energy.state,
+      wind.state,
+      globe.waveOffsets,
+      hazards.state,
+      propulsion,
+    );
     view.update(dt, ship.state, controls.input);
     // After the ship and before `globe.update`: this only places and lights
     // meshes from the state the sim wrote above, and nothing reads them until

@@ -3,10 +3,26 @@ import type { Wallet } from './wallet';
 import type { FishBookStore } from './fishbook';
 import type { Battery } from './battery';
 import type { HarpoonStore } from './harpoons';
+import type { SeaAnchorStore } from './seaanchor';
+import type { OverdriveStore } from './overdrive';
+import type { ChumDrumStore } from './chumdrum';
+import type { BarbedHeadsStore } from './barbedheads';
+import type { TrimStore } from './trim';
+import type { MoonglassStore } from './moonglass';
+import type { ArcLampStore } from './arclamp';
+import type { GovernorStore } from './governor';
 import { createWallet } from './wallet';
 import { createFishBookStore } from './fishbook';
 import { BATTERY_CAPACITY, createBattery } from './battery';
 import { HARPOON_STORE_MAX, createHarpoonStore } from './harpoons';
+import { SEA_ANCHOR_STORE_MAX, createSeaAnchorStore } from './seaanchor';
+import { OVERDRIVE_STORE_MAX, createOverdriveStore } from './overdrive';
+import { CHUM_DRUM_STORE_MAX, createChumDrumStore } from './chumdrum';
+import { BARBED_HEADS_STORE_MAX, createBarbedHeadsStore } from './barbedheads';
+import { TRIM_TIER_MAX, createTrimStore } from './trim';
+import { MOONGLASS_TIER_MAX, createMoonglassStore } from './moonglass';
+import { ARC_LAMP_TIER_MAX, createArcLampStore } from './arclamp';
+import { GOVERNOR_TIER_MAX, createGovernorStore } from './governor';
 
 /**
  * save.ts — localStorage, versioned, and tolerant of anything it finds there.
@@ -35,13 +51,16 @@ export const SAVE_KEY = 'pirate-world.save';
  * NOT widen the accept test, because the whole value of the field is that an
  * unrecognised number is a definite answer rather than a guess.
  *
- * The shop's two fields — `reserve` and `harpoons` — were ADDED to version 1
- * rather than justifying a version 2, and that is the right call under this
- * file's own rules. A version bump means "every field below is of unknown
- * meaning", which is a claim about the file that would be false: a v1 save
- * from a build that predates the shop is a perfectly good save whose owner
- * simply never bought anything. Both fields are absent-means-zero, which is
- * exactly what such a player had.
+ * The shop's fields — `reserve` and `harpoons` first, and now the eight
+ * fields `docs/SHOP_PLAN.md` added (`seaAnchors`, `overdriveCoils`,
+ * `chumDrums`, `barbedHeads`, `trimTier`, `moonglassTier`, `arcLampTier`,
+ * `governorTier`) — were ADDED to version 1 rather than justifying a version
+ * 2, and that is the right call under this file's own rules each time. A
+ * version bump means "every field below is of unknown meaning", which is a
+ * claim about the file that would be false: a v1 save from a build that
+ * predates any one of these offers is a perfectly good save whose owner
+ * simply never bought that thing. Every field here is absent-means-zero,
+ * which is exactly what such a player had.
  */
 const SAVE_VERSION = 1;
 
@@ -51,6 +70,14 @@ export const EMPTY_SAVE: SaveData = Object.freeze({
   fishBook: Object.freeze({}),
   reserve: 0,
   harpoons: 0,
+  seaAnchors: 0,
+  overdriveCoils: 0,
+  chumDrums: 0,
+  barbedHeads: 0,
+  trimTier: 0,
+  moonglassTier: 0,
+  arcLampTier: 0,
+  governorTier: 0,
 });
 
 /* ------------------------------------------------------------------ */
@@ -136,16 +163,38 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
   const gold = toCount(parsed.gold);
   if (gold === null) notes.push(`gold ${JSON.stringify(parsed.gold)}`);
 
-  // Absent is not damage for either of these: a save written before the shop
-  // existed has neither field, and a player who never bought anything has
-  // neither either. Only a present-but-unreadable value is worth a note.
-  const reserveMax = Math.round(BATTERY_CAPACITY * 100);
-  const reserve = parsed.reserve === undefined ? 0 : toCapped(parsed.reserve, reserveMax);
-  if (reserve === null) notes.push(`reserve ${JSON.stringify(parsed.reserve)}`);
+  // Bound to a name of its own rather than read as `parsed` inside the
+  // closure below: `isRecord` narrowed the PARAMETER above, and narrowing on
+  // a parameter does not carry into a nested function — TypeScript has to
+  // assume the parameter could change before the closure runs, even though
+  // this one never does. Capturing it in a `const` after the narrowing gives
+  // the closure something whose type cannot have moved.
+  const record = parsed;
 
-  const harpoons =
-    parsed.harpoons === undefined ? 0 : toCapped(parsed.harpoons, HARPOON_STORE_MAX);
-  if (harpoons === null) notes.push(`harpoons ${JSON.stringify(parsed.harpoons)}`);
+  // Absent is not damage for any field read through here: a save written
+  // before a given offer existed has no field for it, and a player who never
+  // bought that thing has the same zero. Only a present-but-unreadable value
+  // is worth a note — see the file comment on SAVE_VERSION for why each of
+  // these eight joined version 1 rather than forcing a version 2.
+  function readCapped(key: string, max: number): number | null {
+    const value = record[key];
+    if (value === undefined) return 0;
+    const capped = toCapped(value, max);
+    if (capped === null) notes.push(`${key} ${JSON.stringify(value)}`);
+    return capped;
+  }
+
+  const reserveMax = Math.round(BATTERY_CAPACITY * 100);
+  const reserve = readCapped('reserve', reserveMax);
+  const harpoons = readCapped('harpoons', HARPOON_STORE_MAX);
+  const seaAnchors = readCapped('seaAnchors', SEA_ANCHOR_STORE_MAX);
+  const overdriveCoils = readCapped('overdriveCoils', OVERDRIVE_STORE_MAX);
+  const chumDrums = readCapped('chumDrums', CHUM_DRUM_STORE_MAX);
+  const barbedHeads = readCapped('barbedHeads', BARBED_HEADS_STORE_MAX);
+  const trimTier = readCapped('trimTier', TRIM_TIER_MAX);
+  const moonglassTier = readCapped('moonglassTier', MOONGLASS_TIER_MAX);
+  const arcLampTier = readCapped('arcLampTier', ARC_LAMP_TIER_MAX);
+  const governorTier = readCapped('governorTier', GOVERNOR_TIER_MAX);
 
   const fishBook: Record<string, number> = {};
   const raw = parsed.fishBook;
@@ -178,6 +227,14 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
     fishBook,
     reserve: reserve ?? 0,
     harpoons: harpoons ?? 0,
+    seaAnchors: seaAnchors ?? 0,
+    overdriveCoils: overdriveCoils ?? 0,
+    chumDrums: chumDrums ?? 0,
+    barbedHeads: barbedHeads ?? 0,
+    trimTier: trimTier ?? 0,
+    moonglassTier: moonglassTier ?? 0,
+    arcLampTier: arcLampTier ?? 0,
+    governorTier: governorTier ?? 0,
   };
 }
 
@@ -275,6 +332,14 @@ export function createRecords(): {
   book: FishBookStore;
   battery: Battery;
   harpoons: HarpoonStore;
+  seaAnchor: SeaAnchorStore;
+  overdrive: OverdriveStore;
+  chumDrum: ChumDrumStore;
+  barbedHeads: BarbedHeadsStore;
+  trim: TrimStore;
+  moonglass: MoonglassStore;
+  arcLamp: ArcLampStore;
+  governor: GovernorStore;
 } {
   const save = loadSave();
   const wallet = createWallet(save.gold);
@@ -285,6 +350,14 @@ export function createRecords(): {
   // conversion to and from the tank fractions the sim runs in.
   const battery = createBattery(save.reserve);
   const harpoons = createHarpoonStore(save.harpoons);
+  const seaAnchor = createSeaAnchorStore(save.seaAnchors);
+  const overdrive = createOverdriveStore(save.overdriveCoils);
+  const chumDrum = createChumDrumStore(save.chumDrums);
+  const barbedHeads = createBarbedHeadsStore(save.barbedHeads);
+  const trim = createTrimStore(save.trimTier);
+  const moonglass = createMoonglassStore(save.moonglassTier);
+  const arcLamp = createArcLampStore(save.arcLampTier);
+  const governor = createGovernorStore(save.governorTier);
 
   function persist(): void {
     writeSave({
@@ -293,19 +366,52 @@ export function createRecords(): {
       fishBook: book.snapshot(),
       reserve: battery.percent,
       harpoons: harpoons.count,
+      seaAnchors: seaAnchor.count,
+      overdriveCoils: overdrive.count,
+      chumDrums: chumDrum.count,
+      barbedHeads: barbedHeads.count,
+      trimTier: trim.tier,
+      moonglassTier: moonglass.tier,
+      arcLampTier: arcLamp.tier,
+      governorTier: governor.tier,
     });
   }
 
   // Every part of the file, all subscribed, at the one moment where the caller
-  // cannot forget one of them. The cell is the only one of the four that moves
-  // continuously rather than on an event, and it is why `battery.ts` notifies
-  // on its PERSISTED percent rather than on every draw — without that, a ship
-  // burning through its backup would be writing localStorage sixty times a
-  // second for a number that is read back exactly once, at boot.
+  // cannot forget one of them. The cell is the only one of the twelve that
+  // moves continuously rather than on an event, and it is why `battery.ts`
+  // notifies on its PERSISTED percent rather than on every draw — without
+  // that, a ship burning through its backup would be writing localStorage
+  // sixty times a second for a number that is read back exactly once, at
+  // boot. The two deploy timers (`seaAnchor.isDeployed`, `overdrive.isActive`)
+  // are deliberately not among the eight `onChange` subscriptions below: they
+  // are not part of the persisted count and `save.ts` never asks either store
+  // about them.
   wallet.onChange(persist);
   book.onChange(persist);
   battery.onChange(persist);
   harpoons.onChange(persist);
+  seaAnchor.onChange(persist);
+  overdrive.onChange(persist);
+  chumDrum.onChange(persist);
+  barbedHeads.onChange(persist);
+  trim.onChange(persist);
+  moonglass.onChange(persist);
+  arcLamp.onChange(persist);
+  governor.onChange(persist);
 
-  return { wallet, book, battery, harpoons };
+  return {
+    wallet,
+    book,
+    battery,
+    harpoons,
+    seaAnchor,
+    overdrive,
+    chumDrum,
+    barbedHeads,
+    trim,
+    moonglass,
+    arcLamp,
+    governor,
+  };
 }

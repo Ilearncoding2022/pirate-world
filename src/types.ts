@@ -294,6 +294,25 @@ export interface HazardState {
   readonly drive: HazardDrive | null;
 }
 
+/**
+ * The hull's propulsion for one frame, as the chandlery's Navigation offers
+ * change it. Optional everywhere it is threaded through — a caller that never
+ * builds one gets exactly the ship the game shipped with.
+ *
+ * `trim.ts` and `overdrive.ts` are the two writers `main.ts` reads to build
+ * this each frame: `maxForward` is the higher of the ship's Trim & Sheathing
+ * tier and, while the Overdrive Coil is burning, `OVERDRIVE_MAX_FORWARD` —
+ * never the sum of both, because the coil is a sprint on top of the hull the
+ * player already has, not a stack of upgrades. `anchored` is `seaanchor.ts`'s
+ * `isDeployed` and nothing else.
+ */
+export interface PropulsionState {
+  /** Effective top speed this frame, world units/s. See the file comment above. */
+  readonly maxForward: number;
+  /** True for the whole kill-and-hold window of a deployed Sea Anchor. */
+  readonly anchored: boolean;
+}
+
 /** Read-only view of the ship, produced by ship.ts, consumed by camera.ts and hud.ts. */
 export interface ShipState {
   /** Unit vector from globe center to the ship. World position = position * GLOBE_RADIUS. */
@@ -514,6 +533,22 @@ export interface SaveData {
   readonly reserve: number;
   /** Spare harpoons in the locker, 0-100. */
   readonly harpoons: number;
+  /** Sea Anchors stowed, 0-`SEA_ANCHOR_STORE_MAX`. Absent means 0. */
+  readonly seaAnchors: number;
+  /** Overdrive Coils stowed, 0-`OVERDRIVE_STORE_MAX`. Absent means 0. */
+  readonly overdriveCoils: number;
+  /** Chum Drums stowed, 0-`CHUM_DRUM_STORE_MAX`. Absent means 0. */
+  readonly chumDrums: number;
+  /** Barbed Heads bundles stowed, 0-`BARBED_HEADS_STORE_MAX`. Absent means 0. */
+  readonly barbedHeads: number;
+  /** Trim & Sheathing tier bought, 0-`TRIM_TIER_MAX`. Absent means Mk 0. */
+  readonly trimTier: number;
+  /** Moonglass Array tier bought, 0-`MOONGLASS_TIER_MAX`. Absent means Mk 0. */
+  readonly moonglassTier: number;
+  /** Arc-Lamp Rig tier bought, 0-`ARC_LAMP_TIER_MAX`. Absent means Mk 0. */
+  readonly arcLampTier: number;
+  /** Efficiency Governor tier bought, 0-`GOVERNOR_TIER_MAX`. Absent means Mk 0. */
+  readonly governorTier: number;
 }
 
 /* ------------------------------------------------------------------ */

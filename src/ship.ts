@@ -14,7 +14,16 @@ import {
 } from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { BufferGeometry, Material, Object3D } from 'three';
-import type { EnergyState, HazardState, InputState, ShipState, Terrain, WindState } from './types';
+import type {
+  EnergyState,
+  HazardState,
+  InputState,
+  PropulsionState,
+  ShipState,
+  Terrain,
+  WindState,
+} from './types';
+import { SEA_ANCHOR_DRAG } from './seaanchor';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
 import { createShipFx } from './shipfx';
 import type { ShipFx } from './shipfx';
@@ -121,7 +130,20 @@ export const MAX_FORWARD = 10;
  * drag. Plan the approach to a berth earlier.
  */
 const DRAG = 0.35;
-/** Thrust while a throttle key is held, world units / s^2. Now 3.5. */
+/**
+ * Thrust while a throttle key is held, world units / s^2, for the
+ * unmodified hull. Now 3.5.
+ *
+ * `update` below no longer reads this constant directly: Trim & Sheathing
+ * (`trim.ts`) raises `MAX_FORWARD` in `PropulsionState.maxForward`, and
+ * `ACCEL = MAX_FORWARD * DRAG` is exactly the ratio that upgrade is built to
+ * keep — see `trim.ts`'s own comment on why a higher top speed already buys
+ * proportionally more thrust at no separate cost. `update` therefore
+ * recomputes this same product every frame from whatever `maxForward`
+ * `propulsion` hands it, and this constant survives only as the reference
+ * point that derivation is written against, and the number the doc comment
+ * above describes.
+ */
 const ACCEL = MAX_FORWARD * DRAG;
 
 const MAX_REVERSE = 7; // world units / s (magnitude); clamp-limited, not drag-limited
@@ -215,6 +237,17 @@ const NO_HAZARD: HazardState = Object.freeze({
   phase: 'free',
   drive: null,
 }) as HazardState;
+
+/**
+ * The ship as it always was, for a caller that has not bought a single
+ * Navigation offer and has never deployed a Sea Anchor -- the unit tests
+ * included. Frozen for the same reason `NO_HAZARD` is: this file only ever
+ * reads it.
+ */
+const NO_PROPULSION: PropulsionState = Object.freeze({
+  maxForward: MAX_FORWARD,
+  anchored: false,
+});
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -409,6 +442,9 @@ export interface Ship {
    * `hazard` is `hazards.state` -- the rough water, doing two unrelated jobs:
    * a push spent exactly like the wind's, and a drive that takes the hull off
    * the player entirely. Omitted, it defaults to no rough water at all.
+   * `propulsion` is `main.ts`'s per-frame read of the Navigation offers --
+   * effective top speed and whether a Sea Anchor is over the side. Omitted,
+   * it defaults to the unmodified hull. See `types.ts`'s `PropulsionState`.
    */
   update(
     dt: number,
@@ -417,6 +453,7 @@ export interface Ship {
     wind: WindState,
     waveOffsets?: WaveOffsets,
     hazard?: HazardState,
+    propulsion?: PropulsionState,
   ): void;
   /**
    * Puts the hull at `dir` on `headingRad`, stopped.
@@ -754,6 +791,14 @@ export function createShip(
      * nothing at all, so `tests/unit/ship-physics.test.ts` needs no change.
      */
     hazard: HazardState = NO_HAZARD,
+    /**
+     * `main.ts`'s per-frame read of the Navigation offers: the ship's
+     * effective top speed (base, Trim & Sheathing, or an Overdrive Coil's
+     * burn — see `types.ts`) and whether a Sea Anchor is over the side.
+     * Optional and defaulting to the unmodified hull, so
+     * `tests/unit/ship-physics.test.ts` needs no change.
+     */
+    propulsion: PropulsionState = NO_PROPULSION,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
@@ -781,7 +826,13 @@ export function createShip(
       if (input.left) turnInput -= 1;
       if (input.right) turnInput += 1;
 
-      const speedFrac = clamp(Math.abs(state.speed) / MAX_FORWARD, 0, 1);
+      // The hull's top speed for this one frame -- MAX_FORWARD, or higher
+      // with Trim & Sheathing bought or an Overdrive Coil burning. See
+      // `types.ts`'s `PropulsionState` for who builds this and why it is
+      // never a sum of both.
+      const effMaxForward = propulsion.maxForward;
+
+      const speedFrac = clamp(Math.abs(state.speed) / effMaxForward, 0, 1);
       const turnRate = TURN_RATE * (TURN_MIN_SCALE + (1 - TURN_MIN_SCALE) * speedFrac);
       if (turnInput !== 0) {
         // The bow turns about the surface normal. Clockwise-positive looking
@@ -803,22 +854,40 @@ export function createShip(
       // below, so the ship coasts to a stop and still answers the helm -- being
       // out of charge is a predicament, never a frozen frame. The player can
       // always turn the hull, and the panels bring it back.
+      //
+      // A Sea Anchor over the side cuts thrust the same way and for the same
+      // shape of reason -- see `seaanchor.ts` -- but it is not a predicament:
+      // it is the whole point of the item, so it is tested first and an empty
+      // tank underneath it changes nothing either way.
       let thrust = 0;
-      if (energy.canThrust) {
-        if (input.forward) thrust += ACCEL;
-        if (input.backward) thrust -= ACCEL;
+      if (!propulsion.anchored && energy.canThrust) {
+        // ACCEL exactly when the hull is unmodified -- the ordinary case,
+        // and the one that constant's own comment is written against --
+        // and `effMaxForward * DRAG` otherwise, which is the same ratio for
+        // whatever tier or burn `propulsion` is reporting this frame.
+        const accel = effMaxForward === MAX_FORWARD ? ACCEL : effMaxForward * DRAG;
+        if (input.forward) thrust += accel;
+        if (input.backward) thrust -= accel;
       }
 
-      // Exact solution of  ds/dt = thrust - DRAG * s  over dt, rather than a
+      // The drag this frame's exact solution decays against. Ordinary DRAG,
+      // unless a Sea Anchor is over the side, in which case it is
+      // SEA_ANCHOR_DRAG -- an order of magnitude steeper, so the three time
+      // constants of the kill window (see `seaanchor.ts`) decay any speed the
+      // ship was carrying to a crawl in about a second rather than the ship's
+      // usual 2.9 s coast.
+      const drag = propulsion.anchored ? SEA_ANCHOR_DRAG : DRAG;
+
+      // Exact solution of  ds/dt = thrust - drag * s  over dt, rather than a
       // step of each in turn. Two reasons it has to be integrated in closed
-      // form. It makes the top speed exactly thrust / DRAG: stepping thrust and
-      // then drag lands on (ACCEL / DRAG) * (1 - DRAG * dt) instead, which is
+      // form. It makes the top speed exactly thrust / drag: stepping thrust and
+      // then drag lands on (accel / drag) * (1 - drag * dt) instead, which is
       // 19.8 kn at 60fps and 18.6 at 10 -- a top speed that depends on the frame
       // rate. And with no throttle it decays cleanly to zero, so releasing the
       // keys still coasts the ship to a stop.
-      const terminal = thrust / DRAG;
-      state.speed = terminal + (state.speed - terminal) * Math.exp(-DRAG * dt);
-      state.speed = clamp(state.speed, -MAX_REVERSE, MAX_FORWARD);
+      const terminal = thrust / drag;
+      state.speed = terminal + (state.speed - terminal) * Math.exp(-drag * dt);
+      state.speed = clamp(state.speed, -MAX_REVERSE, effMaxForward);
       // Snap on the absence of THRUST, not on the absence of input. The two are
       // the same key press until the tank runs dry, and then they are not: a
       // player holding W on a dead ship gets thrust 0, and the exponential above

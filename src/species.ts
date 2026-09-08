@@ -321,12 +321,22 @@ export const ROW_ODDS: readonly (readonly number[])[] = [
  * `rng` is injected rather than taken from `Math.random` so the odds can be
  * verified against a seeded sequence, and so a future daily-challenge seed
  * costs nothing to add.
+ *
+ * `minTier` is the Chum Drum's own knob (`chumdrum.ts`): every tier below it
+ * is zeroed out of the row's odds rather than merely down-weighted, so "one
+ * session's spawn roll biased toward tier 3+" (`docs/SHOP_PLAN.md`) means
+ * literally that a spawn below the floor can no longer happen at all, not
+ * that it becomes merely less likely. Left at 1 — the default — every row's
+ * own odds are untouched.
  */
-export function rollSpecies(row: number, rng: () => number): Species {
-  const odds = ROW_ODDS[row] ?? ROW_ODDS[0];
+export function rollSpecies(row: number, rng: () => number, minTier: Tier = 1): Species {
+  const rowOdds = ROW_ODDS[row] ?? ROW_ODDS[0];
+  const odds = minTier <= 1 ? rowOdds : rowOdds.map((share, i) => (i + 1 >= minTier ? share : 0));
 
   // Scaled to the row's own total rather than a hard 100, so a mistuned row
-  // stays a valid distribution instead of biasing toward its last tier.
+  // stays a valid distribution instead of biasing toward its last tier. A
+  // biased row's total is smaller than 100 by construction, and this line is
+  // exactly what keeps that a valid distribution too.
   let total = 0;
   for (const share of odds) total += share;
 

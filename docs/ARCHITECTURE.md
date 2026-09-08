@@ -312,7 +312,12 @@ shader.
 | `wallet.ts` | `createWallet(initialGold)` | the only writer of gold; subscribers rather than pollers; `spend` is all-or-nothing for the shop and `lose` is best-effort for a defeat, which is not a purchase and must not be refused for an empty purse |
 | `battery.ts` | `createBattery(initialPercent)`, `BATTERY_CELL`, `BATTERY_CELLS_MAX`, `BATTERY_CAPACITY` | the bought backup cells; the only charge in the world nothing recharges |
 | `harpoons.ts` | `createHarpoonStore(initial)`, `HARPOON_BUNDLE`, `HARPOON_STORE_MAX`, `HARPOON_PER_SESSION_MAX` | the spare-harpoon locker, and its two different ceilings |
-| `shop.ts` | `createShop(deps, search)`, `BATTERY_PRICE`, `HARPOONS_PRICE`, `DEV_GOLD_GRANT`, `isDevMode` | the chandlery panel; the only place gold leaves the purse, and behind `?dev` the only place it is minted |
+| `shop.ts` | `createShop(deps, search)`, `BATTERY_PRICE`, `HARPOONS_PRICE`, `DEV_GOLD_GRANT`, `isDevMode`, and one price constant per Navigation/Fishing item | the chandlery panel, split into a Navigation and a Fishing tab; the only place gold leaves the purse, and behind `?dev` the only place it is minted |
+| `seaanchor.ts`, `overdrive.ts` | `createSeaAnchorStore`/`createOverdriveStore` | the two Navigation consumables with a deploy timer, read by `ship.ts`/`energy.ts` through `main.ts`'s per-frame `PropulsionState` and `overdriveActive` |
+| `trim.ts`, `moonglass.ts` | `createTrimStore`/`createMoonglassStore` | the two Navigation durables; `trim.maxForward` feeds `ship.ts`, `moonglass.nightFraction` feeds `energy.ts` |
+| `chumdrum.ts`, `barbedheads.ts` | `createChumDrumStore`/`createBarbedHeadsStore` | the two Fishing consumables, armed on `fishcover.ts` and spent by `fishing.ts` into `createFishingSim`'s `minSpawnTier`/`tensionDrainScale` |
+| `arclamp.ts`, `governor.ts` | `createArcLampStore`/`createGovernorStore` | the two Fishing durables; `arcLamp.sessionSeconds` and `governor.sessionCost` feed `fishing.ts`/`fishsim.ts` directly |
+| `tierstore.ts`, `stockstore.ts` | `createTierStore`, `createStockStore` | the shared shape behind all eight items above — a tier ladder and a one-at-a-time stock cap, respectively; see `docs/SHOP_PLAN.md` for why the eight do not each reimplement one |
 | `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `blackout.ts` | `createBlackout()` | the fade a wreck happens behind, and both of a battle's; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
@@ -1998,16 +2003,21 @@ mean something different on a phone.
 ### Persistence
 `save.ts` owns one versioned localStorage key and `createRecords()` is its
 only entry point — it loads the file, builds the wallet, the fish book, the
-backup cell and the harpoon locker from it, and subscribes all four to a
-writer. Separate calls would let a caller wire three of them and end up with a
-save that silently stopped updating.
+backup cell, the harpoon locker and, as of `docs/SHOP_PLAN.md`'s Navigation
+and Fishing items, the Sea Anchor, Overdrive Coil, Chum Drum and Barbed Heads
+stocks and the Trim & Sheathing, Moonglass Array, Arc-Lamp Rig and Efficiency
+Governor tiers, and subscribes all twelve to a writer. Separate calls would let
+a caller wire some of them and end up with a save that silently stopped
+updating for the rest.
 
-**The shop's two fields were added to version 1 rather than bumping it.** A
-version bump means "every field below is of unknown meaning", and that would
-be false of a pre-shop save: it is a perfectly good file whose owner never
-bought anything, which is exactly what absent-means-zero gives back. Both
-fields are also clamped to their ceilings on the way in, because an edited
-file claiming 900 harpoons is the cheapest cheat there is.
+**The shop's fields were added to version 1 rather than bumping it, twice
+over.** A version bump means "every field below is of unknown meaning", and
+that would be false of a pre-shop (or pre-Navigation, pre-Fishing) save: it is
+a perfectly good file whose owner never bought that thing, which is exactly
+what absent-means-zero gives back. Every one of the ten stock/tier fields is
+also clamped to its own ceiling on the way in, because an edited file claiming
+900 harpoons — or a Trim tier of 40 — is the cheapest cheat there is. See
+`save.ts`'s comment on `SAVE_VERSION` for the current, exact field list.
 
 **The cell's range doubled without a bump either.** `reserve` is clamped on the
 way in to `BATTERY_CAPACITY * 100`, which went from 50 to 100 when the ship
@@ -2089,6 +2099,27 @@ visible, ask the renderer** — `toBeHidden()`, `getComputedStyle(el).display`, 
 the thing that was wrong. `tests/smoke/game.spec.ts` now asks all three, and the
 pair of tests there was confirmed to fail with the guard removed before being
 trusted.
+
+### Navigation and Fishing: eight more offers, two tabs
+Everything above this paragraph describes the chandlery as it was with two
+offers. It now sells ten, across a NAVIGATION tab and a FISHING tab — Battle
+stays undelivered, see `docs/SHOP_PLAN.md` for why — and the reasoning for
+each of the eight new items lives in that document and in the item's own file
+rather than here, on the same principle `shop.ts`'s own comment states: a
+price typed in more than one place is a price that can disagree with itself.
+Two structural changes worth recording here rather than there, because they
+are about the PANEL and not about any one offer:
+
+- `wireConsumable`/`wireDurable` in `shop.ts` are the generic wiring two new
+  shapes needed — a fixed-price stock cap and a per-tier price ladder — so
+  eight offers did not mean eight hand-written copies of the same dim-reason
+  and refresh logic the original two offers carried inline. `tierstore.ts`
+  and `stockstore.ts` are the matching generic STORES the item files
+  themselves build on.
+- `.shop__panel` gained `display: flex; flex-direction: column` and a capped
+  `max-height`, with `.shop__body` doing the scrolling — the Fish Book's own
+  `.fishbook__panel`/`.fishbook__body` split, copied rather than reinvented,
+  because five offers to a tab is already taller than a panel sized for two.
 
 ## The ship model
 `assets/pirateship_beginner.glb` is built by `tools/build_ship.py` (headless

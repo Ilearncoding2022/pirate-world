@@ -1350,6 +1350,19 @@ kbd {
 }
 
 /*
+ * The stock count beside ANCHOR/COIL's brackets. Quieter than the key itself
+ * -- this is a detail on the button, not a second thing to read -- and it
+ * inherits `.dock__btn:disabled`'s colour below rather than carrying its own,
+ * so a dead key and its count dim as one fact.
+ */
+.dock__count {
+  margin-left: 5px;
+  font-size: 0.85em;
+  letter-spacing: 0.08em;
+  color: var(--cyan-dim);
+}
+
+/*
  * Dead below half a tank. hud.ts writes the `disabled` attribute and the
  * `title` that says why; this only has to make the key look like what it is.
  */
@@ -1367,6 +1380,11 @@ kbd {
 
 .dock__btn:disabled .dock__key::before,
 .dock__btn:disabled .dock__key::after {
+  color: var(--ink-mute);
+  opacity: 0.6;
+}
+
+.dock__btn:disabled .dock__count {
   color: var(--ink-mute);
   opacity: 0.6;
 }
@@ -2168,6 +2186,44 @@ kbd {
   color: var(--ink-mute);
 }
 
+/* The two Fishing consumables, side by side rather than in the column below:
+   these are neither a first choice nor a second one, they are peers a
+   player may arm either, both or neither of before pressing START FISHING.
+   `fishcover.ts` keeps a hidden one out of the layout entirely, so a player
+   with only a Chum Drum bought sees one button, centred by the flex gap,
+   not a button and an empty slot. */
+.fishcover__loadout {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+
+.fishcover__toggle {
+  flex: 1 1 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+/* Armed reads as lit, the same cyan `.fbtn--go` uses for the button that
+   actually spends gold or power -- this one is about to spend a locker. */
+.fishcover__toggle.is-armed {
+  color: var(--cyan);
+  border-color: rgba(63, 224, 255, 0.5);
+  background: rgba(63, 224, 255, 0.14);
+}
+
+.fishcover__toggle-stock {
+  font-size: 0.82em;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+}
+
+.fishcover__toggle.is-armed .fishcover__toggle-stock {
+  color: inherit;
+}
+
 /* A column, not the fishing summary's row: these two are a first choice and a
    second one, and side by side they would read as equals. */
 .fishcover__actions {
@@ -2678,9 +2734,18 @@ kbd {
   backdrop-filter: blur(3px);
 }
 
+/*
+ * Flex column with a capped height, on the Fish Book's own pattern (see
+ * `.fishbook__panel`): five offers to a tab is taller than the two this
+ * panel was authored for, so the head, the tabs, the dev row and the foot
+ * stay put and only `.shop__body` scrolls.
+ */
 .shop__panel {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: min(520px, 100%);
+  max-height: min(86vh, 640px);
   padding: 16px 18px 14px;
   background: linear-gradient(180deg, rgba(10, 20, 31, 0.97), rgba(4, 9, 16, 0.97));
   border: 1px solid rgba(63, 224, 255, 0.22);
@@ -2723,11 +2788,82 @@ kbd {
   border-color: rgba(63, 224, 255, 0.45);
 }
 
+/*
+ * The scrolling region. `flex: 1` claims whatever the capped panel height
+ * above leaves once the head, the tabs, the dev row and the foot have taken
+ * theirs; `min-height: 0` is what actually lets it shrink and scroll instead
+ * of forcing the panel to overflow — the same note `.fishbook__body` carries.
+ */
 .shop__body {
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px 0;
+  padding: 12px 2px 12px 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--cyan-dim) transparent;
+}
+
+.shop__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.shop__body::-webkit-scrollbar-thumb {
+  background: var(--cyan-dim);
+  border-radius: 4px;
+}
+
+/* ---- tabs ------------------------------------------------------------ */
+
+/*
+ * One row of two, styled off `.fbtn` so a tab reads as pressable the same
+ * way every other button in the game does. `.is-active` is the only thing
+ * that tells them apart, written by `shop.ts`'s `paintTabs` and never by
+ * `:hover` or `:focus` alone.
+ */
+.shop__tabs {
+  display: flex;
+  gap: 6px;
+  padding-top: 10px;
+}
+
+.shop__tab {
+  flex: 1 1 0;
+  padding: 7px 6px;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  background: rgba(63, 224, 255, 0.03);
+  border: 1px solid var(--panel-border);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 120ms linear, color 120ms linear, border-color 120ms linear;
+}
+
+.shop__tab:hover {
+  color: var(--ink);
+  border-color: rgba(63, 224, 255, 0.35);
+}
+
+.shop__tab.is-active {
+  color: var(--cyan);
+  background: rgba(63, 224, 255, 0.1);
+  border-color: rgba(63, 224, 255, 0.5);
+  text-shadow: 0 0 10px rgba(63, 224, 255, 0.4);
+}
+
+/* One `.shop__body` grid cell holds both panel-groups; `shop.ts` shows
+   exactly one via `[hidden]`, so this is only the shared layout the two
+   share rather than a second flex context. */
+.shop__panel-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 /* ---- one offer ------------------------------------------------------ */
@@ -2762,6 +2898,38 @@ kbd {
 /* Brass, as the harpoon count in the fishing card's chrome reads. */
 .offer--harpoon {
   --offer: var(--gold);
+}
+
+/* The eight offers `docs/SHOP_PLAN.md` added. Trim & Sheathing keeps the
+   default cyan rather than taking a ninth colour of its own -- not every
+   offer needs to be told apart by hue, and a raise to the ship's own top
+   speed is the one item here closest to "how the ship already handles". */
+.offer--anchor {
+  --offer: #4bf0a6;
+}
+
+.offer--overdrive {
+  --offer: var(--orange);
+}
+
+.offer--moonglass {
+  --offer: #8fd0ff;
+}
+
+.offer--chum {
+  --offer: #c98a3c;
+}
+
+.offer--barbed {
+  --offer: var(--red);
+}
+
+.offer--arclamp {
+  --offer: #ffe9a8;
+}
+
+.offer--governor {
+  --offer: #4bd8f0;
 }
 
 .offer__text {

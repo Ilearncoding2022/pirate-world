@@ -27,6 +27,8 @@ the first frame you are handed does not stutter.
 | Mouse wheel | Zoom the follow camera |
 | on-screen `[FISH]` | Open the fishing screen — start a session, or read the record |
 | on-screen `[SHOP]` | Open the chandlery — only alongside a berth |
+| on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds |
+| on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. One a second, ten rounds |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
@@ -223,36 +225,56 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   power runs at two percent of the reserve a second, so fifty seconds alongside
   fills the tank from empty — four times the best the sun ever manages. Berths
   are plotted on the radar, so the scope is also the fuel map.
-- **The chandlery.** Alongside a berth, `[SHOP]` sells the two things gold is
-  for. A **backup cell** at 1000 gold holds half a tank and is only ever drawn
-  on once the main reserve is flat — no berth and no sunrise will put it back,
-  so it is a consumable wearing a battery's clothes. The ship stows **two** of
-  them, bought one at a time at the same price, so a full backup is a whole
+- **The chandlery.** Alongside a berth, `[SHOP]` opens a two-tab panel — NAVIGATION
+  and FISHING. A **backup cell** at 1000 gold holds half a tank and is only ever
+  drawn on once the main reserve is flat — no berth and no sunrise will put it
+  back, so it is a consumable wearing a battery's clothes. The ship stows **two**
+  of them, bought one at a time at the same price, so a full backup is a whole
   tank's worth for 2000 gold. There is no bulk discount and no partial refill:
   a cell bought at 90% wastes the overflow, which is what stops the cheapest way
   to stay full being a purchase every time a berth goes past. **Five spare
   harpoons** at 500 gold go into a locker that holds a hundred; a session may
-  reach ten of them, and only after its own ten are gone. Both survive a
-  reload.
+  reach ten of them, and only after its own ten are gone.
+  The NAVIGATION tab also sells a **Sea Anchor** (400 gold, stows 5) — a
+  one-press brake that kills the ship's way in about a second and holds it a
+  few seconds more, which is enough to make a red boat's pure pursuit overshoot;
+  an **Overdrive Coil** (800 gold, stows 3) — 20 seconds at 16 knots for a flat,
+  heavy fuel bill, so outrunning a raider costs the fuel to get home; **Trim &
+  Sheathing** (three tiers, 2000/4000/8000 gold) — raises top speed from 10 to
+  13 knots, still short of either raider's 15; and a **Moonglass Array** (three
+  tiers, 3000/6000/12000 gold) — a slow trickle of charge at anchor overnight,
+  scaled by how full the moon is. The FISHING tab adds a **Chum Drum** (600
+  gold, stows 5) and **Barbed Heads** (700 gold, stows 5), both armed on the
+  fishing cover screen rather than sold as an immediate effect — the drum
+  biases one session's spawns to tier 3 and up, the heads cut tension drain on
+  the two hardest fish by 30% — plus an **Arc-Lamp Rig** (three tiers,
+  2000/4000/8000 gold) that stretches a session from 30 seconds to 48, and an
+  **Efficiency Governor** (three tiers, 2500/5000/9000 gold) that cuts a
+  session's own price from half a tank toward a quarter. Every stock and every
+  tier survives a reload.
 - **Fishing.** Anywhere on the globe, docked or not, day or night: press
   `[FISH]` and the world stops behind a cover screen with two ways in —
   START FISHING, and the FISHING RECORD. The screen knows where you are: tied
   up at a berth it wears the harbour, and out at sea it wears the open water.
-  Start a session and The ship comes to a dead halt, the sea and the
-  sky freeze behind a dimmed 9:16 card, and you get thirty seconds and ten
-  harpoon shots at five rows of fish. The harpoon swings under the boat and
-  fires straight along whatever angle it is at, so the whole game is timing.
-  The deeper the row the better the odds, and the two rarest tiers *fight* —
-  the line runs a tension bar the whole way in and you have to tap to keep it
-  from snapping. Twenty species in five tiers, each worth gold, each recorded
-  in a fish book that shows a silhouette and `UNKNOWN` until you have landed
-  one. The shallow water is thick — row 1 keeps a dozen fish alive and row 2
-  eight — and the top of the table is deliberately thin: a legendary is 2% of
-  even the deepest row's spawns, an epic 9%. Gold and the book survive a reload.
-  The session costs **half the reserve**, taken the moment it starts, and
-  START FISHING is dead below that — though the record beside it never is,
-  because a flat battery is exactly when you want to read it. The panels keep
-  charging while you fish, at the elevation the sun was frozen at. There is no refund for quitting early.
+  If you have bought a Chum Drum or a Barbed Heads bundle, two toggles above
+  START FISHING let you arm one or both for the session about to begin — armed
+  and unused is not lost, it resets to off next visit. Start a session and the
+  ship comes to a dead halt, the sea and the sky freeze behind a dimmed 9:16
+  card, and you get the session's own clock (thirty seconds, or more with an
+  Arc-Lamp Rig) and ten harpoon shots at five rows of fish. The harpoon swings
+  under the boat and fires straight along whatever angle it is at, so the whole
+  game is timing. The deeper the row the better the odds, and the two rarest
+  tiers *fight* — the line runs a tension bar the whole way in and you have to
+  tap to keep it from snapping. Twenty species in five tiers, each worth gold,
+  each recorded in a fish book that shows a silhouette and `UNKNOWN` until you
+  have landed one. The shallow water is thick — row 1 keeps a dozen fish alive
+  and row 2 eight — and the top of the table is deliberately thin: a legendary
+  is 2% of even the deepest row's spawns, an epic 9%. Gold and the book survive
+  a reload. The session costs **half the reserve** by default, less with an
+  Efficiency Governor, taken the moment it starts, and START FISHING is dead
+  below that — though the record beside it never is, because a flat battery is
+  exactly when you want to read it. The panels keep charging while you fish, at
+  the elevation the sun was frozen at. There is no refund for quitting early.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the
   world is built from. Under it, a dial shows where the ship stands in its own
