@@ -585,6 +585,37 @@ standing in it, where a storm is the darkened deck and thickened haze
 box threw streaks out past the planet's own limb, and rain falling through
 empty space is worse than no rain at all.
 
+### Two bugs a big box finds that a small one hides
+
+Both showed up as the same picture -- a raft of rain adrift from the ship, or
+a bright bank of it standing past the horizon -- in frames whose box numbers
+are correct in every particular. Both had been latent for as long as the
+module existed, and neither is reachable while the box is small.
+
+**The basis was a reflection.**  is a rotation only when
+x cross y is z, and the starboard vector was built as  cross ,
+which is minus that: determinant -1.  is defined for
+rotations only, and handed a reflection it returns an unnormalised quaternion
+-- for an axis-aligned case literally , a box at half scale
+and no rotation at all. A box centred on the hull and symmetric across its own
+x looks identical reflected, so nothing could see it; offsetting the box
+astern and stretching it differently across than along made the orientation
+observable for the first time.  records the same trap at its own
+, and got it right there.
+
+**The box is flat and the sea is not.** A point  units from the box centre
+sits  above the water. At 14 units across that is 0.12 and invisible;
+at the 50 the camera asks for it is **6.2**, against a box only 10 tall, so
+the far half lifts clean off the sea and the drops that were hidden under the
+water stop being hidden all at once.  bends the box back onto the
+globe with one paraboloid term in the vertex shader -- the second-order
+expansion of the sphere, right to a few centimetres over a box this size, for
+the cost of a dot product.
+
+The pattern worth keeping: **making a thing bigger is a way of testing it.**
+Neither bug was introduced by the camera scaling. The scaling only raised the
+box past the size at which each stopped being invisible.
+
 ### The box has four walls and only three of them are visible
 
 `RAIN_FADE` dissolves the drops toward a wall so the footprint has no edge to
