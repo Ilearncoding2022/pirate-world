@@ -103,7 +103,24 @@ export interface Hazards {
    * this frame's wind rather than last frame's. Before the ship because the
    * ship spends the push, and obeys the drive, this same frame.
    */
-  update(dt: number, ship: ShipState, energy: EnergyState, wind: WindState): void;
+  /**
+   * `stormOdds` multiplies each kind's spawn probability. 1 in fair weather,
+   * up to `1 + STORM_ODDS_GAIN` in a full storm, computed once in `main.ts`
+   * so the hazards and the raiders cannot end up on two different readings of
+   * the same sky.
+   *
+   * It multiplies the COMPARISON and nothing else. The draw itself stays
+   * unconditional -- see the note on `ROLL_ORDER` -- so a stormy run and a
+   * clear one consume the same numbers in the same order, and the seeded
+   * stream still replays.
+   */
+  update(
+    dt: number,
+    ship: ShipState,
+    energy: EnergyState,
+    wind: WindState,
+    stormOdds?: number,
+  ): void;
   /** Clears every hazard and returns to `free`. Called while the screen is black. */
   reset(): void;
   /** Raises one hazard now, at `centre`, travelling `north`. Tests and `?hazard=` only. */
@@ -1059,11 +1076,17 @@ export function createHazards(deps: HazardsDeps): Hazards {
    *
    * The unconditional draw is the whole point — see ROLL_ORDER.
    */
-  function roll(ship: ShipState, wind: WindState): void {
+  function roll(ship: ShipState, wind: WindState, stormOdds: number): void {
     for (const kind of ROLL_ORDER) {
       const draw = rng();
+      // The capacity rule and the storm multiplier are two different limits
+      // and both stand. `stormOdds` makes a hazard likelier to be rolled;
+      // CAPACITY caps how many can be on the water at once, so a storm fills
+      // the free slots faster without ever raising the ceiling. That is why
+      // tripling the odds buys well under three times the weather -- see
+      // `main.ts`'s own note on STORM_ODDS_GAIN.
       if (countOf(kind) >= CAPACITY[kind]) continue;
-      if (draw < ROLL_ODDS[kind]) trySpawn(kind, ship, wind);
+      if (draw < ROLL_ODDS[kind] * stormOdds) trySpawn(kind, ship, wind);
     }
   }
 
@@ -1334,7 +1357,13 @@ export function createHazards(deps: HazardsDeps): Hazards {
 
   /* ---- The frame ----------------------------------------------------- */
 
-  function update(dt: number, ship: ShipState, energy: EnergyState, wind: WindState): void {
+  function update(
+    dt: number,
+    ship: ShipState,
+    energy: EnergyState,
+    wind: WindState,
+    stormOdds = 1,
+  ): void {
     // A frame that advanced no time raises no water. Returning leaves the
     // last true state standing rather than rewriting it with a stale zero.
     if (!(dt > 0)) return;
@@ -1346,7 +1375,7 @@ export function createHazards(deps: HazardsDeps): Hazards {
     rollTimer += dt;
     while (rollTimer >= ROLL_PERIOD) {
       rollTimer -= ROLL_PERIOD;
-      roll(ship, wind);
+      roll(ship, wind, stormOdds);
     }
 
     // ---- Age, travel, and the coast ---------------------------------

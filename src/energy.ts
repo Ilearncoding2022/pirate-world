@@ -1,4 +1,4 @@
-import type { Dock, EnergyMode, EnergyState, ShipState, Towns } from './types';
+import type { Dock, EnergyMode, EnergyState, ShipState, Towns, WeatherState } from './types';
 import type { WorldEnv } from './env';
 import type { Battery } from './battery';
 import { MAX_FORWARD } from './ship';
@@ -26,6 +26,7 @@ export interface Energy {
     env: WorldEnv,
     overdriveActive?: boolean,
     moonNightFraction?: number,
+    weather?: WeatherState,
   ): void;
   /**
    * Takes `level` off the plant in one go, if it is there to take.
@@ -339,6 +340,57 @@ export const DEFEAT_KEEP = 0.1;
  */
 export const STALEMATE_COST = 0.25;
 
+/**
+ * How much of a storm's and a fog bank's darkness the panels lose.
+ *
+ * Harsh, and deliberately so: at 0.95 a full storm is 5% of a clear noon,
+ * which makes a storm a power problem rather than a change of scenery, and
+ * makes a berth worth running for. Fog costs half -- a bank is bright grey
+ * from above and the panels do see SOMETHING through it.
+ *
+ * ## Why this cannot strand a player
+ *
+ * The question a harsh number like this has to answer is whether a ship can
+ * be caught under permanent cloud with an empty tank and no way out. It
+ * cannot, and the bound comes from two places at once:
+ *
+ *  - A SQUALL is a subset of a wind event, and `wind.ts` caps an event at
+ *    `EVENT_MAX` = 30 s. Thirty seconds of no charge costs 15% of
+ *    `SOLAR_FULL_SECONDS`, and the lull that follows is guaranteed.
+ *  - A CELL is bounded twice over. Its own `strength` fades to nothing at the
+ *    end of a life of at most six minutes, and it drifts at 2 units per
+ *    second while a ship at rest does not, so even a dead hull is clear of a
+ *    40-unit storm within about 40 seconds of its centre passing.
+ *
+ * Against `IDLE_ENDURANCE` of 42 minutes, neither is close to dangerous. No
+ * floor is needed here, and adding one would only hide the two bounds above
+ * from whoever next changes them.
+ */
+const STORM_SOLAR_CUT = 0.95;
+const FOG_SOLAR_CUT = 0.5;
+
+/**
+ * The share of a clear sky's output below which the panel says OVERCAST
+ * rather than SOLAR CHARGING.
+ *
+ * Two thirds. It is a threshold on `solarKeep` and NOT on the rate, and that
+ * is the whole care in it: a low winter sun on a clear afternoon makes a
+ * small rate too, and calling that overcast would be a second lie in place of
+ * the first. This asks only "is the weather taking a third of what the sky
+ * would otherwise be worth", which is a question about the sky.
+ *
+ * At the cuts above, a storm passes it at a third of full strength and a fog
+ * bank at two thirds -- so the tag turns over while the weather is arriving
+ * rather than once it has already settled on the ship.
+ */
+const OVERCAST_KEEP = 2 / 3;
+
+/** The share of the panels' output the weather leaves. 1 in clear weather, exactly. */
+function solarKeep(weather?: WeatherState): number {
+  if (!weather) return 1;
+  return (1 - STORM_SOLAR_CUT * weather.storm) * (1 - FOG_SOLAR_CUT * weather.fog);
+}
+
 /* ------------------------------------------------------------------ */
 /* Energy                                                              */
 /* ------------------------------------------------------------------ */
@@ -383,6 +435,7 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     env: WorldEnv,
     overdriveActive = false,
     moonNightFraction = 0,
+    weather?: WeatherState,
   ): void {
     // A frame that advanced no time moves no charge. Returning leaves the last
     // true reading standing; falling through would rewrite `rate` to a 0 the
@@ -431,6 +484,14 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
      * split the panels and the shaders are kept out of.
      */
     let sunUp = false;
+    /**
+     * The share of a clear sky the weather left, for the mode ladder alone.
+     *
+     * `solarKeep` is called once and its answer kept, rather than asked again
+     * down there: two calls could disagree the frame the weather turns over,
+     * and the panel would name a cause the charge above did not come from.
+     */
+    let weatherKeep = 1;
     if (docked) {
       charge = DOCK_RATE;
     } else if (ship.speed === 0) {
@@ -445,7 +506,8 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
       // and the panels would light while the hull was still visibly making way.
       const sunElevation = ship.up.dot(env.sunDirection);
       sunUp = sunElevation > 0;
-      charge = SOLAR_PEAK * Math.max(0, sunElevation);
+      weatherKeep = solarKeep(weather);
+      charge = SOLAR_PEAK * Math.max(0, sunElevation) * weatherKeep;
 
       // A Moonglass Array's own tier fraction of SOLAR_PEAK, gated to hours
       // the sun contributes nothing at all -- see `moonglass.ts`. Added
@@ -453,7 +515,10 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
       // both be positive: `sunElevation` is non-positive exactly when this
       // fires.
       if (sunElevation <= 0 && moonNightFraction > 0) {
-        charge += SOLAR_PEAK * moonNightFraction * env.moonIllumination;
+        // Cut by the same factor: a Moonglass Array under a storm sees no
+        // moon either. Left uncut, a night storm would be a BETTER place to
+        // charge than a day one, which is a strange thing for a game to teach.
+        charge += SOLAR_PEAK * moonNightFraction * env.moonIllumination * solarKeep(weather);
       }
     }
 
@@ -526,7 +591,14 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     else if (overdriveActive) state.mode = 'overdrive';
     else if (ship.speed !== 0) state.mode = 'burn';
     else if (berth !== null) state.mode = 'mooring';
-    else if (charge > 0) state.mode = sunUp ? 'solar' : 'moon';
+    else if (charge > 0) {
+      // Sun, moon, or a sun the weather is standing in front of. The overcast
+      // rung sits inside the sunlit branch and not beside it, because a
+      // Moonglass Array under a storm is still charging off the moon -- it is
+      // cut by the same factor, and MOONGLASS is the cause either way.
+      if (!sunUp) state.mode = 'moon';
+      else state.mode = weatherKeep < OVERCAST_KEEP ? 'overcast' : 'solar';
+    }
     else state.mode = 'hotel';
   }
 

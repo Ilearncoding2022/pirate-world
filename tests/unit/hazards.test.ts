@@ -338,6 +338,79 @@ describe('hazards — a crest rolls its own width and its own life', () => {
     expect(longest).toBeGreaterThan(shortest * 2);
     expect(shortest).toBeLessThan(CREST_BOW_MAX * 0.25);
   });
+
+  it('raises the spawn rate under a full storm, by well under the tripled odds', () => {
+    const ship = stationaryShip();
+    const energy = energyState('drain');
+    const dt = 0.1;
+
+    // Count SPAWNS, not live hazards: the population is capped by CAPACITY,
+    // so a live count would saturate long before the odds showed.
+    function spawnsAt(stormOdds: number): number {
+      const hazards = makeHazards();
+      let spawns = 0;
+      let before = new Set(hazards.state.live);
+      for (let i = 0; i < 3000 / dt; i++) {
+        hazards.update(dt, ship, energy, wind, stormOdds);
+        for (const h of hazards.state.live) if (!before.has(h)) spawns++;
+        before = new Set(hazards.state.live);
+      }
+      return spawns;
+    }
+
+    const calm = spawnsAt(1);
+    const storm = spawnsAt(3);
+    expect(calm).toBeGreaterThan(0);
+    /*
+     * Tripled ODDS, but only about 1.24x the spawns, and the gap is worth
+     * recording rather than tuning away.
+     *
+     * `hazards.ts` rolls once a SECOND at P_WAVE = 0.2 and holds at most
+     * CAPACITY of each kind. A free slot therefore refills within a few
+     * seconds even in fair weather, so what limits the population is how long
+     * a hazard LIVES, not how often one is rolled for. Tripling a probability
+     * that was already saturating buys the difference between "almost
+     * immediately" and "immediately".
+     *
+     * Measured over 100 minutes of sim: 744 spawns at 1x against 923 at 3x, a
+     * ratio of 1.24. **It was 1.46 when this case was written**, against a
+     * sea that held one crest; v0.14.0 raised the odds and let two run at
+     * once, and a fuller sea saturates harder, so the same multiplier buys
+     * less of it. That is the capacity rule and the storm multiplier doing
+     * two different jobs -- the odds decide how fast a free slot refills and
+     * the capacity decides how many there are -- and both were kept
+     * deliberately when the weather branch was merged.
+     *
+     * The raiders, whose roll is once per TEN seconds and nowhere near
+     * saturation, get 2.72x from the same multiplier -- and only on the
+     * orange sort now; see `aiboats.test.ts`. All of these are checked
+     * because they are what the storm multiplier actually buys, and a reader
+     * who believed "tripled" of any of them would be wrong.
+     */
+    const ratio = storm / calm;
+    expect(ratio).toBeGreaterThan(1.12);
+    expect(ratio).toBeLessThan(1.45);
+  });
+
+  it('defaults stormOdds to 1, so a caller that knows no weather is unchanged', () => {
+    const ship = stationaryShip();
+    const energy = energyState('drain');
+    const dt = 0.1;
+
+    function trace(pass: (h: ReturnType<typeof makeHazards>) => void): string[] {
+      const hazards = makeHazards();
+      const out: string[] = [];
+      for (let i = 0; i < 600 / dt; i++) {
+        pass(hazards);
+        if (i % 50 === 0) out.push(hazards.state.live.map((h) => h.kind).join('|'));
+      }
+      return out;
+    }
+
+    expect(trace((h) => h.update(dt, ship, energy, wind))).toEqual(
+      trace((h) => h.update(dt, ship, energy, wind, 1)),
+    );
+  });
 });
 
 describe('hazards — the push', () => {

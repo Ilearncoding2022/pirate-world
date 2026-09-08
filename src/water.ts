@@ -10,6 +10,7 @@ import { seaWindStrength } from './wind';
 import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
+import { WEATHERMAP_GLSL, weatherMapUniforms } from './weathermap';
 import { SWELL_WAVELENGTH, WAVE_WAVELENGTH, CHOP_WAVELENGTH } from './waveconstants';
 import {
   WATER_UNIFORMS,
@@ -288,6 +289,10 @@ export function createWater(
     // Aerial perspective (`fogglsl.ts`'s contract): one shared object so the
     // water and the land (once Stream C lands) always agree on the fog.
     ...fogUniforms,
+    // The weather field, for `applyAerial` below. One texture, owned by
+    // `weathermap.ts`, merged the same way the fog colours are so every
+    // shader in a frame agrees about where the weather is.
+    ...weatherMapUniforms,
   };
   for (const plugin of plugins) {
     Object.assign(uniforms, plugin.uniforms);
@@ -310,6 +315,9 @@ export function createWater(
     ...WATER_UNIFORMS,
     NOISE_GLSL,
     HEIGHTMAP_GLSL,
+    // After the height map: `weatherAt` is built on its `dirToEquirect`
+    // rather than defining a second copy of the same projection.
+    WEATHERMAP_GLSL,
     FOG_GLSL,
     ...pluginDeclarations(plugins),
     ...waterWavefield(freq(SWELL_WAVELENGTH), freq(WAVE_WAVELENGTH), freq(CHOP_WAVELENGTH)),
@@ -329,7 +337,11 @@ export function createWater(
     ...pluginHooks(plugins, 'foam'),
     ...WATER_FOAM_TAIL,
     ...pluginHooks(plugins, 'colour'),
-    '  col = applyAerial(col, vWorldPos, cameraPosition, sunDir, uDayFactor);',
+    // Sampled at the FRAGMENT, not at the camera, which is what makes a fog
+    // bank visible from outside it: the sea inside the bank goes grey and
+    // flat while the water at the ship stays sharp.
+    '  vec2 wx = aerialWeather(weatherAt(uWeatherMap, normalize(vWorldPos)));',
+    '  col = applyAerial(col, vWorldPos, cameraPosition, sunDir, uDayFactor, wx);',
     ...WATER_OUTPUT,
   ].join('\n');
 

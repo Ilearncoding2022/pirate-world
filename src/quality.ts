@@ -69,6 +69,20 @@ export interface QualitySettings {
    * this table's pipeline numbers.
    */
   landFacetBlend: number;
+  /**
+   * How many raindrops `rain.ts` builds, and whether it is built at all.
+   *
+   * 0 means the module is ABSENT rather than idle, the same convention
+   * `reflectionSize` uses: on the low tier a storm is a dark sky, a dimmed
+   * key light and thick haze, which is most of what a storm is, and the one
+   * thing it is missing is the one thing that costs a draw call and a few
+   * thousand vertices every frame it rains.
+   *
+   * A pipeline number, like the rest of this table: a vertex count, not a
+   * distance or a frequency, so the world-scale/ship-scale split does not
+   * apply to it.
+   */
+  rainDrops: number;
 }
 
 /**
@@ -93,6 +107,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 0,
     landDetail: 64,
     landFacetBlend: 0.6,
+    rainDrops: 0,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -104,6 +119,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 1,
     landDetail: 80,
     landFacetBlend: 0.8,
+    rainDrops: 1500,
   },
   high: {
     pixelRatioCap: 2,
@@ -115,6 +131,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 2,
     landDetail: 96,
     landFacetBlend: 0.85,
+    rainDrops: 3000,
   },
 };
 
@@ -181,6 +198,28 @@ declare global {
        * the condition to wait for instead, per docs/TESTING.md rule 2.
        */
       hazards?: { kind: string; envelope: number }[];
+      /**
+       * The live weather: the envelopes at the ship, and every cell with its
+       * kind, radius, strength and distance from the hull. Refreshed every
+       * frame, on the same terms as `hazards` above and for the same reason
+       * -- `tests/shots.mjs` has to photograph a storm and cannot do it on a
+       * clock, and `?weather=` alone pins the sky at the ship without saying
+       * anything about where the cells got to.
+       *
+       * `encounters` counts the times the ship has crossed INTO a cell, and
+       * is the measurement `CELL_TARGET` was set by: sail a full day at
+       * `?debug` and read it. Anything near one an hour means the population
+       * is too thin, anything past one a minute too thick.
+       */
+      weather?: {
+        kind: string;
+        storm: number;
+        fog: number;
+        rain: number;
+        visibility: number;
+        encounters: number;
+        cells: { kind: string; radius: number; strength: number; distance: number }[];
+      };
     };
   }
 }

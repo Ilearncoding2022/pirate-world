@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { Terrain, Towns, ShipState, WindState } from './types';
+import type { CellsState, Terrain, Towns, ShipState, WeatherState, WindState } from './types';
 import type { WorldEnv } from './env';
 import { createHeightMap } from './heightmap';
 import type { HeightMap } from './heightmap';
@@ -19,6 +19,7 @@ import { createTowns } from './towns';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import { latLonToDir } from './geo';
 import { updateFog } from './fog';
+import { createWeatherMap } from './weathermap';
 import { createWaterPatch } from './waterpatch';
 import type { Quality } from './quality';
 
@@ -42,7 +43,15 @@ export interface Globe {
    * D): the wake map and the reflection cube both follow the ship, and
    * neither is available from `env` or `wind`.
    */
-  update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void;
+  update(
+    dt: number,
+    env: WorldEnv,
+    wind: WindState,
+    weather: WeatherState,
+    cells: CellsState,
+    ship: ShipState,
+    camera: THREE.Camera,
+  ): void;
 }
 
 /**
@@ -104,6 +113,10 @@ export function createGlobe(
   const land = createLand(terrain, heightMap, quality);
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
+  // Owned here rather than in `main.ts` because everything that reads it --
+  // the water, the land and the cloud deck -- is built here, and its one
+  // uniform is merged into their materials at construction.
+  const weatherMap = createWeatherMap();
   const sky = createSky();
   const celestial = createCelestial();
 
@@ -123,11 +136,25 @@ export function createGlobe(
     waterBodies,
     towns,
     waveOffsets: water.offsets,
-    update(dt: number, env: WorldEnv, wind: WindState, ship: ShipState, camera: THREE.Camera): void {
-      dayNight.update(dt, env);
+    update(
+      dt: number,
+      env: WorldEnv,
+      wind: WindState,
+      weather: WeatherState,
+      cells: CellsState,
+      ship: ShipState,
+      camera: THREE.Camera,
+    ): void {
+      // The weather reaches the LIGHTS here and `env` never: `daynight.ts`
+      // stays the sole writer of the environment.
+      dayNight.update(dt, env, weather);
       // Before water and land, so both shaders sample this frame's fog
       // colours rather than last frame's -- the same ordering rule as the sun.
-      updateFog(env);
+      updateFog(env, weather);
+      // And before anything that samples the map, for the same reason. It
+      // re-bakes at its own few-times-a-second rate and skips the work
+      // entirely while no cell is alive.
+      weatherMap.update(dt, cells);
       // Only the sea reads the weather. It is passed rather than pushed onto
       // `env` because `env.ts` names day/night as its sole writer, and a second
       // writer is a harder thing to give up than an extra argument. `ship` and
@@ -136,8 +163,8 @@ export function createGlobe(
       waterPatch.update(dt, ship);
       land.update(dt, env);
       cityLights.update(dt, env);
-      clouds.update(dt, env);
-      sky.update(dt, env);
+      clouds.update(dt, env, weather);
+      sky.update(dt, env, weather);
       // After dayNight.update, like every other consumer: it only draws what
       // the sun and moon vectors already say.
       celestial.update(dt, env);

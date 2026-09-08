@@ -421,7 +421,21 @@ const ARENA_SHADE_GLSL: string[] = [
   '  // GLOBE_RADIUS puts them where the same pair would sit on the globe, so',
   '  // the grazing-angle and altitude terms in the aerial contract mean here',
   '  // what they mean out there.',
-  '  col = applyAerial(col, P + ARENA_LIFT, cameraPosition + ARENA_LIFT, sun, uDayFactor);',
+  // The weather the fight is fought in is the weather it interrupted: the fog
+  // uniform block is `fog.ts`'s own, shared into this scene and last written
+  // before the contact froze the world, so `uRainHere` is the storm that was
+  // over the ship at the moment of the ram.
+  //
+  // The storm comes in and the fog does not, and the second half of that is
+  // deliberate rather than an omission. A storm's haze darkens the air, which
+  // an arena can carry -- a fight in foul weather should look like one. A
+  // bank whitens it, and this camera sits close over a twenty-unit ring: fog
+  // thick enough to read as fog would hide the enemy hull, and a fight the
+  // player cannot see is not a harder fight, it is a broken one. There is no
+  // map sample either, and there could not be: the arena is a flat sea
+  // nowhere on the globe, so an equirectangular lookup here would be
+  // meaningless.
+  '  col = applyAerial(col, P + ARENA_LIFT, cameraPosition + ARENA_LIFT, sun, uDayFactor, vec2(uRainHere, 0.0));',
   '  // A hand-written ShaderMaterial, so postfx.ts leaves it out of the',
   '  // self-encode patch and it does the linear to sRGB step itself.',
   '  gl_FragColor = vec4(pow(col, vec3(0.4545454545)), alpha);',

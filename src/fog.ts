@@ -1,5 +1,6 @@
 import { Color } from 'three';
 import type { WorldEnv } from './env';
+import type { WeatherState } from './types';
 import { GLOBE_RADIUS } from './geo';
 import { ATMOSPHERE_COLOR, skyHorizonColor } from './sky';
 
@@ -53,6 +54,51 @@ const FOG_SKY_WEIGHT = 0.25;
 const _horizon = new Color();
 
 /**
+ * The resting value of `uFogMax`, and the one `fogglsl.ts` documents at
+ * length as `FOG_MAX_AMOUNT`.
+ *
+ * It is a uniform now rather than a constant, but this is still the number
+ * every one of that comment's screenshots was taken against, and clear
+ * weather still renders at exactly it. A fog bank raises the ceiling toward
+ * `FOG_MAX_BANK`; nothing lowers it.
+ */
+const FOG_MAX_CLEAR = 0.15;
+
+/**
+ * The colour a fog bank fades toward.
+ *
+ * Deliberately not the sky's blue and not the atmosphere's. Fog is water in
+ * the air: it takes the colour OUT of what is behind it rather than tinting
+ * it, so the endpoint is a flat pale grey with barely any hue at all. A bank
+ * that faded toward `ATMOSPHERE_COLOR` would read as an unusually blue
+ * distance rather than as air you cannot see through.
+ *
+ * It is a CONSTANT uniform, and the two day/night colours above are left
+ * alone. That is not a detail: `battlescene.ts` merges this same
+ * `fogUniforms` object, and while a fight is up `globe.update` does not run,
+ * so anything written here during a storm would FREEZE into the arena's haze
+ * for the length of the fight. The greying happens per fragment inside
+ * `applyAerial` instead, weighted by a `wx` the arena passes as zero, so a
+ * fight looks like a fight whatever the sea outside is doing.
+ */
+const FOG_BANK_COLOR = new Color('#aeb4b8');
+
+/**
+ * The colour a STORM's haze fades toward, and it is nearly the opposite of
+ * the one above.
+ *
+ * Fog is bright: it is lit water in the air, and it whitens the distance. A
+ * downpour is dark, and fading one toward `FOG_BANK_COLOR` painted the whole
+ * ocean the flat pale sheet this file's own two warnings are about -- caught
+ * in a `?weather=storm` shot rather than by any test, which is exactly the
+ * failure mode those warnings describe and exactly why the shots exist.
+ *
+ * A dark slate with the sea's own blue in it, so a storm reads as the horizon
+ * closing in rather than as a fog bank with the lights off.
+ */
+const FOG_STORM_COLOR = new Color('#39434e');
+
+/**
  * Night fog colour, as a fraction of the atmosphere shell's own brightness.
  * A dimensionless multiplier -- there is no sun to tint the haze warm once it
  * is this dark, so night fog is just the atmosphere's hue turned most of the
@@ -73,6 +119,22 @@ export const fogUniforms = {
   uFogColorDay: { value: ATMOSPHERE_COLOR.clone() },
   uFogColorNight: { value: ATMOSPHERE_COLOR.clone().multiplyScalar(FOG_NIGHT_DARKEN) },
   uFogDensity: { value: FOG_DENSITY },
+  /**
+   * The ceiling `applyAerial` blends toward, which used to be a GLSL constant
+   * and is now a uniform so a fog bank can raise it. Its resting value is that
+   * constant, so a build with no weather in it renders what it always did.
+   */
+  uFogMax: { value: FOG_MAX_CLEAR },
+  /** The flat grey a bank fades toward. Constant; only its WEIGHT moves. */
+  uFogBankColor: { value: FOG_BANK_COLOR.clone() },
+  /** And the dark one a downpour does. See `FOG_STORM_COLOR`. */
+  uFogStormColor: { value: FOG_STORM_COLOR.clone() },
+  /**
+   * The at-ship squall, for the half of the weather that has no place on the
+   * map. Both 0 in clear weather, which is what makes every term above inert.
+   */
+  uFogHere: { value: 0 },
+  uRainHere: { value: 0 },
 };
 
 /**
@@ -91,10 +153,24 @@ export const fogUniforms = {
  * that warmth. The night endpoint is two constants multiplied together and
  * never changes, so it is set once at declaration above and left alone.
  */
-export function updateFog(env: WorldEnv): void {
+export function updateFog(env: WorldEnv, weather?: WeatherState): void {
   fogUniforms.uFogColorDay.value.copy(ATMOSPHERE_COLOR).lerp(env.sunColor, FOG_DAY_SUN_WEIGHT);
   // Then pulled most of the way to the sky's own horizon. `skyHorizonColor`
   // mixes the dome's two horizon constants by `env.dayFactor`, which is the
   // same number the dome's shader mixes them by, so these cannot drift apart.
   fogUniforms.uFogColorDay.value.lerp(skyHorizonColor(env, _horizon), FOG_SKY_WEIGHT);
+
+  /*
+   * The weather, and nothing else in this file, is optional.
+   *
+   * A caller that passes no weather -- every test that predates it, and the
+   * arena, which has weather of its own to not have -- leaves these three at
+   * the values that make every weather term in `applyAerial` multiply out to
+   * zero. That is the zero contract in its cheapest possible form: the
+   * uniforms exist, and in clear weather they are the numbers the shader had
+   * baked in before they were uniforms at all.
+   */
+  fogUniforms.uFogHere.value = weather ? weather.fog : 0;
+  fogUniforms.uRainHere.value = weather ? weather.rain : 0;
+  fogUniforms.uFogMax.value = FOG_MAX_CLEAR;
 }

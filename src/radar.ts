@@ -1,7 +1,16 @@
 import { Vector3 } from 'three';
 import { GLOBE_RADIUS } from './geo';
 import type { HeightMap } from './heightmap';
-import type { AiBoatState, HazardState, ShipState, Towns, WindState } from './types';
+import type {
+  AiBoatState,
+  CellsState,
+  HazardState,
+  ShipState,
+  Towns,
+  WeatherState,
+  WindState,
+} from './types';
+import type { Chart } from './chart';
 import type { WaterBodies } from './waterbodies';
 import { OCEAN_CAP } from './wind';
 
@@ -395,12 +404,20 @@ const COS_RADAR_RANGE = Math.cos(RADAR_RANGE / GLOBE_RADIUS);
 
 export interface Radar {
   /** Redraws the scope. Safe to call before the first terrain raster. */
+  /**
+   * `weather`, `cells` and `chart` are optional and all three absent is the
+   * instrument the game shipped with: the full range, everything drawn live,
+   * and nothing remembered.
+   */
   update(
     dt: number,
     ship: ShipState,
     wind: WindState,
     hazards: HazardState,
     boats?: AiBoatState,
+    weather?: WeatherState,
+    cells?: CellsState,
+    chart?: Chart,
   ): void;
 }
 
@@ -424,6 +441,37 @@ const GRASS = [58, 124, 66];
 const FOREST = [34, 84, 60];
 const ROCK = [82, 90, 104];
 const PEAK = [158, 160, 172];
+
+/**
+ * What a pixel the scope cannot currently SEE is painted.
+ *
+ * A flat, cold slate. Not black: black reads as a hole in the instrument
+ * rather than as murk, and the range rings still have to be legible over it
+ * so the player can see how much of their scope the weather has taken.
+ */
+const SCOPE_FOG = [10, 22, 30];
+
+/**
+ * How far toward that fog a REMEMBERED pixel is drawn.
+ *
+ * A coast the ship has charted but cannot presently see is still drawn --
+ * that is the entire point of a chart -- but drawn dim, so remembered and
+ * seen are never confused. 0.55 of the way to the fog colour is enough to
+ * separate them at a glance and not so far as to lose the coastline.
+ */
+const CHART_DIM = 0.55;
+
+/**
+ * Storm and fog cells on the plot, and how solid they are drawn.
+ *
+ * A desaturated slate-violet for a storm, a pale grey for a bank: both
+ * outside the terrain palette, for the same reason the dock's mint is, and
+ * both drawn as translucent fills rather than outlines because a cell is an
+ * area of weather rather than an object with an edge.
+ */
+const SCOPE_STORM = 'rgba(122, 132, 178, 0.28)';
+const SCOPE_FOGCELL = 'rgba(196, 204, 210, 0.24)';
+const SCOPE_STORM_EDGE = 'rgba(150, 160, 205, 0.55)';
 
 /**
  * Town icons, deliberately outside the terrain palette above.
@@ -529,6 +577,16 @@ export function createRadar(
    * orthonormal, so the result is already unit length.
    */
   const cells = RASTER * RASTER;
+  /**
+   * Each pixel's distance from the scope's centre, as a fraction of
+   * `RADAR_RANGE`.
+   *
+   * Precomputed with the projection tables beside it, and for the same
+   * reason: the visibility mask below is a comparison against this on every
+   * pixel of every raster, and `Math.hypot` on 37000 pixels ten times a
+   * second to recover a number the build loop already had would be waste.
+   */
+  const kRadius = new Float32Array(cells);
   const kUp = new Float32Array(cells);
   const kFwd = new Float32Array(cells);
   const kStb = new Float32Array(cells);
@@ -543,6 +601,7 @@ export function createRadar(
       const i = py * RASTER + px;
       if (r > 1) continue;
       inScope[i] = 1;
+      kRadius[i] = r;
       const theta = (r * RADAR_RANGE) / GLOBE_RADIUS;
       // Bearing clockwise from the bow: +x on the scope is starboard.
       const bearing = Math.atan2(nx, ny);
@@ -622,9 +681,22 @@ export function createRadar(
    * Returns false when the point is outside the scope's angular radius, so a
    * crest with one end over the horizon is simply not drawn from that end.
    */
+  /**
+   * The live frame's own cull, in cosine, so `projectLive` can compare
+   * against it without a trig call per mark.
+   *
+   * Rewritten once a frame in `update` from `WeatherState.visibility`, and
+   * exactly `COS_RADAR_RANGE` in clear weather -- so with no weather threaded
+   * through, every mark on the scope is culled precisely where it always was.
+   */
+  let cosSight = COS_RADAR_RANGE;
+
   function projectLive(d: Vector3): boolean {
     const c = hUp.x * d.x + hUp.y * d.y + hUp.z * d.z;
-    if (c < COS_RADAR_RANGE) return false;
+    // Hazards and raiders are LIVE things: seen or not seen, and never
+    // remembered. The chart holds coastline and harbours, which do not move;
+    // a crest the ship saw a minute ago is not information, it is a ghost.
+    if (c < cosSight) return false;
     const cc = c > 1 ? 1 : c;
     const sinT = Math.sqrt(1 - cc * cc);
     const r = (Math.acos(cc) * GLOBE_RADIUS) / RADAR_RANGE;
@@ -643,13 +715,34 @@ export function createRadar(
   let spin = 0;
   let cssSize = 0;
 
-  function raster(): void {
+  /**
+   * Rasterise the plot.
+   *
+   * Three cases per pixel, and the order they are tested in is the order they
+   * cost:
+   *
+   *  - Beyond the current visibility and never charted: `SCOPE_FOG`, and no
+   *    height-map read at all. In thick weather that is two thirds of the
+   *    scope skipped, which is the one place the mask pays for itself.
+   *  - Beyond visibility but charted: drawn, then dimmed toward the fog.
+   *    Remembered, not seen.
+   *  - Inside visibility: drawn as it always was.
+   *
+   * The scope's GEOMETRY does not change with the weather. `RADAR_RANGE` and
+   * the projection tables built from it are fixed, and the range rings still
+   * draw at the radii they always did; what shrinks is how much of that
+   * geometry has anything in it. Re-ranging the instrument instead would mean
+   * rebuilding those tables whenever the fog thickened, and would leave the
+   * player without the one cue that tells them how much they have lost.
+   */
+  function raster(visibility: number, chart: Chart | null): void {
     if (!plotCtx || !image || !frameValid) return;
 
     const up = pUp;
     const fwd = pFwd;
     const starboard = pStb;
     const data = image.data;
+    const seeable = visibility / RADAR_RANGE;
 
     for (let i = 0; i < cells; i++) {
       const o = i * 4;
@@ -665,10 +758,27 @@ export function createRadar(
         up.y * a + fwd.y * b + starboard.y * c,
         up.z * a + fwd.z * b + starboard.z * c,
       );
+
+      const seen = kRadius[i] <= seeable;
+      if (!seen && chart !== null && !chart.discovered(dir)) {
+        data[o] = SCOPE_FOG[0];
+        data[o + 1] = SCOPE_FOG[1];
+        data[o + 2] = SCOPE_FOG[2];
+        data[o + 3] = 255;
+        continue;
+      }
+
       surfaceColor(heightMap.sample(dir), seaLevel, waterBodies.sample(dir), rgb);
-      data[o] = rgb[0];
-      data[o + 1] = rgb[1];
-      data[o + 2] = rgb[2];
+      if (!seen) {
+        // Charted, but not in sight: the same coastline, turned down.
+        data[o] = rgb[0] + (SCOPE_FOG[0] - rgb[0]) * CHART_DIM;
+        data[o + 1] = rgb[1] + (SCOPE_FOG[1] - rgb[1]) * CHART_DIM;
+        data[o + 2] = rgb[2] + (SCOPE_FOG[2] - rgb[2]) * CHART_DIM;
+      } else {
+        data[o] = rgb[0];
+        data[o + 1] = rgb[1];
+        data[o + 2] = rgb[2];
+      }
       data[o + 3] = 255;
     }
     plotCtx.putImageData(image, 0, 0);
@@ -692,16 +802,36 @@ export function createRadar(
     wind: WindState,
     hazards: HazardState,
     boats?: AiBoatState,
+    weather?: WeatherState,
+    cells?: CellsState,
+    chart?: Chart,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
+
+    // How far the scope can see this frame. Absent weather is clear weather,
+    // so a caller that knows nothing about it gets the whole instrument.
+    const visibility = weather ? weather.visibility : RADAR_RANGE;
+    const theChart = chart ?? null;
+    cosSight = Math.cos(visibility / GLOBE_RADIUS);
 
     sinceRaster += dt;
     if (sinceRaster >= 1 / RASTER_HZ) {
       sinceRaster = 0;
       captureFrame(ship);
-      raster();
+      raster(visibility, theChart);
+      /*
+       * And chart exactly the disc that was just drawn live.
+       *
+       * Here rather than in the frame loop because this is the one place that
+       * knows both numbers -- what the scope can see, and when it last looked
+       * -- and it already runs at the right rate. Tying discovery to
+       * visibility is also what makes fog cost something lasting: a coast
+       * passed in thick weather is not charted, and has to be passed again.
+       */
+      if (theChart !== null) theChart.reveal(ship.position, visibility);
     }
+    if (theChart !== null) theChart.tick(dt);
 
     sweep = (sweep + (dt * Math.PI * 2) / SWEEP_PERIOD) % (Math.PI * 2);
     spin = (spin + dt * MAELSTROM_SPIN) % (Math.PI * 2);
@@ -794,6 +924,10 @@ export function createRadar(
       ctx.lineWidth = 1 / R;
 
       const list = towns.all;
+      // The same cull the raster's mask uses, in the cosine the town loop
+      // already compares against, so the icons and the plot under them agree
+      // about where sight ends.
+      const cosVisibility = Math.cos(visibility / GLOBE_RADIUS);
       for (let i = 0; i < list.length; i++) {
         const town = list[i];
         const d = town.dir;
@@ -802,6 +936,14 @@ export function createRadar(
         // make sixty times a second.
         const c = pUp.x * d.x + pUp.y * d.y + pUp.z * d.z;
         if (c < COS_RADAR_RANGE) continue;
+        /*
+         * Beyond what the scope can presently see, a harbour is drawn only if
+         * it has been charted -- and then out to the full range, exactly as
+         * before. A remembered harbour is most of the point of keeping a
+         * chart at all: fog should make a coast hard to READ, not make the
+         * berth you were running for cease to exist.
+         */
+        if (c < cosVisibility && (theChart === null || !theChart.discovered(d))) continue;
 
         // Rounding can push a unit-vector dot fractionally over 1, and acos of
         // that is NaN -- which would silently drop the icon, not crash.
@@ -877,6 +1019,68 @@ export function createRadar(
       hStb.normalize();
       hUp.copy(ship.up);
       hFwd.copy(ship.forward);
+    }
+
+    /*
+     * Weather cells, drawn UNDER the hazards and the raiders and over the
+     * plot.
+     *
+     * From the live frame, like everything else that moves, and for the same
+     * reason: a cell drifts and a raster is up to a tenth of a second old.
+     *
+     * A cell is drawn as a filled disc of `radius * strength`, so it grows on
+     * the instrument over the same half-minute it grows in the sky, and it is
+     * culled on `RADAR_RANGE + radius` rather than on the range alone -- a
+     * bank whose centre is off the scope but whose edge is on it is exactly
+     * the case the player most needs to see.
+     *
+     * It is masked by visibility like everything else: you cannot see a
+     * second storm through the first one.
+     */
+    if (cells !== undefined && cells.live.length > 0 && liveFrame) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.clip();
+      for (const cell of cells.live) {
+        if (cell.strength <= 0) continue;
+        const c = hUp.x * cell.centre.x + hUp.y * cell.centre.y + hUp.z * cell.centre.z;
+        const cc = c > 1 ? 1 : c < -1 ? -1 : c;
+        const distance = Math.acos(cc) * GLOBE_RADIUS;
+        if (distance > visibility + cell.radius) continue;
+
+        const sinT = Math.sqrt(1 - cc * cc);
+        const r = distance / RADAR_RANGE;
+        const k = sinT < 1e-6 ? 0 : r / sinT;
+        const f = hFwd.x * cell.centre.x + hFwd.y * cell.centre.y + hFwd.z * cell.centre.z;
+        const st = hStb.x * cell.centre.x + hStb.y * cell.centre.y + hStb.z * cell.centre.z;
+        const cx = k * st;
+        const cy = -k * f;
+        const radius = (cell.radius * cell.strength) / RADAR_RANGE;
+        if (!(radius > 0)) continue;
+
+        ctx.fillStyle = cell.kind === 'fog' ? SCOPE_FOGCELL : SCOPE_STORM;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // A lightning cell gets a mark at its centre. It is the one piece of
+        // information on the scope that the sky cannot give the player from
+        // outside: a storm and a storm with lightning in it look alike at
+        // forty units, and only one of them is worth going round.
+        if (cell.kind === 'storm' && cell.lightning) {
+          const z = Math.min(radius * 0.45, 0.09);
+          ctx.strokeStyle = SCOPE_STORM_EDGE;
+          ctx.lineWidth = 1.6 / R;
+          ctx.beginPath();
+          ctx.moveTo(cx - z * 0.5, cy - z);
+          ctx.lineTo(cx + z * 0.2, cy - z * 0.15);
+          ctx.lineTo(cx - z * 0.2, cy + z * 0.15);
+          ctx.lineTo(cx + z * 0.5, cy + z);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
     }
 
     if (hazards.live.length > 0) {

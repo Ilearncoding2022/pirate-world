@@ -2,10 +2,14 @@ import * as THREE from 'three';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS } from './geo';
 import { LAYER_REFLECTED } from './layers';
+import { HEIGHTMAP_GLSL } from './heightmap';
+import { WEATHERMAP_GLSL, weatherMapUniforms } from './weathermap';
+import type { WeatherState } from './types';
 
 export interface Clouds {
   object: THREE.Object3D;
-  update(dt: number, env: WorldEnv): void;
+  /** `weather` is optional and absent means clear: see `update` below. */
+  update(dt: number, env: WorldEnv, weather?: WeatherState): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -194,9 +198,21 @@ const FRAGMENT_SHADER = [
   'uniform float uSilver;',
   'uniform float uFadeNear;',
   'uniform float uFadeFar;',
+  '// The weather at the ship, and the weather everywhere. A squall has no',
+  '// place and arrives as the two scalars; a cell has one and arrives as the',
+  '// map, sampled per pixel so a storm forty units away is a black mass on',
+  '// the horizon rather than a change to the sky overhead.',
+  'uniform float uCover;',
+  'uniform float uGloom;',
+  'uniform float uFlash;',
+  'uniform float uFlashLocal;',
+  // `uWeatherMap` is declared by WEATHERMAP_GLSL below, the way FOG_GLSL
+  // declares the fog colours: declaring it here too fails to compile.
   'varying vec3 vObjDir;',
   'varying vec3 vWorldPos;',
   SIMPLEX_GLSL,
+  HEIGHTMAP_GLSL,
+  WEATHERMAP_GLSL,
   // Each octave slides through the noise field along its own direction. That
   // decorrelates the layers over time, so banks grow and dissolve instead of
   // the whole pattern sliding past as one rigid painted sphere.
@@ -214,6 +230,22 @@ const FRAGMENT_SHADER = [
   // Very low frequency, so a whole weather system agrees on how tall it builds
   // rather than towers and sheets interleaving every few kilometres.
   'const vec3 TOWER_DRIFT = vec3(0.0031, -0.0024, 0.0027);',
+  '// How far a full storm lowers the coverage threshold.',
+  '//',
+  '// `uThreshold` is 0.5127 and its comment records the measurement behind',
+  '// it: over a uniform sample of the sphere at three times of day it covers',
+  '// 25.9% of the sky. Subtracting 0.16 takes the same field to about 80%,',
+  '// which is a sky with weather in it rather than a sky with a lid on it --',
+  '// the gaps a real storm leaves are most of what makes the light under one',
+  '// interesting. Retune it by the same measurement that comment describes.',
+  'const float COVER_GAIN = 0.16;',
+  '// How far a full storm pulls the two lit colours toward the storm grey,',
+  '// and how far a flash lifts the underside toward white.',
+  'const float GLOOM_MIX = 0.8;',
+  'const float FLASH_CLOUD = 0.6;',
+  '// The colour a storm cloud is. Not black: a storm cloud lit from above is',
+  '// a dark blue-grey, and true black reads as a hole cut in the sky.',
+  'const vec3 STORM_CLOUD = vec3(0.227, 0.259, 0.314);',
   'void main() {',
   '  vec3 nWorld = normalize(vWorldPos);',
   '  vec3 viewDir = normalize(vWorldPos - cameraPosition);',
@@ -236,6 +268,16 @@ const FRAGMENT_SHADER = [
   // extent, tapering into domes. uAltitude is 0 on the base slice, so the
   // silhouette from above still measures the coverage the base was tuned for.
   '  float thrBase = uThreshold + uBand * sin(nWorld.y * 6.5 + 0.7);',
+  '  // The weather here. One texture fetch, whatever the cell population is.',
+  '  vec3 wx = weatherAt(uWeatherMap, nWorld);',
+  '  float cover = max(uCover, wx.r);',
+  '  float gloom = max(uGloom, wx.r);',
+  '  // Lowering the threshold is what makes a storm overcast: the same field,',
+  '  // asked for less before it counts as cloud. It is deliberately applied',
+  '  // to `thrBase` and therefore BEFORE the early-out below, so the sky over',
+  '  // a cell genuinely fills in rather than merely darkening the banks that',
+  '  // happened to be there already.',
+  '  thrBase -= cover * COVER_GAIN;',
   // A tower field decides how tall the weather builds *here*, and altitude is
   // divided by it, so each slice asks "how far up its own bank am I" rather
   // than "how far up the deck". One field then gives flat sheets in one place
@@ -299,7 +341,13 @@ const FRAGMENT_SHADER = [
   '  float shadow = clamp(-relief, 0.0, 1.0) * mix(0.45, 1.0, deep);',
   // Colour: warm lit tops, blue-grey lee sides, soft terminator, dark night.
   '  vec3 sunTint = mix(vec3(1.0), uSunColor, 0.42);',
-  '  vec3 litCol = mix(uDayColor, uShadowColor, shadow * uShadowMix) * sunTint;',
+  '  // The gloom lands on both endpoints BEFORE the shadow mixes between',
+  '  // them, so a storm darkens the whole cloud rather than deepening its',
+  '  // shadows -- an overcast sky is uniformly grey, and it is the lack of',
+  '  // contrast that reads as weather.',
+  '  vec3 dayCol = mix(uDayColor, STORM_CLOUD, gloom * GLOOM_MIX);',
+  '  vec3 shadowCol = mix(uShadowColor, STORM_CLOUD, gloom * GLOOM_MIX);',
+  '  vec3 litCol = mix(dayCol, shadowCol, shadow * uShadowMix) * sunTint;',
   '  float twilight = 1.0 - smoothstep(0.0, 0.30, abs(sunDot));',
   '  litCol = mix(litCol, litCol * uSunsetColor * 1.12, twilight * 0.45);',
   '  float lit = smoothstep(-0.26, 0.20, sunDot);',
@@ -310,6 +358,13 @@ const FRAGMENT_SHADER = [
   '  float edge = clamp(cov * (1.0 - deep) * 1.6, 0.0, 1.0);',
   '  float forward = clamp(dot(viewDir, uSunDirection), 0.0, 1.0);',
   '  col += uSunColor * (pow(forward, 6.0) * edge * lit * uSilver);',
+  '  // Lightning, lighting its own cloud. `uFlashLocal` is 1 when the strike',
+  '  // came from a squall -- which has no place, so it lights the whole deck',
+  '  // -- and 0 when it came from a cell, in which case `wx.b` says which',
+  '  // part of the sky is allowed to be lit. Without that, a strike inside a',
+  '  // storm on the horizon would flash the clear sky overhead too.',
+  '  float flashHere = uFlash * max(uFlashLocal, wx.b);',
+  '  col = mix(col, vec3(1.0), clamp(flashHere * FLASH_CLOUD, 0.0, 1.0));',
   // Alpha. Thicker seen edge on, and faded out close to the camera so the
   // layer never fogs the chase view around the ship.
   '  float graze = 1.0 - facing;',
@@ -428,6 +483,17 @@ export function createClouds(): Clouds {
     uGraze: { value: 2.5 },
     uSilver: { value: 0.5 },
     /** Camera distance fade, world units. Keeps the layer off the chase view. */
+    ...weatherMapUniforms,
+    /**
+     * The at-ship weather. Zero in fair weather, which is what makes every
+     * term above inert: `max(0, wx)` is the map alone, and an empty map is
+     * zero everywhere, so the deck renders exactly what it always did.
+     */
+    uCover: { value: 0 },
+    uGloom: { value: 0 },
+    uFlash: { value: 0 },
+    /** 1 when the live flash belongs to a squall rather than to a cell. */
+    uFlashLocal: { value: 0 },
     uFadeNear: { value: 30 },
     uFadeFar: { value: 85 },
   };
@@ -467,10 +533,16 @@ export function createClouds(): Clouds {
 
   return {
     object,
-    update(_dt: number, env: WorldEnv): void {
+    update(_dt: number, env: WorldEnv, weather?: WeatherState): void {
       uniforms.uTime.value = env.elapsed;
       uniforms.uSunDirection.value.copy(env.sunDirection);
       uniforms.uSunColor.value.copy(env.sunColor);
+      // Optional, and absent means clear: a caller that knows nothing about
+      // weather gets the deck the game shipped with.
+      uniforms.uCover.value = weather ? weather.cover : 0;
+      uniforms.uGloom.value = weather ? weather.storm : 0;
+      uniforms.uFlash.value = weather ? weather.flash : 0;
+      uniforms.uFlashLocal.value = weather && weather.flashLocal ? 1 : 0;
       // Bulk drift, derived from elapsed so it never accumulates float error.
       object.setRotationFromAxisAngle(SPIN_AXIS, env.elapsed * SPIN_RATE);
     },

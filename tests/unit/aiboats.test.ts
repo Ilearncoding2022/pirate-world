@@ -316,6 +316,109 @@ describe('aiboats: pursuit', () => {
   });
 });
 
+describe('aiboats: the storm multiplier', () => {
+  it('raises nearly three times as many raiders under a full storm', () => {
+    const ship = stationaryShip();
+    const energy = energyState();
+    const dt = 0.1;
+
+    // Count SPAWNS rather than live boats: the population is capped at one of
+    // each kind, so a live count saturates before the odds show through.
+    function spawnsAt(stormOdds: number): number {
+      const boats = makeBoats(REAL_WORLD);
+      let spawns = 0;
+      let before = new Set(boats.state.live);
+      for (let i = 0; i < 6000 / dt; i++) {
+        boats.update(dt, ship, energy, NO_HAZARDS, false, stormOdds);
+        for (const b of boats.state.live) if (!before.has(b)) spawns++;
+        before = new Set(boats.state.live);
+      }
+      return spawns;
+    }
+
+    const calm = spawnsAt(1);
+    const storm = spawnsAt(3);
+    expect(calm).toBeGreaterThan(0);
+    /*
+     * Close to the tripling the multiplier asks for, and the reason it lands
+     * so much nearer 3 than `hazards.ts` does is the roll period. The raiders
+     * roll once every TEN seconds, nowhere near saturating their
+     * one-of-each-kind cap, so tripling the probability very nearly triples
+     * the encounters. The hazards roll every second and were already
+     * saturated; they get 1.24. See the matching case in `hazards.test.ts`.
+     *
+     * Almost all of this is ORANGE, and that is not an accident of the
+     * seed: red is exempt from the multiplier (see the case below) and its
+     * own odds are 0.032 against orange's 0.24, so the fleet a storm brings
+     * is overwhelmingly the wandering sort. The ratio is barely moved by the
+     * exemption for exactly that reason.
+     */
+    const ratio = storm / calm;
+    expect(ratio).toBeGreaterThan(2.2);
+    expect(ratio).toBeLessThan(3.2);
+  });
+
+  it('multiplies the wandering raider and never the aggressive one', () => {
+    const ship = stationaryShip();
+    const energy = energyState();
+    const dt = 0.1;
+
+    /** Spawns of each colour over 100 minutes of sim at this multiplier. */
+    function spawnsAt(stormOdds: number): Record<AiBoatKind, number> {
+      const boats = makeBoats(REAL_WORLD);
+      const out: Record<AiBoatKind, number> = { red: 0, orange: 0 };
+      let before = new Set(boats.state.live);
+      for (let i = 0; i < 6000 / dt; i++) {
+        boats.update(dt, ship, energy, NO_HAZARDS, false, stormOdds);
+        for (const b of boats.state.live) if (!before.has(b)) out[b.kind]++;
+        before = new Set(boats.state.live);
+      }
+      return out;
+    }
+
+    const calm = spawnsAt(1);
+    const storm = spawnsAt(3);
+
+    // Orange takes the weather: the roll is nowhere near saturation, so a
+    // tripled probability shows up almost in full.
+    expect(storm.orange).toBeGreaterThan(calm.orange * 2);
+
+    /*
+     * Red does not. The two counts are not asserted EQUAL, and the reason is
+     * worth keeping: `trySpawn` draws its placement from the same seeded
+     * stream, so a storm that spawns more orange boats consumes more numbers
+     * and every later red draw lands at a different offset. Red's rate is
+     * unchanged; the particular boats are not the same boats. So this is a
+     * band around the calm count rather than an identity, and it is a band
+     * the tripling would blow straight through -- 3x on a count this small
+     * is far outside it.
+     */
+    expect(calm.red).toBeGreaterThan(4);
+    expect(storm.red).toBeGreaterThan(calm.red * 0.5);
+    expect(storm.red).toBeLessThan(calm.red * 1.6);
+  });
+
+  it('defaults stormOdds to 1, so a caller that knows no weather is unchanged', () => {
+    const ship = stationaryShip();
+    const energy = energyState();
+    const dt = 0.1;
+
+    function trace(pass: (b: ReturnType<typeof makeBoats>) => void): string[] {
+      const boats = makeBoats(REAL_WORLD);
+      const out: string[] = [];
+      for (let i = 0; i < 1200 / dt; i++) {
+        pass(boats);
+        if (i % 100 === 0) out.push(boats.state.live.map((b) => b.kind).join('|'));
+      }
+      return out;
+    }
+
+    expect(trace((b) => b.update(dt, ship, energy, NO_HAZARDS, false))).toEqual(
+      trace((b) => b.update(dt, ship, energy, NO_HAZARDS, false, 1)),
+    );
+  });
+});
+
 describe('aiboats: the coast', () => {
   it('removes a boat whose centre steps onto land', () => {
     // Land east of 30 degrees of longitude, open water west of it, so a boat

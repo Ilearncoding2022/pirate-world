@@ -160,6 +160,34 @@ if (/[?&]hazard=/.test(QUERY)) {
   }
 }
 
+/*
+ * `?cell=` is the same problem in a slower form, and gets the same answer.
+ *
+ * A forced weather cell is released on the same three simulated seconds as a
+ * hazard, so on the software rasteriser it does not exist for the first half
+ * minute of wall clock -- and a shot taken before then is a photograph of
+ * ordinary weather with a misleading filename. The cell is published on the
+ * same debug hook (see `quality.ts`), so wait for it to actually be there and
+ * to have grown into something worth looking at.
+ *
+ * `strength > 0.4` rather than the hazard's 0.85: a cell is meant to be shot
+ * from OUTSIDE, on the horizon, and it is at its most legible while it is
+ * still a mass over there rather than a sky the camera is inside.
+ */
+if (/[?&]cell=/.test(QUERY)) {
+  console.log(`   waiting for the forced cell to form (up to ${Math.round(HAZARD_TIMEOUT / 1000)} s)...`);
+  try {
+    await page.waitForFunction(
+      () => (globalThis.window.__pirateWorld?.weather?.cells ?? []).some((c) => c.strength > 0.4),
+      null,
+      { timeout: HAZARD_TIMEOUT, polling: 250 },
+    );
+    await shot('cell');
+  } catch {
+    console.log('   (no cell formed in time; raise --hazard-timeout. Carrying on)');
+  }
+}
+
 await page.keyboard.down('KeyW');
 await page.waitForTimeout(4000);
 await shot('sailing');

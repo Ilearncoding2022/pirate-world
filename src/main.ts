@@ -14,9 +14,14 @@ import { createEnv } from './env';
 import { elapsedAtLocalTime } from './daynight';
 import { createEnergy } from './energy';
 import { createWind } from './wind';
+import { createWeatherCells } from './weathercells';
+import { createWeather } from './weather';
+import type { WeatherPin } from './weather';
+import { createRain } from './rain';
+import { createChart } from './chart';
 import { createDocks } from './docks';
 import { createPostFx } from './postfx';
-import { createRecords } from './save';
+import { createRecords, loadChart, writeChart } from './save';
 import { createFishing } from './fishing';
 import { createFishBook } from './fishbook';
 import { createFishCover } from './fishcover';
@@ -209,6 +214,45 @@ async function startGame(): Promise<void> {
   const wind = createWind(terrain, globe.heightMap);
 
   /*
+   * The weather, in its two halves.
+   *
+   * `weathercells.ts` is the drifting population -- storms and fog banks with
+   * a place, a size and a bearing, which the player can see coming and sail
+   * around. `weather.ts` rolls squalls off the wind's own phases and combines
+   * the two into the one `WeatherState` everything downstream reads.
+   *
+   * Both are built here, after the globe, because the cells probe the same
+   * height field the wind and the scope do -- so a fog bank refused for being
+   * over land is refused against the coastline the ship actually collides
+   * with.
+   *
+   * `?weather=` pins the envelopes and switches the squall roll off, for
+   * `npm run shots` and for the owner's eye. Cells keep running under a pin,
+   * so `?weather=storm&cell=fog` is a bank seen from inside a storm. Read
+   * through URLSearchParams on the same terms as `?quality=` and `?hazard=`.
+   */
+  const weatherCells = createWeatherCells(terrain, globe.heightMap);
+  const weatherQuery = new URLSearchParams(window.location.search).get('weather');
+  const WEATHER_PINS = ['clear', 'overcast', 'rain', 'storm', 'lightning', 'fog'];
+  const weatherPin: WeatherPin | null = WEATHER_PINS.includes(weatherQuery ?? '')
+    ? (weatherQuery as WeatherPin)
+    : null;
+  const weather = createWeather(undefined, weatherPin);
+
+  /*
+   * The chart: what the ship has seen, and therefore what the scope may draw.
+   *
+   * Loaded from its OWN storage key rather than from `SaveData` -- see
+   * `save.ts`'s comment on `CHART_KEY` for why the two cadences cannot share
+   * a file -- and persisted on its own throttle rather than on the records'
+   * subscription, for the same reason. `pagehide` catches the last few
+   * seconds a throttle would otherwise lose.
+   */
+  const chart = createChart(undefined, undefined, loadChart());
+  chart.onChange(() => writeChart(chart.encode()));
+  window.addEventListener('pagehide', () => writeChart(chart.encode()));
+
+  /*
    * Rough water: the strong waves that shove the hull and the maelstroms that
    * eat it. Built here because it needs the world -- the height field it
    * spawns over, the reachable-water mask that keeps a crest out of a lake,
@@ -300,6 +344,17 @@ async function startGame(): Promise<void> {
   await ship.ready;
 
   await loading.step(0.90, 'LIGHTING THE INSTRUMENTS');
+
+  /*
+   * Rain, at the ship.
+   *
+   * `quality.rainDrops` is 0 on the low tier, where the module is ABSENT
+   * rather than idle -- the same convention `reflection.ts` follows for its
+   * cube. A low-tier storm is a dark sky, a dimmed key light and thick haze,
+   * which is most of a storm and none of the per-frame cost.
+   */
+  const rain = quality.rainDrops > 0 ? createRain(quality.rainDrops) : null;
+  if (rain) scene.add(rain.object);
 
   const hud = createHud(records.wallet, records.seaAnchor, records.overdrive);
   const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
@@ -404,12 +459,41 @@ async function startGame(): Promise<void> {
   /** Seconds of sailing before either fires. The same beat the forced hazard waits. */
   let boatCountdown = 3;
   /**
-   * `?calm=1`: every fight this session plays on a flat sea. Read once, into
-   * the same `BattleOptions` both `createBattleSim` call sites are handed —
-   * there is nothing to plumb onto `state` for this, since the scene and the
-   * strip already read whatever the sim hands them.
+   * What sea a fight is fought on.
+   *
+   * `?calm=1` forces a flat one and `?rough=1` forces the crests, shoals and
+   * flotsam; between them, the SKY decides. A fight begun in a storm gets
+   * `ROUGH`, one begun in fair weather gets `CALM`, and that is the only way
+   * the weather reaches the arena at all -- there is no rain in there, no
+   * haze and no lightning, because the arena is a second scene with its own
+   * flat sea nowhere on the globe.
+   *
+   * It is decided ONCE, at the moment the cover card opens, and held for the
+   * length of the fight: `battleSeaFor` below is called from the one path
+   * into a fight. Re-reading the weather mid-fight would let the sea change
+   * under a gunner who has already aimed at it, and the world is frozen for
+   * the whole three-second count anyway.
+   *
+   * `?rough=1` is new with the weather and exists for exactly one reason: the
+   * shipping default used to be `ROUGH` unconditionally, so a tuning session
+   * that wants the crests now has to ask for them rather than merely not ask
+   * for calm.
    */
-  const battleOptions = battleParams.get('calm') === '1' ? CALM : ROUGH;
+  const forcedCalm = battleParams.get('calm') === '1';
+  const forcedRough = battleParams.get('rough') === '1';
+  /**
+   * How much storm makes a fight rough.
+   *
+   * Half. Above it the sea outside is visibly running and a flat arena would
+   * read as a different ocean; below it the crests would be arriving out of a
+   * sky that has not earned them.
+   */
+  const BATTLE_STORM_GATE = 0.5;
+  function battleSeaFor(): typeof CALM {
+    if (forcedCalm) return CALM;
+    if (forcedRough) return ROUGH;
+    return weather.state.storm > BATTLE_STORM_GATE ? ROUGH : CALM;
+  }
 
   /**
    * How far ahead `?boat=` puts its raider, world units.
@@ -442,7 +526,7 @@ async function startGame(): Promise<void> {
    * false until a real fight starts, so this first one is only ever read by
    * the type checker.
    */
-  let battleSim = createBattleSim(undefined, battleOptions);
+  let battleSim = createBattleSim(undefined, battleSeaFor());
 
   /** The boat a fight is being fought with, and its hull, for the fade home. */
   let contactBoat: AiBoat | null = null;
@@ -539,7 +623,7 @@ async function startGame(): Promise<void> {
       battleCover.close();
       return;
     }
-    battleSim = createBattleSim(undefined, battleOptions);
+    battleSim = createBattleSim(undefined, battleSeaFor());
     outcomeSettled = false;
     battleUi.open(boat.kind);
     blackout.run(() => {
@@ -837,12 +921,38 @@ async function startGame(): Promise<void> {
    */
   const WARM_DT = 1 / 60;
   view.update(WARM_DT, ship.state, controls.input);
-  globe.update(WARM_DT, env, wind.state, ship.state, view.camera);
+  globe.update(
+    WARM_DT,
+    env,
+    wind.state,
+    weather.state,
+    weatherCells.state,
+    ship.state,
+    view.camera,
+  );
   postFx.render(WARM_DT, scene, view.camera);
   controls.endFrame();
 
   await loading.step(1, 'READY');
   await loading.done();
+
+  /**
+   * How much a full storm multiplies the hazard and raider spawn odds.
+   *
+   * 2, i.e. tripled odds at `storm = 1`. It lives here rather than in either
+   * sim because both must read one number: a storm that raised the sea
+   * without raising the chance of meeting a raider in it would be half a
+   * system, and two constants would eventually become two different storms.
+   *
+   * What it buys differs sharply between the two, which is worth knowing
+   * before moving it. `aiboats.ts` rolls once every ten seconds and is
+   * nowhere near its one-of-each-kind cap, so tripled odds are worth about
+   * 2.7x the encounters. `hazards.ts` rolls every second at odds that already
+   * refill a free slot almost at once, so the same multiplier is worth about
+   * 1.5x -- what limits the hazards is how long one LIVES, not how often one
+   * is rolled for. Both are measured in their own unit tests.
+   */
+  const STORM_ODDS_GAIN = 2;
 
   /*
    * `?hazard=wave|maelstrom` -- one forced hazard, 25 units dead
@@ -913,6 +1023,45 @@ async function startGame(): Promise<void> {
     hazards.force(kind, _forceCentre, _forceNorth);
   }
 
+  /*
+   * `?cell=storm|fog|lightning` -- one forced weather cell, sixty units dead
+   * ahead, on the same three-second beat as `?hazard=`.
+   *
+   * Sixty rather than the hazard's twenty-five: a cell has a radius of 25 to
+   * 60 and the point of the query is to photograph one from OUTSIDE, on the
+   * horizon and on the scope, which is the half of the effect that cannot be
+   * seen from inside it. Sailing forward for a few seconds then puts the ship
+   * under it.
+   *
+   * `lightning` is a storm cell like any other -- every forced storm carries
+   * lightning, since `weathercells.ts`'s `force` sets the flag -- and exists
+   * as a separate word only so a shot can be named for what it is showing.
+   */
+  const cellQuery = new URLSearchParams(window.location.search).get('cell');
+  let forcedCell: 'storm' | 'fog' | 'lightning' | null =
+    cellQuery === 'storm' || cellQuery === 'fog' || cellQuery === 'lightning'
+      ? cellQuery
+      : null;
+  let cellCountdown = 3;
+  /** How far ahead a forced cell is raised, world units. See above. */
+  const CELL_FORCE_DISTANCE = 60;
+
+  function releaseForcedCell(kind: 'storm' | 'fog' | 'lightning'): void {
+    if (!aimAtShip(CELL_FORCE_DISTANCE)) return;
+    weatherCells.force(kind === 'fog' ? 'fog' : 'storm', _forceCentre, _forceNorth);
+  }
+
+  /**
+   * How many times the ship has crossed INTO a cell this session.
+   *
+   * The measurement `CELL_TARGET` was chosen against: the encounter rate is a
+   * closed-form function of the population and the bubble, and this is what
+   * checks the arithmetic against a real course rather than a stationary
+   * ship. Published on the debug hook; costs one boolean compare a frame.
+   */
+  let cellEncounters = 0;
+  let inCell = false;
+
   const clock = new THREE.Clock();
 
   /**
@@ -972,7 +1121,12 @@ async function startGame(): Promise<void> {
       // reasons: the sun is still up, the ship may be at a berth, and a fight
       // is long enough that a tank frozen through one would be a lie about
       // where the power went.
-      energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction);
+      // The plant keeps running under a card, and keeps running in the
+      // weather it was under when the card opened: `weather.update` is not
+      // called on this branch, exactly as `wind.update` is not, so the sky
+      // freezes with the rest of the world and a storm cannot quietly pass
+      // while the player reads a menu.
+      energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction, weather.state);
       // Only once the arena is actually on screen. Through the first fade the
       // world is still what is being drawn, and a fight that had started
       // behind it would be a second of shooting the player never saw.
@@ -989,7 +1143,7 @@ async function startGame(): Promise<void> {
       // rather than over a freeze-frame.
       battleScene.update(dt, battleSim.state);
       battleUi.update(battleSim.state);
-      hud.update(ship.state, energy.state, wind.state);
+      hud.update(ship.state, energy.state, wind.state, weather.state);
       // Redrawn but not advanced, for the frozen branch's reason: `env` is not
       // rewritten during a fight, so this repaints the same reading, and a
       // canvas resized behind the overlay that is never drawn into is blank.
@@ -1033,7 +1187,12 @@ async function startGame(): Promise<void> {
       // hull; see `restingSnapshot`. It also keeps the berth alive under the
       // shop: a chandlery that disconnected the ship the moment it opened
       // would make browsing cost the charge the visit was for.
-      energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction);
+      // The plant keeps running under a card, and keeps running in the
+      // weather it was under when the card opened: `weather.update` is not
+      // called on this branch, exactly as `wind.update` is not, so the sky
+      // freezes with the rest of the world and a storm cannot quietly pass
+      // while the player reads a menu.
+      energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction, weather.state);
       if (fishing.isOpen) fishing.update(dt);
       // The plant is still running under the cover screen, so START FISHING
       // has to be re-read against it: a player who opens this at a berth on
@@ -1053,7 +1212,7 @@ async function startGame(): Promise<void> {
        * to cover is handled instead.
        */
       if (battleCover.isOpen) battleCover.update();
-      hud.update(ship.state, energy.state, wind.state);
+      hud.update(ship.state, energy.state, wind.state, weather.state);
       // Redrawn but not advanced: `env` is frozen with the rest of the world,
       // so this repaints the same reading. It has to run at all because the
       // canvas can still be resized behind the overlay, and a resized canvas
@@ -1076,10 +1235,59 @@ async function startGame(): Promise<void> {
     // Power first, on last frame's speed: the ship must not spend energy it
     // turns out not to have. `globe.update` is what writes `env`, so the sun the
     // solar panels see is also one frame old -- 16 ms of a 10-minute day.
-    energy.update(dt, ship.state, env, overdriveActive, moonNightFraction);
+    energy.update(dt, ship.state, env, overdriveActive, moonNightFraction, weather.state);
     // Wind sits between the two: it needs this frame's docked verdict to know
     // whether the ship is in shelter, and the ship needs this frame's push.
-    wind.update(dt, ship.state, energy.state);
+    /*
+     * The cells run BEFORE the wind, which is the one ordering constraint the
+     * weather adds to this loop.
+     *
+     * A storm cell floors the wind's speed (`CELL_WIND_LIFT`), so the wind
+     * has to read this frame's cell sample rather than last frame's -- the
+     * same argument that already puts `wind.update` after `energy.update` for
+     * the berth verdict it shelters behind.
+     */
+    weatherCells.update(dt, ship.state, energy.state);
+    wind.update(dt, ship.state, energy.state, weatherCells.state.stormAtShip);
+    /*
+     * Then the weather itself: after the wind, because a squall is rolled off
+     * this frame's phase, and before the hazards, because the storm
+     * multiplier on their spawn rolls is this frame's storm.
+     */
+    weather.update(dt, wind.state, weatherCells.state);
+    // One edge per entry, not per frame inside: what is being counted is how
+    // often the player MEETS weather, which is the number the population was
+    // sized against.
+    const nowInCell =
+      weatherCells.state.stormAtShip > 0.1 || weatherCells.state.fogAtShip > 0.1;
+    if (nowInCell && !inCell) cellEncounters++;
+    inCell = nowInCell;
+    /*
+     * What a storm does to the odds of meeting something.
+     *
+     * Computed here rather than inside either sim because both read the same
+     * sky and must not develop two opinions of it -- the same argument
+     * `suppressed()` below is computed here for.
+     *
+     * A word on what it actually buys, because "tripled" is only half true.
+     * It triples the PROBABILITY in both. The raiders roll once every ten
+     * seconds, nowhere near saturating their one-of-each-kind cap, and get
+     * about 2.7x the encounters for it. The hazards roll every second at
+     * odds that already refill a free slot almost immediately, so tripling
+     * them buys about 1.5x. Both figures are measured in the unit tests.
+     */
+    const stormOdds = 1 + STORM_ODDS_GAIN * weather.state.storm;
+    // `?cell=`, once, on the same beat as `?hazard=` and for the same reason:
+    // a storm cell is a 0.6 draw every ten seconds against a bubble 250 units
+    // across, so waiting for one to arrive at the ship is a vigil rather than
+    // a test. Null on every ordinary session.
+    if (forcedCell !== null) {
+      cellCountdown -= dt;
+      if (cellCountdown <= 0) {
+        releaseForcedCell(forcedCell);
+        forcedCell = null;
+      }
+    }
     // `?hazard=`, once, three seconds in. Null on every ordinary session.
     if (forcedHazard !== null) {
       forceCountdown -= dt;
@@ -1113,7 +1321,7 @@ async function startGame(): Promise<void> {
     // frame. The water plugin reads the same state inside `globe.update`
     // below, after the hull has ridden it, so the sea on the GPU and the sea
     // the hull just climbed are one frame's numbers.
-    hazards.update(dt, ship.state, energy.state, wind.state);
+    hazards.update(dt, ship.state, energy.state, wind.state, stormOdds);
     // Republished for `tests/shots.mjs`, which waits on an envelope rather
     // than on a clock -- see the field's own comment in `quality.ts`. The
     // hook only exists under `?quality=` or `?debug`, so this is a no-op in
@@ -1123,6 +1331,21 @@ async function startGame(): Promise<void> {
         kind: h.kind,
         envelope: h.envelope,
       }));
+      window.__pirateWorld.weather = {
+        kind: weather.state.kind,
+        storm: weather.state.storm,
+        fog: weather.state.fog,
+        rain: weather.state.rain,
+        visibility: weather.state.visibility,
+        encounters: cellEncounters,
+        cells: weatherCells.state.live.map((c) => ({
+          kind: c.kind,
+          radius: c.radius,
+          strength: c.strength,
+          distance:
+            Math.acos(Math.max(-1, Math.min(1, c.centre.dot(ship.state.position)))) * GLOBE_RADIUS,
+        })),
+      };
     }
     // Raiders sit between the hazards and the ship, and both sides of that are
     // load bearing. After the hazards because a boat is suppressed while a
@@ -1130,7 +1353,7 @@ async function startGame(): Promise<void> {
     // Before the ship because a contact has to halt the hull the same frame it
     // happens: `onContact` calls `ship.halt()` and flips the overlay, and the
     // `ship.update` below then runs on a hull that is already stopped.
-    aiBoats.update(dt, ship.state, energy.state, hazards.state, suppressed());
+    aiBoats.update(dt, ship.state, energy.state, hazards.state, suppressed(), stormOdds);
     // The Navigation offers' one read this frame: the higher of Trim &
     // Sheathing's tier and an Overdrive Coil's burn speed -- never their sum,
     // see `types.ts`'s `PropulsionState` -- and whether a Sea Anchor is still
@@ -1153,15 +1376,35 @@ async function startGame(): Promise<void> {
     // meshes from the state the sim wrote above, and nothing reads them until
     // the render at the foot of the frame.
     aiHulls.update(dt, aiBoats.state);
-    globe.update(dt, env, wind.state, ship.state, view.camera);
+    globe.update(
+      dt,
+      env,
+      wind.state,
+      weather.state,
+      weatherCells.state,
+      ship.state,
+      view.camera,
+    );
+    // After `globe.update`: the box hangs on the hull the camera has just
+    // been framed against, and nothing reads it until the render.
+    rain?.update(dt, ship.state, wind.state, weather.state);
     // Before postFx.render: it renders straight into its own cube target and
     // must restore the renderer's target before the visible frame draws, or
     // the game renders into its own reflection cube and the canvas goes black.
     reflection.update(dt, ship.state.position, renderer, scene);
     docks.update(dt, env, ship.state, energy.state);
     wake.update(dt, ship.state, env, renderer);
-    hud.update(ship.state, energy.state, wind.state);
-    radar.update(dt, ship.state, wind.state, hazards.state, aiBoats.state);
+    hud.update(ship.state, energy.state, wind.state, weather.state);
+    radar.update(
+      dt,
+      ship.state,
+      wind.state,
+      hazards.state,
+      aiBoats.state,
+      weather.state,
+      weatherCells.state,
+      chart,
+    );
     // After globe.update, which is what writes `env.sunDirection`. Reading it
     // before would put the dial a frame behind the sky it is describing.
     timeDial?.update(ship.state, env);

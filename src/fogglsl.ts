@@ -27,11 +27,53 @@
  * uses -- kept in the signature even though this body does not read it,
  * since `uFogColorDay`/`uFogColorNight` already carry the sun's current tint
  * (see `fog.ts`'s `updateFog`) and a second use of it here would double it up.
+ *
+ * ## The weather argument
+ *
+ * `wx` is `(rain, fog)` AT THIS FRAGMENT, 0..1 each, and it is passed IN
+ * rather than read from a uniform inside this body. That is the whole reason
+ * a fog bank can be seen from outside itself: the caller samples
+ * `weathermap.ts` at the point being shaded, so the sea and the land INSIDE a
+ * bank go grey and flat while the water at the ship stays sharp, which from a
+ * deck reads as a wall of air sitting on the horizon.
+ *
+ * It is an argument and not a uniform for a second reason too. `battlescene.ts`
+ * calls this contract from a flat arena that is nowhere on the globe, where a
+ * sample of an equirectangular world map would be meaningless; it passes
+ * `vec2(0.0)` and gets exactly the arena it always had. A uniform read inside
+ * this body would have hazed the arena the first time it stormed at sea.
+ *
+ * Use `aerialWeather(...)` below to build `wx`: it is the one place the map's
+ * sample and the at-ship squall are combined, so a caller cannot combine them
+ * one way while another combines them the other.
+ *
+ * Every weather term is multiplied by a component of `wx`, so at `wx = 0` this
+ * is byte for byte the function it was before any of it existed. That is the
+ * zero contract (docs/WEATHER_PLAN.md, Trap 2) and it is not negotiable: the
+ * ocean's depth ramp has been washed out by a careless additive term twice
+ * already, and both times it was found by eye rather than by a test.
  */
 export const FOG_GLSL = [
   'uniform vec3 uFogColorDay;',
   'uniform vec3 uFogColorNight;',
   'uniform float uFogDensity;',
+  '// The ceiling below, as a uniform rather than the constant it used to be,',
+  '// so a fog bank can raise it. Its resting value IS the old constant.',
+  'uniform float uFogMax;',
+  '// The two colours weather fades the distance toward. A FOG bank is a pale',
+  '// grey -- fog is bright, it is lit water in the air, and it takes the',
+  '// colour out of what is behind it. A STORM is the opposite and needs its',
+  '// own endpoint: rain darkens the distance rather than whitening it, and',
+  '// fading a storm toward the bank grey painted the whole ocean into the',
+  '// flat pale sheet this file warns about twice above. Seen, once, in a',
+  '// `?weather=storm` shot; the two colours are the fix.',
+  'uniform vec3 uFogBankColor;',
+  'uniform vec3 uFogStormColor;',
+  '// The weather AT THE SHIP, for the half of it that has no place: a squall',
+  '// is rolled off the wind and is wherever the ship is, so it cannot come',
+  '// from the map. `aerialWeather` maxes these with the map\'s own sample.',
+  'uniform float uFogHere;',
+  'uniform float uRainHere;',
   '// How much denser the haze gets at a fully grazing view angle (looking',
   '// along the horizon) versus straight down at the surface under the',
   '// camera. A tuning ratio, not a world- or ship-scale distance.',
@@ -64,7 +106,63 @@ export const FOG_GLSL = [
   '// shelf, ocean, deep, abyss) stayed plainly distinct at all of them, not',
   '// just the two zoomed-out ones.',
   'const float FOG_MAX_AMOUNT = 0.15;',
-  'vec3 applyAerial(vec3 col, vec3 worldPos, vec3 camPos, vec3 sunDir, float dayFactor) {',
+  '// How much denser a full fog bank makes the haze.',
+  '//',
+  '// 3.5, down from a first cut of 6.0 which -- with the ceiling below at its',
+  '// own first cut of 0.85 -- put the water directly under the hull at a 60%',
+  '// blend and produced a ship sailing on a sheet of white paper. That is the',
+  '// exact failure the ceiling constant below is written to prevent, and it',
+  '// was caught in a `?weather=fog` shot rather than by any test.',
+  '//',
+  '// At 3.5, with the chase camera about 21 units up, the sea twenty units',
+  '// ahead of the bow is blended about a third of the way to the bank and the',
+  '// horizon is gone entirely. That is a bank you sail INTO rather than one',
+  '// you are painted over by.',
+  'const float FOG_DENSITY_GAIN = 3.5;',
+  '// Rain thickens the air, but nothing like a bank does: you can see a long',
+  '// way through a downpour and a few hundred metres through fog. 1.0 against',
+  '// the 6.0 above is that ratio, and the first cut at 2.0 was part of what',
+  '// washed the sea out.',
+  'const float STORM_DENSITY_GAIN = 1.0;',
+  '// What the ceiling becomes in a full bank.',
+  '//',
+  '// 0.75, and the reason it is not 1.0 is literal: even inside the thickest',
+  '// fog the sea immediately under the hull has to still be sea, or the ship',
+  '// appears to be sailing on a sheet of paper. The first cut said exactly',
+  '// that at 0.85 and then did it anyway, because the density gain above was',
+  '// pushing every distance into the ceiling; both numbers came down together.',
+  'const float FOG_MAX_BANK = 0.75;',
+  '// How far rain lifts the ceiling, and it has to be SMALL.',
+  '//',
+  '// The comment on FOG_MAX_AMOUNT above is the whole argument: 0.15 was',
+  '// chosen over 0.18 because the larger number washed the chase view, and',
+  '// "even a 30-40% mix already reads as the ocean turning into a flat pale',
+  '// sheet". The first cut of this constant was 0.25, which put a full',
+  '// downpour at exactly 0.40 and reproduced that failure precisely. 0.08 is',
+  '// a ceiling of 0.23 in the heaviest rain: a visibly hazier sea that is',
+  '// still a sea with a depth ramp in it.',
+  '//',
+  '// A fog BANK may go to 0.85 because a bank is meant to take the horizon',
+  '// away -- that is the effect, and there is nothing left to preserve.',
+  'const float STORM_MAX_GAIN = 0.08;',
+  '// How much of a storm reads as rain in the air, for the map\'s sake: the',
+  '// map carries a storm field and a fog field and no rain field of its own,',
+  '// because rain is a fixed function of storm and a third channel would be',
+  '// a byte per texel spent on arithmetic.',
+  'const float RAIN_OF_STORM = 0.75;',
+  '// How far a full downpour pulls the haze toward the storm colour above.',
+  '// Not toward the BANK colour: see uFogStormColor. Under rain the air is',
+  '// wet and dark, and this is a weight on a dark endpoint rather than on a',
+  '// pale one, so it can afford to be large.',
+  'const float STORM_GREY = 0.7;',
+  '// Build the `wx` argument from `weathermap.ts`\'s sample at this fragment.',
+  '// The ONE place the map and the at-ship squall are combined, so every',
+  '// caller combines them the same way. `max`, not a sum: two pieces of',
+  '// weather in one place are one weather.',
+  'vec2 aerialWeather(vec3 mapSample) {',
+  '  return vec2(max(uRainHere, mapSample.r * RAIN_OF_STORM), max(uFogHere, mapSample.g));',
+  '}',
+  'vec3 applyAerial(vec3 col, vec3 worldPos, vec3 camPos, vec3 sunDir, float dayFactor, vec2 wx) {',
   '  vec3 toCam = camPos - worldPos;',
   '  float dist = length(toCam);',
   '  vec3 viewDir = toCam / max(dist, 1e-4);',
@@ -79,12 +177,26 @@ export const FOG_GLSL = [
   '  // shaded instead of needing a uniform or a baked-in constant for it.',
   '  float camAlt = max(0.0, length(camPos) - length(worldPos));',
   '  float altFalloff = exp(-camAlt / FOG_ALTITUDE_FALLOFF);',
-  '  float density = uFogDensity * mix(1.0, FOG_GRAZE_BOOST, grazing) * altFalloff;',
-  '  // Scaled by FOG_MAX_AMOUNT rather than clamped after the fact, so the',
-  '  // curve eases into its ceiling instead of hitting a visible elbow where',
-  '  // the clamp engages.',
-  '  float fogAmt = FOG_MAX_AMOUNT * (1.0 - exp(-dist * density));',
+  '  // The altitude term is kept in FRONT of the weather, deliberately. A fog',
+  '  // bank is a thing that sits on water; from orbit you should see the sea',
+  '  // through it and the cell in the CLOUD deck above it instead. Without',
+  '  // this, thick weather would paint the whole limb grey at far zoom.',
+  '  float weather = 1.0 + FOG_DENSITY_GAIN * wx.y + STORM_DENSITY_GAIN * wx.x;',
+  '  float density = uFogDensity * weather * mix(1.0, FOG_GRAZE_BOOST, grazing) * altFalloff;',
+  '  // Scaled by the ceiling rather than clamped after the fact, so the',
+  '  // curve eases into it instead of hitting a visible elbow where the clamp',
+  '  // engages. At wx = 0 the ceiling is uFogMax, whose resting value is the',
+  '  // FOG_MAX_AMOUNT above -- the constant is kept as the documented default',
+  '  // and the reasoning behind it is still the reasoning behind the uniform.',
+  '  float ceiling = min(1.0, mix(uFogMax, FOG_MAX_BANK, wx.y) + wx.x * STORM_MAX_GAIN);',
+  '  float fogAmt = ceiling * (1.0 - exp(-dist * density));',
   '  vec3 fogColor = mix(uFogColorNight, uFogColorDay, clamp(dayFactor, 0.0, 1.0));',
+  '  // Then the weather\'s own colour, in two steps rather than one, because',
+  '  // the two endpoints pull opposite ways: a bank whitens the distance, a',
+  '  // downpour darkens it. Rain first, so that a bank rolling through a',
+  '  // storm still reads as a bank.',
+  '  fogColor = mix(fogColor, uFogStormColor, clamp(STORM_GREY * wx.x, 0.0, 1.0));',
+  '  fogColor = mix(fogColor, uFogBankColor, clamp(wx.y, 0.0, 1.0));',
   '  return mix(col, fogColor, fogAmt);',
   '}',
 ].join('\n');

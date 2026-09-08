@@ -120,6 +120,34 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the banks have flat bases, domed tops and real thickness at the horizon. How
   tall a bank builds varies from place to place, between two thirds and all of
   the deck's depth.
+- **Storms and fog.** The sky is weather now, not decoration. Squalls roll off
+  the wind's own gusts, and on top of them whole regional cells — storms and
+  fog banks — drift across the globe on their own courses, born outside your
+  scope so weather always arrives from somewhere rather than switching on
+  around you. The panel gains a `SKY` row that names what you are in, and the
+  scope draws the cells as marks you can steer around.
+  A storm is a power problem before it is a view: it takes **95% of your
+  panels** and a fog bank takes half, so a tank that fills in three and a half
+  minutes under a clear noon barely moves under a black sky, and the power
+  panel says so in as many words — `IDLE - OVERCAST` rather than the
+  `IDLE - SOLAR CHARGING` it would be lying with. Neither can strand you: a
+  squall is over in half a minute and a cell drifts past in about forty
+  seconds even if you sit still, against a hotel load that takes forty-two
+  minutes to empty a full tank. A berth charges at the same rate whatever the
+  sky is doing, which is what makes one worth running for.
+  Dirty weather also brings company. Rough water is rolled about a quarter
+  more often in a full storm, and **wandering** orange raiders nearly three
+  times as often — but a red one, the sort that comes for you, is never made
+  likelier by the sky. A storm makes the sea busier, not more hostile.
+  A fight carries the storm you were in when you were rammed: the arena's
+  water goes dark and grey under it. It never carries the fog, because a
+  white-out over a twenty-unit ring would hide the boat you are shooting at.
+- **The chart.** The scope remembers. Everywhere you have sailed is charted
+  and stays charted between sessions, on a 1024×512 bitmap of the globe kept
+  in its own storage slot beside your save. What you have not visited is
+  blank. How far you chart is your **visibility**, not your radar range, so a
+  coast passed in thick fog is not charted at all and has to be passed again
+  in clear air — which is the one lasting price fog asks.
 - **Wind.** It never stops. Gusts blow up on a random bearing and hold for five
   to thirty seconds, and between them the wind falls away to a lull of a knot
   rather than to nothing — a lull that draws its own fresh bearing, so the

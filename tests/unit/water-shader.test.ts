@@ -47,6 +47,29 @@ import fixture from '../fixtures/water-shader.json';
  * Only (6) changes a pixel in THIS shader, and only where `foam > 0`: with no
  * plugin registered, `steep` is 0 and `tiltBoost` is 1 by construction, so
  * (3), (4) and (5) are inert here by the same argument the fog body was.
+ *
+ * The weather (docs/WEATHER_PLAN.md) updated it again, and that list, in
+ * full:
+ *
+ *  1. `applyAerial` gained a sixth parameter, `vec2 wx` -- the rain and fog
+ *     AT THIS FRAGMENT. It is an argument rather than a uniform read inside
+ *     the body so that `battlescene.ts`, which calls the same contract from a
+ *     flat arena nowhere on the globe, can pass `vec2(0.0)` and keep exactly
+ *     the arena it had.
+ *  2. `WEATHERMAP_GLSL` is pasted after `HEIGHTMAP_GLSL`, whose
+ *     `dirToEquirect` it is built on, and the call site gained the two lines
+ *     that sample it and hand the result to `applyAerial`.
+ *  3. `FOG_GLSL` gained five uniforms (`uFogMax`, `uFogBankColor`,
+ *     `uFogHere`, `uRainHere`, and the map's own sampler is declared by the
+ *     chunk above) and six constants, plus the `aerialWeather` helper that
+ *     combines the map's sample with the at-ship squall.
+ *
+ * At zero weather every one of those terms multiplies out and the function
+ * computes exactly what it computed before -- the ceiling is a uniform whose
+ * resting value is the constant it replaced, and both weather gains are
+ * multiplied by a component of `wx`. That is the zero contract, and the
+ * screenshots taken at `?weather=clear` against `main` are what actually
+ * check it; this fixture only pins the text.
  */
 function normalize(glsl: string): string {
   return glsl.replace(/\s+/g, ' ').trim();

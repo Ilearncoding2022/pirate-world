@@ -58,12 +58,32 @@ export interface AiBoats {
    * `suppressed` is `main.ts`'s verdict — docked, mid-blackout, or in a
    * maelstrom — and blocks both spawning and contact.
    */
+  /**
+   * `stormOdds` multiplies the ORANGE spawn probability, from the same number
+   * `hazards.ts` reads in `main.ts`: raiders work the weather too, and a storm
+   * that raised the sea without putting another hull on it would be half a
+   * system.
+   *
+   * **Red is deliberately exempt** (2026-09-08, owner's call, on the same day
+   * `P_RED` was cut to a fifth). The two colours are different kinds of event
+   * and the weather may only multiply one of them. An orange boat is a hull
+   * that happens to be out there, so more of them in dirty weather is the
+   * world being busier. A red one ends in a fight unless it is out-turned, and
+   * tripling that in a storm is the game deciding to interrupt you at the
+   * exact moment the sea is already the thing you are fighting -- which is
+   * also, more plainly, most of the 80% cut handed straight back.
+   *
+   * It multiplies the COMPARISON only. The draw stays unconditional and is
+   * taken for both colours, so the seeded stream replays whatever the sky is
+   * doing.
+   */
   update(
     dt: number,
     ship: ShipState,
     energy: EnergyState,
     hazards: HazardState,
     suppressed: boolean,
+    stormOdds?: number,
   ): void;
   /** Removes the boat a fight was fought with, and starts the grace period. */
   remove(boat: AiBoat): void;
@@ -523,12 +543,16 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
    *
    * The unconditional draw is the whole point; see ROLL_ORDER.
    */
-  function roll(ship: ShipState, suppressed: boolean): void {
+  function roll(ship: ShipState, suppressed: boolean, stormOdds: number): void {
     for (const kind of ROLL_ORDER) {
       const draw = rng();
       if (suppressed || state.grace > 0) continue;
       if (liveOf(kind) !== null) continue;
-      if (draw < ROLL_ODDS[kind]) trySpawn(kind, ship);
+      // Orange takes the weather's multiplier; red never does. See the note
+      // on `stormOdds` in the interface above for why the sky may make the
+      // sea busier without making it more hostile.
+      const odds = kind === 'orange' ? ROLL_ODDS[kind] * stormOdds : ROLL_ODDS[kind];
+      if (draw < odds) trySpawn(kind, ship);
     }
   }
 
@@ -641,6 +665,7 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
     _energy: EnergyState,
     _hazards: HazardState,
     suppressed: boolean,
+    stormOdds = 1,
   ): void {
     // A frame that advanced no time draws no raiders. Returning leaves the
     // last true state standing rather than rewriting it with a stale zero.
@@ -656,7 +681,7 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
     rollTimer += dt;
     while (rollTimer >= ROLL_PERIOD) {
       rollTimer -= ROLL_PERIOD;
-      roll(ship, suppressed);
+      roll(ship, suppressed, stormOdds);
     }
 
     // ---- Steer, travel, and the coast -------------------------------
