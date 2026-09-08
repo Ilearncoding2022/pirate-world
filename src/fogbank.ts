@@ -66,6 +66,7 @@ import * as THREE from 'three';
 import type { WorldEnv } from './env';
 import type { CellsState, ShipState, WeatherState } from './types';
 import { GLOBE_RADIUS } from './geo';
+import { NEAR_DISTANCE, NEAR_HEIGHT } from './camera';
 import { HEIGHTMAP_GLSL } from './heightmap';
 import { WEATHERMAP_GLSL, weatherMapUniforms } from './weathermap';
 import { SIMPLEX_GLSL } from './simplexglsl';
@@ -167,32 +168,61 @@ const HULL_WIDTH = 1.5;
  * The eye of clear air the ship keeps around itself, in world units: fully
  * clear inside `FOG_CLEAR_CORE`, full bank again beyond `FOG_CLEAR_EDGE`.
  *
- * A thick bank is meant to swallow the boat, and it still does -- but a boat
- * that is only a smudge is a boat you cannot steer, and the whole point of
- * `STACK_OPACITY` stopping short of opaque was to leave a silhouette to read.
- * That silhouette is worth much more with a hull's width of clear air around
- * it, which is what this is: the hull's own half-length (1.56) plus one
- * `HULL_WIDTH`, so the clearing stands exactly one hull width off the boat at
- * its widest point.
+ * A thick bank is meant to swallow the boat, and it still does at any range
+ * past the edge -- but a boat that is only a smudge is a boat you cannot
+ * steer, and the whole point of `STACK_OPACITY` stopping short of opaque was
+ * to leave a silhouette to read.
  *
- * The feather out to `EDGE` is deliberately much wider than the core -- two
- * and a half hull widths of it. A clearing that reached full fog at its own
- * radius would read as a circle stamped out of the bank, which is a worse
- * artefact than the haze it removes; over four units it reads as the fog
- * thinning around the boat instead.
+ * ## Why the edge is the CHASE CAMERA'S setback and not a hull measurement
  *
- * It is a COLUMN, not a bubble: the distance measured is from the ship's own
- * local vertical axis, so the clearing runs from the water to the top of the
- * layer. A sphere of this radius would be nearly useless, and the reason is
- * pure geometry -- the chase camera sits about 9.5 units up and 21 back,
- * INSIDE the layer, so its line of sight to the hull is 23 units of fog
- * travelled almost horizontally. A sphere clears the last three of those; a
- * column clears every part of that line within `EDGE` of the boat, which is
- * the stretch nearest the ship and the stretch that `FOG_NEAR_FULL` has
- * already let back up to full strength.
+ * The first cut of this was a hull's half-length plus one beam, feathered to
+ * about 6.8 units: a clearing sized against the BOAT, which is the obvious way
+ * to size a clearing around a boat. It looked almost the same as no clearing
+ * at all, and the reason is worth writing down, because the obvious way is
+ * wrong here for a structural reason that will not change.
+ *
+ * The chase camera sits `NEAR_HEIGHT` (9.5) up and `NEAR_DISTANCE` (21) BACK,
+ * which puts it inside the layer -- the layer is 11 units deep -- so its line
+ * of sight to the hull is 23 units travelled almost horizontally through fog.
+ * Walk that line and the fog on it is shaped by two fades: `FOG_NEAR_FULL`
+ * lets it up to full strength 16 units out from the camera, and this clearing
+ * takes it away again near the ship. A clearing of radius r only ever touches
+ * the last r units of a 21-unit horizontal run, so at 6.8 the whole middle of
+ * the line -- the part at FULL density -- was untouched. Integrated along the
+ * ray, the boat-sized clearing removed 39% of the fog in front of the hull and
+ * still left a stretch at 100%. That is what "still greatly obscured" was.
+ *
+ * So the edge has to reach the camera, and `NEAR_DISTANCE` is what "reach the
+ * camera" means. At that value the same integral falls to 1.4 units of
+ * full-strength-equivalent fog out of 23, peaking at 20% density, and the hull
+ * reads as a hull. `tests/unit/fogbank.test.ts` walks the ray and pins both
+ * numbers, so a future edit that shrinks this back toward the boat fails
+ * rather than merely looking worse.
+ *
+ * The core stays a boat measurement, because that is the part the eye reads as
+ * "clear water around the ship": two hull lengths of it, then the fog comes
+ * back over the remaining fourteen units. That long feather is the whole
+ * difference between a bank the ship sits in a bowl of and a circle stamped
+ * out of the fog.
+ *
+ * ## What this costs
+ *
+ * Fog no longer rolls across the hull at chase framing, which was a deliberate
+ * choice earlier and is being reversed on purpose: a bank that passes over the
+ * boat and a boat you can see are not both available from a camera that sits
+ * inside the fog 21 units away. Wisps still cross the hull at the near framing
+ * whenever the bank is thin, and the horizon is still gone -- what the bowl
+ * removes is the near field, not the effect.
  */
-const FOG_CLEAR_CORE = HULL_LENGTH * 0.5 + HULL_WIDTH;
-const FOG_CLEAR_EDGE = FOG_CLEAR_CORE + HULL_WIDTH * 2.5;
+const FOG_CLEAR_CORE = HULL_LENGTH * 2;
+const FOG_CLEAR_EDGE = NEAR_DISTANCE;
+
+/**
+ * The chase camera's own line of sight to the hull, world units, and the
+ * geometry the two constants above are justified against. Exported for the
+ * test that walks it; nothing in the shader reads it.
+ */
+export const CHASE_SIGHT_LENGTH = Math.hypot(NEAR_HEIGHT, NEAR_DISTANCE);
 
 /**
  * Total opacity the whole stack composites to in the core of a full bank, and
@@ -714,13 +744,15 @@ export function createFogBank(slices: number): FogBank {
 }
 
 export {
+  FOG_CLEAR_CORE,
+  FOG_CLEAR_EDGE,
+  FOG_NEAR_FULL,
+  FOG_NEAR_MIN,
   FOG_LAYER_DEPTH,
   FOG_CAP_ARC,
   FOG_SLICE_MAX,
   STACK_OPACITY,
   FOG_WAKE_RANGE,
-  FOG_CLEAR_CORE,
-  FOG_CLEAR_EDGE,
   HULL_WIDTH,
   HULL_LENGTH,
 };

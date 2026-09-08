@@ -314,7 +314,7 @@ shader.
 | `globe.ts` | `createGlobe(terrain, quality, waterPlugins?): { group, heightMap, waterBodies, towns, waveOffsets, update(dt, env, wind, ship, camera) }` | orchestrator only; culls islets and installs the land mask before anything reads the map; builds the displacement patch after the water plugins are woven into the shader |
 | `ship.ts` | `createShip(terrain, start?, maxAnisotropy?, onHullProgress?)`, `MAX_FORWARD`, `MODEL_SCALE`, `HULL_OFFSET` | glTF hull + physics + collision; `ready` settles on load; `update`'s optional fifth argument is `globe.waveOffsets`, the CPU wave field the hull heaves, pitches and rolls on — see **The wave field** — and its optional sixth is `hazards.state`, a push spent like the wind's plus a drive that takes the helm away entirely; `place(dir, heading)` is the respawn's teleport, `halt()` the overlays' stop; `cloneHull()` is the AI boats' copy, geometry shared and every material cloned, null until `ready` settles |
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
-| `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
+| `camera.ts` | `createFollowCamera(aspect)`, `NEAR_DISTANCE`, `NEAR_HEIGHT` | the two chase-framing constants are exported for `fogbank.ts`, which derives its clearing from the fact that this camera sits inside the fog layer — see **The fog bank**. follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
 | `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
 | `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
@@ -839,20 +839,31 @@ Four things about it are easy to undo by accident:
   the same term `clouds.ts` has with the opposite sense. The threshold is also
   DROPPED by the bank's strength, so a strengthening bank fills in its gaps and
   closes over the ship instead of merely thickening where it already was.
-- **The ship keeps an eye of clear air around itself.** `FOG_CLEAR_CORE` is
-  the hull's half-length plus one beam (3.06 units, from the 3.12 x 1.5 hull
-  `islets.ts` sizes islands against), feathered out to `FOG_CLEAR_EDGE` over
-  two and a half more beams so the clearing reads as the fog thinning rather
-  than as a circle stamped out of the bank. It is a COLUMN about the ship's
-  vertical axis, not a bubble, and the difference is not cosmetic: the chase
-  camera sits ~9.5 units up and 21 back, INSIDE the layer, so its line of
-  sight to the hull is 23 units of fog travelled almost horizontally — a
-  bubble clears the last three of those, a column clears every part of that
-  line within `EDGE` of the boat, which is exactly the stretch
-  `FOG_NEAR_FULL` has already let back up to full strength. It costs no
-  uniform and cannot drift out of sync with the ship: in the cap's object
-  space the ship's axis IS +Y, so the vertex shader reads the distance
-  straight off `length(dir.xz)`.
+- **The ship keeps a bowl of clear air around itself, and its EDGE is the
+  chase camera's setback, not a hull measurement.** This is the one number
+  here whose obvious value is wrong. Sized against the boat first
+  (half-length plus a beam, feathered to ~6.8 units) it looked almost the
+  same as no clearing at all, because the chase camera sits `NEAR_HEIGHT`
+  (9.5) up and `NEAR_DISTANCE` (21) BACK, which puts it *inside* an 11-unit
+  layer: its line of sight to the hull is 23 units of fog travelled almost
+  horizontally, and a clearing of radius r only ever touches the last r units
+  of that 21-unit horizontal run. Walking the ray, the boat-sized version
+  removed 39% of the fog in front of the hull and still left a stretch at
+  100% density. `FOG_CLEAR_EDGE` is therefore `NEAR_DISTANCE`, imported from
+  `camera.ts` so moving the chase framing moves the clearing; the same
+  integral then falls to 1.4 units of full-strength-equivalent fog out of 23,
+  peaking at 20%. `tests/unit/fogbank.test.ts` walks that ray and pins both
+  numbers against the old version, so shrinking this back toward the boat
+  fails rather than merely looking worse. `FOG_CLEAR_CORE` stays a boat
+  measurement (two hull lengths) because that is the part the eye reads as
+  clear water around the ship; the long feather over the remaining fourteen
+  units is what makes it a bowl rather than a circle stamped out of the bank.
+  The cost, accepted deliberately: fog no longer rolls across the hull at
+  chase framing. A bank that passes over the boat and a boat you can see are
+  not both available from a camera sitting inside the fog 21 units away.
+  It is a COLUMN about the ship's vertical axis, costs no uniform and cannot
+  drift out of sync with the ship: in the cap's object space that axis IS +Y,
+  so the vertex shader reads the distance straight off `length(dir.xz)`.
 - **Per-slice opacity is derived, not chosen**, exactly as the deck's is:
   `sliceOpacity(n)` solves `1 - (1 - a)^n = STACK_OPACITY`, so nine slices are
   as DENSE as fourteen and what a lower tier loses is smoothness in the

@@ -14,9 +14,16 @@ const SHIP_ALTITUDE = 0.6;
  *
  * Ship-scale, so these are absolute and do not move with GLOBE_RADIUS. The
  * hull should look the same up close on any size of world.
+ *
+ * Exported because `fogbank.ts` derives the clear air it keeps around the ship
+ * from `NEAR_DISTANCE`, and the derivation is not a nicety: the chase camera
+ * sits that far back HORIZONTALLY and inside the fog layer, so a clearing
+ * narrower than this setback cannot reach the middle of the camera's own line
+ * of sight, which is where the fog on it is thickest. Reading the number
+ * rather than copying it means moving the chase framing moves the clearing.
  */
-const NEAR_DISTANCE = 21;
-const NEAR_HEIGHT = 9.5;
+export const NEAR_DISTANCE = 21;
+export const NEAR_HEIGHT = 9.5;
 /**
  * Furthest framing: high, near-orbital look at the planet.
  *

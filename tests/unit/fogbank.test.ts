@@ -1,13 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
 import type { Mesh, ShaderMaterial } from 'three';
+import { NEAR_DISTANCE } from '../../src/camera';
 import {
   createFogBank,
   fogInRange,
   sliceOpacity,
   FOG_CLEAR_CORE,
   FOG_CLEAR_EDGE,
+  CHASE_SIGHT_LENGTH,
   FOG_CAP_ARC,
+  FOG_NEAR_FULL,
+  FOG_NEAR_MIN,
   FOG_SLICE_MAX,
   FOG_WAKE_RANGE,
   HULL_LENGTH,
@@ -117,26 +121,90 @@ describe('fog bank stack', () => {
   });
 });
 
+/** GLSL `smoothstep`, so the test walks the ray the shader actually shades. */
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Fog along the chase camera's line of sight to the hull.
+ *
+ * The camera sits `NEAR_HEIGHT` up and `NEAR_DISTANCE` back and is INSIDE the
+ * layer, so this ray is 23 units of fog travelled almost horizontally. Both
+ * of the shader's distance fades are evaluated per sample: the near-camera
+ * one on distance along the ray, the clearing on the horizontal distance from
+ * the ship's axis, which is what the shader's `vAxisDist` carries.
+ *
+ * Returns the peak density reached and the integral, in world units of
+ * full-strength fog. It is the measurement that condemned the first version
+ * of the clearing -- sized against the boat, it removed 39% of this and still
+ * left the ray at 100% somewhere along it -- so it is the thing to pin.
+ */
+function sightLine(core: number, edge: number): { peak: number; units: number } {
+  const samples = 4000;
+  let peak = 0;
+  let units = 0;
+  for (let i = 0; i < samples; i++) {
+    const t = (i + 0.5) / samples; // 0 at the camera, 1 at the hull
+    const alongRay = CHASE_SIGHT_LENGTH * t;
+    const fromAxis = FOG_CLEAR_EDGE_SETBACK * (1 - t);
+    const density =
+      smoothstep(FOG_NEAR_MIN, FOG_NEAR_FULL, alongRay) * smoothstep(core, edge, fromAxis);
+    peak = Math.max(peak, density);
+    units += density * (CHASE_SIGHT_LENGTH / samples);
+  }
+  return { peak, units };
+}
+
+/**
+ * The camera's horizontal setback, which is also what `FOG_CLEAR_EDGE` is.
+ * Named separately here so the ray keeps its own geometry if the clearing is
+ * ever decoupled from the camera again.
+ */
+const FOG_CLEAR_EDGE_SETBACK = FOG_CLEAR_EDGE;
+
 describe('the clear air the ship keeps around itself', () => {
-  it('stands a full hull width off the boat at its widest point', () => {
-    // The ask, in the units it was made in: a hull's width of clear air
-    // around the boat. Measured from the ship's axis, that is its own
-    // half-length plus one beam, and nothing here may quietly shrink it.
-    expect(FOG_CLEAR_CORE).toBeCloseTo(HULL_LENGTH * 0.5 + HULL_WIDTH, 6);
-    expect(FOG_CLEAR_CORE - HULL_LENGTH * 0.5).toBeGreaterThanOrEqual(HULL_WIDTH);
+  it('reaches the chase camera, or it cannot clear the sight line at all', () => {
+    // The structural fact this whole constant rests on: a clearing of radius r
+    // only touches the last r units of the camera's 21-unit horizontal run, so
+    // anything narrower leaves the middle of the ray -- the full-density part
+    // -- untouched. Sizing it against the hull is the intuitive mistake.
+    expect(FOG_CLEAR_EDGE).toBeGreaterThanOrEqual(NEAR_DISTANCE);
+  });
+
+  it('leaves the hull readable from the chase camera', () => {
+    const { peak, units } = sightLine(FOG_CLEAR_CORE, FOG_CLEAR_EDGE);
+    // Never a stretch of full fog in front of the boat...
+    expect(peak).toBeLessThan(0.3);
+    // ...and little enough of it in total to see a hull through.
+    expect(units).toBeLessThan(3);
+  });
+
+  it('is measurably better than sizing the clearing against the boat', () => {
+    // The version this replaced, kept as the comparison that justifies the
+    // change rather than as a number in a comment: a hull half-length plus a
+    // beam, feathered over two and a half more.
+    const boatSized = sightLine(HULL_LENGTH * 0.5 + HULL_WIDTH, HULL_LENGTH * 0.5 + HULL_WIDTH * 3.5);
+    const bare = sightLine(0, 1e-6);
+    expect(boatSized.peak).toBeCloseTo(1, 2); // it left the ray at full density
+    expect(boatSized.units).toBeGreaterThan(bare.units * 0.5); // and removed under half
+    expect(sightLine(FOG_CLEAR_CORE, FOG_CLEAR_EDGE).units).toBeLessThan(boatSized.units * 0.25);
+  });
+
+  it('keeps a core the eye reads as clear water around the ship', () => {
+    expect(FOG_CLEAR_CORE).toBeGreaterThanOrEqual(HULL_LENGTH);
+    expect(FOG_CLEAR_CORE).toBeLessThan(FOG_CLEAR_EDGE);
   });
 
   it('feathers rather than stamping a circle out of the bank', () => {
-    expect(FOG_CLEAR_EDGE).toBeGreaterThan(FOG_CLEAR_CORE);
-    // Wide enough to read as the fog thinning: at least two hull widths of
-    // ramp, or the clearing's own rim becomes the artefact.
-    expect(FOG_CLEAR_EDGE - FOG_CLEAR_CORE).toBeGreaterThanOrEqual(HULL_WIDTH * 2);
+    // Most of the clearing has to be ramp, or its own rim becomes the artefact.
+    expect(FOG_CLEAR_EDGE - FOG_CLEAR_CORE).toBeGreaterThan(FOG_CLEAR_CORE);
   });
 
   it('is small against the bank it is cut out of', () => {
-    // A clearing is a hole in weather, not the weather. If this ever grows
-    // past a fraction of the cap the ship is no longer sailing in fog.
-    expect(FOG_CLEAR_EDGE).toBeLessThan(FOG_CAP_ARC * 0.1);
+    // A clearing is a hole in weather, not the weather.
+    expect(FOG_CLEAR_EDGE).toBeLessThan(FOG_CAP_ARC * 0.2);
   });
 
   it('measures from the ship axis and fades before any noise is sampled', () => {
