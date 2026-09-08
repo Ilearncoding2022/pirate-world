@@ -84,6 +84,21 @@ const FOG_MAX_CLEAR = 0.15;
 const FOG_BANK_COLOR = new Color('#aeb4b8');
 
 /**
+ * The colour a STORM's haze fades toward, and it is nearly the opposite of
+ * the one above.
+ *
+ * Fog is bright: it is lit water in the air, and it whitens the distance. A
+ * downpour is dark, and fading one toward `FOG_BANK_COLOR` painted the whole
+ * ocean the flat pale sheet this file's own two warnings are about -- caught
+ * in a `?weather=storm` shot rather than by any test, which is exactly the
+ * failure mode those warnings describe and exactly why the shots exist.
+ *
+ * A dark slate with the sea's own blue in it, so a storm reads as the horizon
+ * closing in rather than as a fog bank with the lights off.
+ */
+const FOG_STORM_COLOR = new Color('#39434e');
+
+/**
  * Night fog colour, as a fraction of the atmosphere shell's own brightness.
  * A dimensionless multiplier -- there is no sun to tint the haze warm once it
  * is this dark, so night fog is just the atmosphere's hue turned most of the
@@ -112,6 +127,8 @@ export const fogUniforms = {
   uFogMax: { value: FOG_MAX_CLEAR },
   /** The flat grey a bank fades toward. Constant; only its WEIGHT moves. */
   uFogBankColor: { value: FOG_BANK_COLOR.clone() },
+  /** And the dark one a downpour does. See `FOG_STORM_COLOR`. */
+  uFogStormColor: { value: FOG_STORM_COLOR.clone() },
   /**
    * The at-ship squall, for the half of the weather that has no place on the
    * map. Both 0 in clear weather, which is what makes every term above inert.
