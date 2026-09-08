@@ -136,31 +136,77 @@ describe('hazardfield: the crest profile', () => {
   });
 });
 
+/*
+ * The funnel is a BOWL -- `-D * (1 - r*r)^2` -- and not the cone `-D *
+ * (1 - r)^3` it shipped as. The depth at the centre is the same number; the
+ * shape of the descent to it is not, and these five cases are between them
+ * what says so. The fifth is the reason the other four moved: the cone had a
+ * sharp apex at r = 0 that a single patch vertex had to stand on, and a point
+ * with no normal cannot be shaded however good the art over it is.
+ */
 describe('hazardfield: the maelstrom profile', () => {
   it('is FUNNEL_DEPTH deep at the centre, scaled by the envelope', () => {
     // The sign lives in the profile, not in `amplitude` -- see
     // `hazardStrength`. A funnel that comes back positive is a mountain.
+    //
+    // Unchanged by the move to a bowl, and deliberately so: the hull falls
+    // exactly as far as it did, it just falls along a different curve.
     expect(hazardHeight(at(0, 0), [makeHazard('maelstrom')])).toBeCloseTo(-FUNNEL_DEPTH, 5);
     expect(hazardHeight(at(0, 0), [makeHazard('maelstrom', { envelope: 0.5 })])).toBeCloseTo(-FUNNEL_DEPTH * 0.5, 5);
   });
 
   it('scales its radius with `size`, so a growing maelstrom is a growing hole', () => {
     const half = makeHazard('maelstrom', { size: 0.5 });
-    // Clear of a half-grown funnel, lip and all -- the lip's outer edge is at
-    // 1.02 radii, so "outside" for a maelstrom is a little past its radius.
+    // Clear of a half-grown funnel, lip and all. The lip's outer edge now
+    // lands exactly on the radius rather than 2% past it, so a maelstrom's
+    // whole footprint really is its own radius and nothing of it is left
+    // standing outside for the hull to trip over.
+    expect(hazardHeight(at(MAELSTROM_RADIUS * 0.5 * 1.0001, 0), [half])).toBe(0);
     expect(hazardHeight(at(MAELSTROM_RADIUS * 0.5 * 1.05, 0), [half])).toBe(0);
     // And still a hole in the middle, at full depth.
     expect(hazardHeight(at(0, 0), [half])).toBeCloseTo(-FUNNEL_DEPTH, 5);
   });
 
-  it('raises a lip near the rim and is flat outside it', () => {
+  it('raises a lip of exactly RIM_HEIGHT at the rim and is flat outside it', () => {
     const m = makeHazard('maelstrom');
-    // The lip peaks at 0.9 of the radius, where the funnel it sits on is
-    // already down to (1 - 0.9)^3 of its depth -- three thousandths of a
-    // unit. RIM_HEIGHT minus that is the whole of the arithmetic.
-    const lip = hazardHeight(at(MAELSTROM_RADIUS * 0.9, 0), [m]);
-    expect(lip).toBeCloseTo(RIM_HEIGHT - FUNNEL_DEPTH * 0.001, 5);
+    /*
+     * The lip crowns at 0.82 of the radius and carries RIM_HEIGHT exactly,
+     * not RIM_HEIGHT minus whatever the funnel underneath had left. That is
+     * the difference between adding the lip to the bowl and letting it
+     * REPLACE the bowl beneath itself: a bowl is still a third of a unit deep
+     * out here, so an added lip would crown short and off-centre.
+     */
+    expect(hazardHeight(at(MAELSTROM_RADIUS * 0.82, 0), [m])).toBeCloseTo(RIM_HEIGHT, 5);
     expect(hazardHeight(at(MAELSTROM_RADIUS + 1.5, 0), [m])).toBe(0);
+
+    /*
+     * And that crown is the whole profile's maximum, reached once. A second
+     * ring anywhere would be a trough the hull could be caught circling in,
+     * and it is exactly the sort of thing a lip riding on a sloped bowl grows
+     * without anyone noticing.
+     */
+    let highest = -Infinity;
+    let highestAt = 0;
+    let previous = -Infinity;
+    let turned = 0;
+    // Half-thousandths of a radius, so the scan lands exactly on 0.82 rather
+    // than a whisker either side of it and the crown it finds is the crown.
+    for (let i = 0; i <= 2400; i++) {
+      const r = i / 2000;
+      const here = hazardHeight(at(MAELSTROM_RADIUS * r, 0), [m]);
+      if (here > highest) {
+        highest = here;
+        highestAt = r;
+      }
+      // Count the times the profile stops climbing: up out of the bowl,
+      // over the crown, down to flat water, and never again.
+      if (here < previous - 1e-9 && turned === 0) turned = 1;
+      else if (here > previous + 1e-9 && turned === 1) turned = 2;
+      previous = here;
+    }
+    expect(highest).toBeCloseTo(RIM_HEIGHT, 5);
+    expect(highestAt).toBeCloseTo(0.82, 2);
+    expect(turned).toBe(1);
   });
 
   it('is radially symmetric -- the swirl is art, not geometry', () => {
@@ -170,6 +216,52 @@ describe('hazardfield: the maelstrom profile', () => {
     for (const angle of [0.4, 1.1, 2.7, 4.9]) {
       expect(hazardHeight(at(r * Math.cos(angle), r * Math.sin(angle)), [m])).toBeCloseTo(reference, 5);
     }
+  });
+
+  it('has NO slope at all at the centre -- the apex is flat, not a cone point', () => {
+    const m = makeHazard('maelstrom');
+    const centre = hazardHeight(at(0, 0), [m]);
+
+    /*
+     * This is the case the whole change exists for.
+     *
+     * `-D * (1 - r)^3` descends at 3D/radius at the centre -- 0.9 world units
+     * of height per world unit of ground on a 10-unit, 3-deep funnel -- and
+     * it descends at that rate from a single point, in every direction at
+     * once. That is a cone apex: not differentiable, no normal, and sampled
+     * by about one vertex of the displacement grid, which is why the middle
+     * of a maelstrom read as a spike of shading nonsense.
+     *
+     * `-D * (1 - r*r)^2` reaches the centre with zero slope and is a function
+     * of r*r alone, so it is smooth in u and v rather than merely smooth in
+     * r. Measured over a step this small the float32 field does not move AT
+     * ALL -- the quadratic it now descends by is below half an ulp of 3.0 out
+     * here -- so the slope is exactly zero rather than nearly it. The cone
+     * gave 0.900 over the same step, which is what the 1e-6 below is really
+     * separating this from.
+     */
+    const tiny = 1e-3;
+    for (const [du, dv] of [
+      [tiny, 0],
+      [-tiny, 0],
+      [0, tiny],
+      [0, -tiny],
+    ] as const) {
+      const slope = (hazardHeight(at(du, dv), [m]) - centre) / tiny;
+      expect(Math.abs(slope)).toBeLessThan(1e-6);
+    }
+
+    /*
+     * And it is not merely flat in an interval too small to render. The
+     * displacement patch lays a vertex every half world unit, so the first
+     * vertex out from the centre is the one that used to sit on the side of
+     * the spike: the cone climbed 0.856 units of height per unit of ground
+     * across that first step, the bowl climbs 0.030.
+     */
+    const vertex = 0.5;
+    const firstStep = (hazardHeight(at(vertex, 0), [m]) - centre) / vertex;
+    expect(firstStep).toBeGreaterThan(0);
+    expect(firstStep).toBeLessThan(0.05);
   });
 });
 
