@@ -264,9 +264,11 @@ shader.
 | `noiseglsl.ts` | `NOISE_GLSL` | inlined Ashima/Gustavson simplex noise; `water.ts` and `land.ts` share this one copy |
 | `waveconstants.ts` | `SWELL_WAVELENGTH`, `WAVE_WAVELENGTH`, `CHOP_WAVELENGTH`, `AXIS_WAVE`, `AXIS_CHOP`, `DISPLACE_AMPLITUDE`, `freq`, `freqNumber`, `vec3Literal` | the one source both `waterglsl.ts` (GPU) and `wavefield.ts` (CPU) read, so the two wave fields can never numerically drift apart — see **The wave field** |
 | `waterglsl.ts` | `WATER_UNIFORMS`, `waterWavefield`, `waterDepth`, `WATER_LIGHTING_HEAD`/`_TAIL`, `waterFoam`, `WATER_FOAM_TAIL`, `WATER_OUTPUT` | the water fragment shader, as named chunks `water.ts` assembles; see **Shader notes** for the plugin hook seams between them |
-| `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective blend toward the atmosphere colour, thickened at grazing angles and weakened with camera altitude, capped at `FOG_MAX_AMOUNT`; called from water and land |
+| `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective blend toward the atmosphere colour, thickened at grazing angles and weakened with camera altitude, capped at `FOG_MAX_AMOUNT`; called from water and land. The BANK's share of it ramps in over `FOG_BANK_ONSET` (70 units) so the near field belongs to `fogbank.ts`'s geometry and this term keeps the far — see **The fog bank** |
 | `fog.ts` | `fogUniforms`, `updateFog(env, weather?)` | owns the seven uniforms `applyAerial` reads; called from `globe.update` before water and land. `uFogMax` is a uniform whose resting value is the constant `FOG_MAX_AMOUNT` used to be; `uFogBankColor` and `uFogStormColor` are the two endpoints weather fades the distance toward, and they pull opposite ways — a bank whitens, a downpour darkens. Deliberately does NOT rewrite the day/night colours: `battlescene.ts` merges this same object and `globe.update` does not run during a fight, so anything written here would freeze into the arena's haze |
 | `weathermap.ts` | `createWeatherMap()`, `bakeWeatherMap(cells, data, w, h)`, `WEATHERMAP_GLSL`, `weatherMapUniforms`, `MAP_WIDTH/HEIGHT/HZ` | the live cells baked into a 512×256 RGBA8 equirect texture at 4 Hz: R storm, G fog, B a lightning flag, `NoColorSpace`. Data, not colour, in `wakemap.ts`'s sense. `WEATHERMAP_GLSL` declares `uWeatherMap` itself and is pasted after `HEIGHTMAP_GLSL`, whose `dirToEquirect` it reuses. Read by the water, the land and the cloud deck; read by nothing that decides a number — see **Weather** |
+| `fogbank.ts` | `createFogBank(slices)`, `fogInRange(ship, weather?, cells?)`, `sliceOpacity(n)` | the fog you sail INTO: a stack of concentric spherical caps at sea level, following the ship, carrying a four-octave simplex field. `update(dt, env, ship, weather?, cells?)`. Built by `globe.ts` and gated on `quality.fogSlices`, which is 0 on the low tier where the module is ABSENT rather than idle. See **The fog bank** |
+| `simplexglsl.ts` | `SIMPLEX_GLSL` | Ashima's 3D simplex noise, once. Lived inside `clouds.ts` until `fogbank.ts` needed the same field at sea level; declares no uniforms, and defines `mod289`/`permute`/`taylorInvSqrt`, so a shader must not paste it twice |
 | `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; exposes `offsets`, the three wave layers' integrated drift (direction-space, read-only), for `wavefield.ts`'s CPU port; see **Shader notes** for the plugin contract |
 | `wavefield.ts` | `snoise`, `sampleWave`, `waveHeight`, `waveNormalBasis`, `WaveOffsets`, `WaveSample` | float32-rounded CPU port of `waterglsl.ts`'s swell+wave `waveField`; `ship.ts` rides this, the player sees the GPU copy — see **The wave field** |
 | `hazardfield.ts` | `HAZARD_GLSL`, `HAZARD_PROFILE_GLSL`, `HAZ_CREST_RATIO_GLSL`, `hazardHeight(dir, hazards)`, `MAX_HAZARDS`, the crest/funnel sizes | the SECOND height field, beside `waveField` and never inside it: GLSL for three consumers and a float32 CPU port for the hull. Polynomial plus one `sqrt`, which is what makes its parity free — see **Hazards** |
@@ -794,6 +796,70 @@ Two more things follow from the stack and are easy to undo by accident:
   ramp width and the slice's own silhouette all fade out as `facing` drops.
   This is the same cure `water.ts` uses on the ocean.
 
+## The fog bank
+Fog is two effects with a seam between them, and knowing which one is which is
+most of what there is to know about it.
+
+`fogglsl.ts`'s `applyAerial` is the FAR half. It blends the surface being
+shaded toward a flat grey, which is exactly right for aerial perspective and
+exactly wrong for a bank sitting on the water: a surface tint cannot pass in
+front of the hull, cannot be denser in one place than the next at the same
+distance, and cannot part as you sail through it. For as long as it was the
+only fog there was, a bank read as a grey layer laid over the sea rather than
+as anything in the air — which is the note `fogbank.ts` was written to answer.
+
+`fogbank.ts` is the NEAR half, and it is real geometry: `quality.fogSlices`
+concentric spherical CAPS (not full spheres, the way the cloud deck does it)
+spanning `FOG_LAYER_DEPTH` = 11 world units above the water, centred on the
+ship's own local up and reaching `FOG_CAP_ARC` = 150 units out. Eleven units
+puts the whole hull and its 4.15-unit masthead inside the layer while the
+chase camera at ~21 units up stays above the top of it, looking down into a
+hole in the fog with a ship in it. At 25 the camera is inside the bank, every
+frame is a grey wall, and there is no game left to play.
+
+The seam is `FOG_BANK_ONSET` (70 units). Under about 20 units the aerial term
+contributes almost nothing to a bank and the geometry is the whole effect; by
+70 it is at full weight and the geometry has faded out at its own cap rim. The
+two overlap over the middle third and neither module reads the other. Because
+the near field is no longer the aerial term's to protect, `FOG_MAX_BANK` is
+**0.92**, not the 0.75 it held while that term was the whole of fog: at
+distance a bank is supposed to take the horizon away completely.
+
+Four things about it are easy to undo by accident:
+
+- **The group follows the ship; the field does not.** Noise is sampled from
+  `normalize(vWorldPos)` — a direction on the globe, not a position in the cap
+  — so the density is painted on the world and the ship sails through it. Get
+  it backwards and the bank follows the boat, which reads as a bug in the
+  camera rather than as weather. `update` therefore only ever writes the
+  group's QUATERNION; the caps are concentric with the globe, so following the
+  ship is a rotation and nothing else.
+- **Fog is bottom-heavy, and that is the one thing separating it from a low
+  cloud.** The coverage threshold climbs with altitude (`uTopTaper`), which is
+  the same term `clouds.ts` has with the opposite sense. The threshold is also
+  DROPPED by the bank's strength, so a strengthening bank fills in its gaps and
+  closes over the ship instead of merely thickening where it already was.
+- **Per-slice opacity is derived, not chosen**, exactly as the deck's is:
+  `sliceOpacity(n)` solves `1 - (1 - a)^n = STACK_OPACITY`, so nine slices are
+  as DENSE as fourteen and what a lower tier loses is smoothness in the
+  gradient. `STACK_OPACITY` is **0.97** rather than 1.0 on purpose — a bank has
+  to block the ship partially, not delete it, and the three per cent that
+  survives the thickest core is the silhouette you steer by.
+- **Two early-outs pay for the whole thing, and both are load-bearing.**
+  `fogInRange` turns the group off on the CPU when no fog cell is within
+  `FOG_WAKE_RANGE` of the ship and there is no squall, so clear weather is zero
+  draw calls rather than a dozen cheap ones; it reads `cells.live`
+  analytically, never the map, for the reason in **The three traps**. And the
+  fragment shader samples the weather map FIRST and discards where there is no
+  bank, before it touches a single octave, so open sea inside the cap costs one
+  texture fetch.
+
+Unlike the cloud deck it can be faded off neither near the camera (the player
+is INSIDE it) nor at the limb in the way the aerial term is, so it is the one
+weather effect a machine feels immediately. It is also deliberately NOT on
+`LAYER_REFLECTED`: the reflection cube gathers things far enough away to be a
+constant over the patch of water reflecting them, and a bank is metres away.
+
 ## Frame loop
 ```
 energy.update(dt, shipState, env, ..., weather.state)   // burn / solar / dock, on last frame's speed and last frame's sky
@@ -805,7 +871,7 @@ aiBoats.update(dt, shipState, energyState, hazards.state, suppressed(), stormOdd
 ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
-globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
+globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, the fog bank (needs `ship` for the cap it follows and `cells` for whether it is drawn at all), sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
 rain.update(dt, shipState, wind.state, weather.state, view.camera)  // after globe: the box hangs on the hull the camera has just been framed against, and is SIZED off that camera
 lightning.update(dt, shipState, weather.state)  // alongside the rain, for the same reason; rebuilds its geometry only when flashSeed changes
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
@@ -1028,7 +1094,13 @@ the atmosphere's own colour as distance grows, thickened at grazing angles
 (more air looking along the horizon than straight down) and weakened with the
 camera's own altitude above the local surface, capped at `FOG_MAX_AMOUNT`
 (0.15) so the exponential never washes the water's deep-colour ramp into a
-flat pale sheet. The three uniforms it reads (`uFogColorDay`, `uFogColorNight`,
+flat pale sheet. A weather BANK raises that ceiling toward `FOG_MAX_BANK`
+(0.92) and thickens the density, but only with distance: the bank's share of
+every weather term is multiplied by `smoothstep(0.0, FOG_BANK_ONSET, dist)`,
+so the near field belongs to `fogbank.ts`'s geometry and this term is the far
+half of fog. The ramp is a factor ON the bank rather than a change to it, so
+`wx.y = 0` is still exactly zero at every distance and the battle arena, which
+passes `vec2(0.0)`, is untouched. The three uniforms it reads (`uFogColorDay`, `uFogColorNight`,
 `uFogDensity`) are owned by `fog.ts`, which exposes them as one shared
 `fogUniforms` object — merged into every caller's material uniforms, so there
 is exactly one writer — and `updateFog(env)`, called from `globe.update`
@@ -1099,8 +1171,19 @@ drawn triangles after the coastal cull), a blend weight
 (`landFacetBlend`, how far land's per-pixel normal replaces its flat facet
 normal -- the one row that costs nothing to move at runtime, since it reaches
 the shader as a uniform rather than a baked constant), a face count
-(`reflectionFacesPerFrame`), and whether the water shader's fragment-side
-chop octave runs at all (`waveChop`). **`reflectionSize: 0`** (the `low`
+(`reflectionFacesPerFrame`), a slice count (`fogSlices`, how many caps
+`fogbank.ts` stacks its bank out of), and whether the water shader's
+fragment-side chop octave runs at all (`waveChop`).
+
+**`fogSlices: 0`** (the `low` tier) is the same ABSENT-not-idle convention as
+`reflectionSize` and `rainDrops`: `globe.ts` builds no fog-bank module at all
+there and fog is the aerial haze alone, which is what fog was everywhere
+before `fogbank.ts` existed. Above zero the per-slice alpha is solved from the
+count (see **The fog bank**), so a `medium` machine gets fog that is exactly as
+THICK as a `high` one and only less smooth in the gradient. It is the row a
+machine feels soonest when the weather turns: the layer is almost pure fill
+rate and, unlike the cloud deck, it cannot be faded off near the camera,
+because the player is inside it. **`reflectionSize: 0`** (the `low`
 tier) means the reflection cube is **absent, not idle**: `reflection.ts`
 allocates no render target at all, its `texture` is `null`, and `main.ts`
 never builds `waterreflect.ts`'s plugin — so the water shader compiles with

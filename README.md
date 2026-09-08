@@ -126,6 +126,11 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   scope so weather always arrives from somewhere rather than switching on
   around you. The panel gains a `SKY` row that names what you are in, and the
   scope draws the cells as marks you can steer around.
+  A fog bank is a thing in the air rather than a grey filter over the sea: it
+  is drawn as a stack of slices standing on the water, so it drifts past the
+  bow with real depth, closes over the deck, and leaves the hull a silhouette
+  rather than a tinted boat. Sail into a thick one and the horizon is simply
+  gone.
   A storm is a power problem before it is a view: it takes **95% of your
   panels** and a fog bank takes half, so a tank that fills in three and a half
   minutes under a clear noon barely moves under a black sky, and the power
