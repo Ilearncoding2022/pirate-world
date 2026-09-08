@@ -142,6 +142,26 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   A fight carries the storm you were in when you were rammed: the arena's
   water goes dark and grey under it. It never carries the fog, because a
   white-out over a twenty-unit ring would hide the boat you are shooting at.
+- **Rain, and a bolt to go with the flash.** A storm you can see from the
+  deck. Rain begins at a tenth of a storm's depth rather than a quarter, so
+  ordinary weather is wet instead of only greying the sky, and the curtain is
+  drawn heavier — streaks nearly twice as long at nearly twice the alpha, over
+  **eight times the drops**. It is sized to the CAMERA rather than to the ship:
+  its width comes off the frustum, so it reaches the edges of the frame at
+  every zoom and on any shape of window rather than standing on the boat as a
+  column with dry sea around it; its depth reaches past the lens, so the
+  foreground is rained on too; and its ceiling climbs as the camera climbs, so
+  the height drops start falling from is never a line drawn across the sky.
+  Sides, far edge and ceiling all dissolve, so there is nowhere the rain
+  visibly begins or ends. Pull back far enough and it hands off to the darkened
+  cloud deck and the haze, which is what a storm looks like from above.
+  Lightning finally has something to look at. A strike draws a forked bolt from
+  the cloud base down to just above the water — thrown 12 to 34 units clear of
+  the hull when the squall is your own, or standing in the cell that is doing
+  the striking when it is not — and it rides the same double pulse the sky
+  does, so the channel dims and re-lights with the hemisphere rather than on a
+  clock of its own. Its shape comes off the strike's own seed, so the same
+  weather draws the same bolt down to the fork.
 - **The chart.** The scope remembers. Everywhere you have sailed is charted
   and stays charted between sessions, on a 1024×512 bitmap of the globe kept
   in its own storage slot beside your save. What you have not visited is
