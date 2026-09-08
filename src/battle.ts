@@ -23,6 +23,7 @@ import {
 } from './battleconstants';
 import { createBattleAi } from './battleai';
 import { ROUGH, createBattleSea } from './battlesea';
+import { mulberry32 } from './towns';
 
 /**
  * battle.ts — the cannon fight, in flat arena units.
@@ -177,8 +178,22 @@ export function createBattleSim(
   rng: () => number = Math.random,
   options: BattleOptions = ROUGH,
 ): BattleSim {
-  const ai = createBattleAi(rng);
-  const sea = createBattleSea(rng, options);
+  // Two streams off the one source, drawn in a FIXED order before either
+  // module exists and before `options` has been looked at.
+  //
+  // Handing both modules the same `rng` looked equivalent and is not. The sea
+  // draws in its own constructor -- `rollObstacles` alone takes five numbers
+  // per obstacle -- and how many it takes depends on which systems are
+  // switched on, so a shared stream leaves the gunner reading from a
+  // different offset in a rough fight than in a calm one. Its coin flips and
+  // its solutions would then differ between the two for no reason connected
+  // to the sea at all, which is exactly the comparison `?calm=1` and the
+  // gunner's own pinned test exist to make. Two draws here, always the same
+  // two whatever the options say, and the gunner's dice are its own.
+  const aiRng = mulberry32(Math.floor(rng() * 0x100000000));
+  const seaRng = mulberry32(Math.floor(rng() * 0x100000000));
+  const ai = createBattleAi(aiRng);
+  const sea = createBattleSea(seaRng, options);
 
   const state: MutableBattleState = {
     radius: ARENA_R0,

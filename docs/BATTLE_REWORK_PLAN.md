@@ -547,6 +547,47 @@ and look, per the budget in `docs/TESTING.md`:
 - The Vite log and the browser console show no shader errors. A green build
   is not a pass.
 
+## What it measured, once it was built
+
+Added after the work landed, as the record of what the seven decisions
+actually produced. Measured 2026-09-08 over 200 seeded fights per row, on
+`ROUGH` unless the row says otherwise, against simulated players. Not
+playtesting: no human has held the keys yet, and every figure below is a
+robot's approximation of one. Read them as bounds, not as verdicts.
+
+**The gunner, against a player who does nothing.** 46.5% before the rework,
+**30.1% after**, on the sea the game is played on. On `CALM` the same gunner
+scores 68.6%, which is why the calm figure is a laboratory isolate and is
+pinned separately: two thirds of the fight's fairness is the sea, not the
+gunner.
+
+**The telegraph is the whole fight.** One simulated captain, timing shots
+well, played twice against the same 200 seeds:
+
+| The captain | Foe's hit rate | Won | Lost | Drawn |
+|---|---|---|---|---|
+| Ignores the lit fuse | 30% | 49 | 104 | 47 |
+| Breaks off when the fuse lights | 4% | 150 | 3 | 47 |
+
+Reading the fuse takes the enemy from 30% to 4%. Decision 4 is doing what it
+was for, and it is doing nearly all of the work: a player who learns one
+thing about this fight should learn that one.
+
+**The floor and the ceiling are far apart.** A captain who fires blind and
+steers at random hits about 5% and draws three fights in four, because ten
+rounds at that accuracy cannot find three hits. A captain who times the shot
+and reads the fuse hits 36% and loses three fights in two hundred. Fights run
+23 to 42 seconds and essentially never reach the two-minute timeout once
+anybody is firing, so the STAND-OFF the plan feared is a draw on two empty
+lockers rather than a clock running out.
+
+**What to watch when playing it.** The ceiling may be too kind: 150 wins to 3
+losses is a fight that stops being one once the trick is known. If it plays
+that way, the lever is `AI_FUSE` — a shorter fuse leaves less room to step
+out from under the shot — and NOT `AI_LAG`, which is what keeps the enemy
+beatable by steering at all. Neither should move before the owner has played
+it, per the decisions above.
+
 ## Out of scope
 
 The AI seeing or avoiding anything the sea does. Wind in the arena. Balls

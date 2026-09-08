@@ -73,7 +73,13 @@ describe('battle: the ball', () => {
    * happened to it.
    */
   function shoot(delay: number, lead: number): { hits: number; splashes: number } {
-    const sim = createBattleSim(mulberry32(0xba11));
+    // CALM, because this case is about the lead a diameter owes and nothing
+    // else. On a rough sea a crest would shove the scripted enemy off the
+    // track this function has just written for it, and a shoal standing on
+    // the diameter would eat the one ball the case is watching -- both of
+    // which are the sea working correctly and would still read here as the
+    // geometry being wrong.
+    const sim = createBattleSim(mulberry32(0xba11), CALM);
     const state = mutable(sim.state);
     // Silence the AI's own guns: this case is about one ball, not a fight.
     state.ai.rounds = 0;
@@ -235,6 +241,39 @@ describe('battle: the AI gunner', () => {
     // earlier (buggy) 3.25% measurement describes the gunner as it now is.
     expect(rate).toBeGreaterThan(0.565);
     expect(rate).toBeLessThan(0.765);
+  });
+});
+
+describe('battle: the gunner rolls its own dice', () => {
+  /**
+   * Switching a sea system on must not change what the AI decides, except
+   * through the water actually moving something.
+   *
+   * The two modules take one seeded source between them, and the sea draws
+   * from it in its own constructor: five numbers per obstacle, none at all
+   * when the shoals are off. Shared, that would leave the gunner reading from
+   * a different offset in a rough fight than a calm one, and its coin flips
+   * would diverge for no reason to do with the sea. `battle.ts` splits the
+   * source into two streams up front, in a fixed order, before it has looked
+   * at the options at all.
+   *
+   * Shoals are the system that proves it, because they are the one that
+   * touches no hull: they eat cannonballs and nothing else. So a fight with
+   * shoals on and a fight with the sea flat must put both boats through
+   * exactly the same motions, tick for tick, forever. Before the split they
+   * diverged within a few helm periods.
+   */
+  it('steers identically with the shoals on, since a shoal moves no hull', () => {
+    const flat = createBattleSim(mulberry32(0x5ea), CALM);
+    const rocks = createBattleSim(mulberry32(0x5ea), { waves: false, shoals: true, flotsam: false });
+    expect(rocks.state.obstacles.length).toBeGreaterThan(0);
+
+    for (let i = 0; i < 30 / DT; i++) {
+      flat.update(DT, IDLE);
+      rocks.update(DT, IDLE);
+      expect(rocks.state.ai.angle).toBe(flat.state.ai.angle);
+      expect(rocks.state.player.angle).toBe(flat.state.player.angle);
+    }
   });
 });
 
