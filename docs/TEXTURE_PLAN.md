@@ -1,7 +1,95 @@
 # Land, wave face and maelstrom surface detail: implementation plan
 
-Status: **Waves 0, 1 and 2 landed. Wave 3 awaits the owner's sign-off.**
-Branch: `claude/terrain-wave-maelstrom-texture-kvbh49`.
+Status: **Complete. Waves 0 to 3 landed.** Branch:
+`claude/terrain-wave-maelstrom-texture-kvbh49`.
+
+## Wave 3: what landed, and what is unverified
+
+Two streams, S (crest silhouette) and Q (quality tiers and cost). Both merged
+without a conflict. **Screenshots were cut partway through this wave at the
+owner's instruction**, so the visual claims below are marked for what was
+actually seen and what was not; the owner is verifying by eye.
+
+**S: the crest's silhouette.** The wave shaded like water after Wave 1 but
+still drew a mesa: a flat top with a hard corner at each shoulder, made more
+conspicuous by Wave 2 because the wave is now lighter than the sea behind it.
+The brief blamed the plateau's width; the real fault was that `hazPlateau` was
+C1 but not C2 at the shoulder, so curvature stepped from nothing to 16.7
+inside one vertex. A flat top AND a curvature step is what the eye reads as a
+tabletop. It is now `hazBump(x * x)`, the bump the file already carried with
+the square handed to it -- which rounds the top, removes the step, and DELETES
+two baked constants rather than adding any. Same shape reused a second way is
+one fewer thing the two ports can disagree over. Footprint unchanged, so
+`hazards.ts`'s contact test is untouched; not steeper (30 degrees at the
+shoulder against 31); parity 0/255.
+
+Two things S declined, both correctly. A face steeper at the lip than at the
+base is not available to a height field: `hazCrest` starts the crest line at
+zero slope, which is what makes it a rounded top rather than a crease, so the
+steepest point is necessarily inside the face. And the curvature-driven normal
+the plan sketched sits in the `normal` hook, which `waterhazard.ts` owns; S
+used `tiltBoost`, a seam it did own, rather than editing outside its files.
+
+**Q: `patchSegments` stays at 160.** The plan deferred a rise to 192 to be
+tried after the shader work. Q made the change and then reverted it, on a
+finding that reframes the question: raising the patch's density buys none of
+the shading. The patch vertex shader emits only `vDir` and `vWorldPos`; the
+water shader finite-differences its own normal per PIXEL and the hazard slope
+is three taps at a fixed 0.5-unit step. Neither knows how finely the grid was
+cut. So 44% more vertex-shader invocations (1.54M/s to 2.21M/s at 60 fps, each
+running two simplex octaves plus `hazardHeight`) buys a marginally sharper
+silhouette and nothing else -- and because the grid snaps to the ship while a
+maelstrom sits still, whether a vertex lands on the lip's crown is phase, not
+density. `RENDER_PLAN.md` also lists patch segments as the third feature to
+drop under budget pressure, which is hard to square with raising it first.
+
+**Q: `landDetail` added to the quality table** (64/80/96 subdivisions per 100
+units of radius; `land.ts` does the multiplication so the triangle keeps its
+world size). High is arithmetically identical to the old fixed value, which is
+what makes `world-golden.json` coming back byte-identical the real proof that
+the high tier did not move. Low drops the drawn mesh from 289k triangles to
+133k.
+
+With no way to look, Q measured the coastline risk in Node instead of assuming
+it: the real cull against the real height map, per tier, with the surviving
+landmasses flood-filled. All 93 landmasses survive at every tier and at a
+third of high's detail; the drawn envelope grows 3.2% from high to low against
+a true land area of 125,654; the smallest islet goes from 50 triangles to 28.
+It also found 11 faces on low spanning two landmasses and correctly judged
+them harmless, since such a face's seaward vertex is sunk by `SHORE_DIP` and
+dives under the water rather than bridging it.
+
+**Integration also corrected a documentation error Q surfaced.** `land.ts`
+claimed a "~2.2 unit triangle"; the icosphere at the high tier is 744,980
+triangles over 502,655 square units, so the edge is about 1.25. The
+finite-difference step is therefore nearly one triangle wide rather than half
+of one, and always was. The number stays; the reasoning around it is now
+right.
+
+**Verified**: build and tsc clean, 140/140 unit tests, wave parity 1/255 on
+the wave field and 0/255 on the hazard field through the crest reshape, all
+four fixtures settled (`hazard-shader.json` moved with S, the other three
+byte-identical).
+
+**Unverified, and needing the owner's eye:**
+
+- `SHOULDER_CHOP = 1.2` at strength. `tilt` scales with wind and every frame S
+  saw was at 1 KN, so the shoulder chop was near its floor. This is the first
+  constant to pull if the crest glitters in a gale.
+- Anything at `?quality=low` or `medium` for the crest, and the STRONG wave
+  (amplitude 1.6) at any tier -- S only ever shot the great wave at high.
+- A crest and a maelstrom overlapping, to confirm the shared `steep`/
+  `tiltBoost` seam behaves. The max-never-assignment discipline is preserved
+  and `hazard-shader.test.ts` pins it, but no picture backs it.
+- Whether a 6-unit islet drawn with 1.87-unit triangles reads as blobbier to a
+  person on the low tier. The numbers say no island is lost; they cannot say
+  how it looks.
+- Any after-shot of the land change at any tier.
+
+**Available but not taken**: low's `landDetail` could go to 48 (a 73% triangle
+cut) and all 93 islands still survive, but the smallest islet would fall to
+about 10 interior triangles and Q would not push that far without being able
+to look at a beach.
 
 ## Wave 2: what integration actually changed
 

@@ -83,10 +83,27 @@ export interface Land {
 /**
  * Finite-difference step for slope, curvature and the per-pixel normal.
  *
- * Ship-scale (a fixed world-unit distance, not a fraction of the globe):
- * well under the ~2.2 unit triangle `landDetail` builds, so the derivative
- * reads the height field's own detail rather than averaging across a whole
- * facet, but not so small that it degenerates to the map's own texel noise.
+ * Ship-scale: a fixed world-unit distance, not a fraction of the globe.
+ *
+ * This comment used to say the step was "well under the ~2.2 unit triangle",
+ * and that figure is wrong. At the high tier the icosphere is 20 * 193^2 =
+ * 744,980 triangles over a sphere of 4*PI*200^2 = 502,655 square units, so a
+ * face is 0.675 square units and its edge is about **1.25** units. The step is
+ * therefore very nearly one triangle wide, not half of one, and always was.
+ *
+ * Left at 1.2 rather than shrunk to match the sentence, because the sentence
+ * was the thing that was wrong and the number has been tuned by eye against
+ * the terrain it actually reads. What the true figure changes is the
+ * REASONING: the step is not sampling inside a facet, it is sampling across
+ * one, so the slope and curvature this drives are a facet-scale gradient of
+ * the height field rather than a sub-facet one. That is the right scale for
+ * the rock/wet/curvature masks it feeds, all of which are meant to follow the
+ * terrain's shape rather than its texel noise. The finer scale is the detail
+ * normal's job, and DETAIL_STEP_WORLD (0.25) is a fifth of this for exactly
+ * that reason.
+ *
+ * If `landDetail` is ever retuned, this relationship is worth re-deriving
+ * rather than assumed: edge ~= sqrt(4 * area / (sqrt(3) * triangles)).
  */
 const SLOPE_STEP_WORLD = 1.2;
 

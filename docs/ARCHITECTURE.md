@@ -714,7 +714,10 @@ from.
 
 Every field is a pipeline/wiring number, not a world- or ship-scale one: a
 pixel-ratio ceiling, a bloom working-width cap, three render-target/vertex
-counts (`wakeMapSize`, `patchSegments`, `reflectionSize`), a blend weight
+counts (`wakeMapSize`, `patchSegments`, `reflectionSize`, `landDetail` --
+icosphere subdivisions per 100 units of `GLOBE_RADIUS`, so the land triangle
+keeps its world size as the globe is retuned: 64/80/96, giving 133k/204k/289k
+drawn triangles after the coastal cull), a blend weight
 (`landFacetBlend`, how far land's per-pixel normal replaces its flat facet
 normal -- the one row that costs nothing to move at runtime, since it reaches
 the shader as a uniform rather than a baked constant), a face count
