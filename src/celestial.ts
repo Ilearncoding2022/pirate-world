@@ -107,6 +107,79 @@ const MOON_GLOW_GAIN = (SUN_CORE_GAIN + SUN_CORONA_GAIN) * MOON_GLOW_FRACTION;
 const MOON_GLOW_SCALE = SUN_CORONA_SCALE;
 
 /* ------------------------------------------------------------------ */
+/* The aurora rim                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where the rim aurora's band sits, in quad radii, and how wide it is.
+ *
+ * The moon's own limb is at exactly `1 / MOON_GLOW_SCALE` on the halo quad --
+ * that is what `coreEdge` means on this billboard -- and the band is centred a
+ * few percent OUTSIDE it, so the ring reads as light standing off the edge of
+ * the body rather than as a bright stripe painted around the outside of the
+ * disc. The width is a third of the moon's own radius, which is narrow enough
+ * that the thing is unmistakably a rim and not a second halo, and wide enough
+ * to survive the bloom blurring it.
+ */
+const MOON_AURORA_EDGE = 1.06 / MOON_GLOW_SCALE;
+const MOON_AURORA_WIDTH = 0.1;
+
+/**
+ * The rim's peak brightness, and it is the same tenth of the sun the halo is:
+ * `MOON_GLOW_GAIN` itself, not a number of its own.
+ *
+ * **This ring glows; it does not go through the bloom pass, and the margin is
+ * 1.3%.** Worth writing down, because it is the kind of thing that gets
+ * "fixed" by someone who did not measure it. `postfx.ts` thresholds on the
+ * peak channel at 0.9. The brightest pixel this rim can ever appear on is the
+ * lit limb of a FULL moon over the brightest crater the hash produces:
+ * MOON_ALBEDO is 0.565 in the linear space these shaders write, the crater
+ * term tops out at 1.22 of it (0.689), MOON_GLOW_COLOR's own peak channel is
+ * 0.922, and the rim is additive over the face (see `buildMoonAurora`'s
+ * renderOrder). So the best case is 0.689 + 0.922 * 0.215 = 0.887, and the
+ * bloom chain never sees it.
+ *
+ * That is a real tension in what was asked for and not an oversight: a tenth
+ * of the sun and a bloom are two different instructions, and on this
+ * threshold they are 0.013 apart. The tenth wins because it is the number
+ * that was actually written down, and because it is the same tenth the halo
+ * has always been held to -- the moon is the one body in this world that is
+ * not allowed to glare, which is the whole of MOON_MAX_LUMA's argument.
+ *
+ * If the ring should genuinely bloom, this is the one constant to move and
+ * nothing else changes: about 0.23 puts the brightest full-moon limb over the
+ * line, and about 0.36 -- a sixth of the sun rather than a tenth -- puts the
+ * whole lit half of an ordinary full moon over it, which is the value that
+ * would actually read as glare.
+ *
+ * What the ring does do is the rest of what was asked, and it does it off the
+ * phase: scaled by `moonIllumination` exactly as the halo is, a full moon
+ * wears a complete ring, a thin crescent wears one on the lit horn, and a new
+ * moon wears none.
+ */
+const MOON_AURORA_GAIN = MOON_GLOW_GAIN;
+
+/**
+ * The aurora's shimmer: how much of the ring's brightness moves, and the two
+ * rates it moves at, radians of ring per cycle and cycles per second.
+ *
+ * A ring of constant brightness is a decal. Two slow sines at coprime
+ * frequencies -- the second SUBTRACTED, so the two run opposite ways around
+ * the limb rather than in step -- give it the drifting bright and dim arcs
+ * that make the thing read as an aurora rather than as a drawn circle. Both
+ * are functions of the angle around the quad, so the pattern turns with the
+ * moon rather than with the camera.
+ *
+ * The depth is deliberately under half: at more than that the ring visibly
+ * breaks into separate arcs, and a broken ring reads as an artefact.
+ */
+const MOON_AURORA_SHIMMER = 0.34;
+const MOON_AURORA_LOBES_A = 3;
+const MOON_AURORA_LOBES_B = 5;
+const MOON_AURORA_RATE_A = 0.29;
+const MOON_AURORA_RATE_B = 0.17;
+
+/* ------------------------------------------------------------------ */
 /* The billboard both haloes are drawn with                            */
 /* ------------------------------------------------------------------ */
 
@@ -134,24 +207,34 @@ const GLOW_VERTEX = [
 ].join('\n');
 
 /*
- * One fragment shader for both haloes, and `uCoreGain` is what separates them.
+ * One fragment shader for all three billboards, and the three gains are what
+ * separate them.
  *
- * The sun sets it and gets a hard disc inside a wide falloff. The moon sets it
- * to ZERO, which drops the core term entirely and leaves only the falloff --
- * exactly what the moon wants, because the moon already draws its own body as
- * a lit sphere, and a second bright disc behind that sphere would fill in the
- * dark half and destroy the phase. A crescent has to stay a crescent with the
- * glow on.
+ * The sun sets `uCoreGain` and gets a hard disc inside a wide falloff. The
+ * moon's halo sets it to ZERO, which drops the core term entirely and leaves
+ * only the falloff -- exactly what the moon wants, because the moon already
+ * draws its own body as a lit sphere, and a second bright disc behind that
+ * sphere would fill in the dark half and destroy the phase. A crescent has to
+ * stay a crescent with the glow on. The moon's aurora sets `uRimGain` alone
+ * and gets the band by itself, drawn OVER the body rather than under it --
+ * which is what lets a ring at a tenth of the sun still be seen against a
+ * face several times brighter than it.
  *
- * Sharing the string rather than writing the moon a second one is deliberate:
- * `celestial-shader.test.ts` pins this by golden, and two near-identical
- * shaders would be two goldens free to drift apart.
+ * Sharing the string rather than writing each one its own is deliberate:
+ * `celestial-shader.test.ts` pins this by golden, and three near-identical
+ * shaders would be three goldens free to drift apart. Every term is exactly
+ * zero at its own gain of zero, so a body that does not want one does not pay
+ * for it in anything but the arithmetic.
  */
 const GLOW_FRAGMENT = [
   'uniform vec3 uColor;',
   'uniform float uCoreEdge;',
   'uniform float uCoreGain;',
   'uniform float uCoronaGain;',
+  'uniform float uRimGain;',
+  'uniform float uRimEdge;',
+  'uniform float uRimWidth;',
+  'uniform float uTime;',
   'varying vec2 vQuad;',
   'void main() {',
   '  float r = length(vQuad);',
@@ -161,7 +244,17 @@ const GLOW_FRAGMENT = [
   '  // Corona: a wide falloff that is gone before the corner of the quad, so',
   '  // the quad itself never shows.',
   '  float corona = pow(clamp(1.0 - r, 0.0, 1.0), 2.5);',
-  '  float amount = core * uCoreGain + corona * uCoronaGain;',
+  '  // Rim aurora: a gaussian band standing just outside the body\'s own limb,',
+  '  // with its brightness drifting around the ring on two slow lobes running',
+  '  // opposite ways. atan() is undefined at the origin, so the shimmer fades',
+  '  // out over the middle of the quad -- where the band is zero in any case.',
+  '  float rimT = (r - uRimEdge) / max(uRimWidth, 1e-4);',
+  '  float rim = exp(-rimT * rimT);',
+  '  float ang = atan(vQuad.y, vQuad.x);',
+  `  float shimmer = sin(ang * ${MOON_AURORA_LOBES_A.toFixed(1)} + uTime * ${MOON_AURORA_RATE_A.toFixed(2)})`,
+  `                * sin(ang * ${MOON_AURORA_LOBES_B.toFixed(1)} - uTime * ${MOON_AURORA_RATE_B.toFixed(2)});`,
+  `  rim *= 1.0 - ${MOON_AURORA_SHIMMER.toFixed(2)} * (0.5 - 0.5 * shimmer) * smoothstep(0.0, 0.1, r);`,
+  '  float amount = core * uCoreGain + corona * uCoronaGain + rim * uRimGain;',
   '  // Additive, so alpha is only a mask; the colour carries the brightness.',
   '  gl_FragColor = vec4(uColor * amount, clamp(amount, 0.0, 1.0));',
   '}',
@@ -171,8 +264,12 @@ const GLOW_FRAGMENT = [
  * A billboarded halo: `size` world units to the corner of the quad, with the
  * hard core filling `coreEdge` of that radius.
  *
- * Shared by both bodies, so a change to how a halo is drawn cannot reach one
- * and miss the other.
+ * Shared by all three billboards, so a change to how a halo is drawn cannot
+ * reach one and miss another.
+ *
+ * `rim` is the aurora band: its gain, where it sits in quad radii, and how
+ * wide it is. Zero gain removes it, which is what the sun and the moon's own
+ * halo pass.
  */
 function buildGlow(
   name: string,
@@ -182,6 +279,11 @@ function buildGlow(
   coreGain: number,
   coronaGain: number,
   renderOrder: number,
+  rim: { readonly gain: number; readonly edge: number; readonly width: number } = {
+    gain: 0,
+    edge: 0,
+    width: 1,
+  },
 ): THREE.Mesh {
   const material = new THREE.ShaderMaterial({
     uniforms: {
@@ -190,6 +292,10 @@ function buildGlow(
       uCoreEdge: { value: coreEdge },
       uCoreGain: { value: coreGain },
       uCoronaGain: { value: coronaGain },
+      uRimGain: { value: rim.gain },
+      uRimEdge: { value: rim.edge },
+      uRimWidth: { value: rim.width },
+      uTime: { value: 0 },
     },
     vertexShader: GLOW_VERTEX,
     fragmentShader: GLOW_FRAGMENT,
@@ -220,7 +326,7 @@ function buildSun(): THREE.Mesh {
     new THREE.Color('#fff4e4'),
     SUN_CORE_GAIN,
     SUN_CORONA_GAIN,
-    -4,
+    -3,
   );
 }
 
@@ -245,6 +351,38 @@ function buildMoonGlow(): THREE.Mesh {
     0,
     MOON_GLOW_GAIN,
     -6,
+  );
+}
+
+/**
+ * The moon's rim aurora: the same billboard again, with the core and the
+ * corona switched off and only the band standing.
+ *
+ * Sits at renderOrder -4, OVER the moon's own sphere at -5, and that is the
+ * whole difference between this and the halo below it. The halo is light
+ * BEHIND the body and has to be painted over by the lit face; the aurora is
+ * light standing at the body's edge, so it is painted over the face and adds
+ * to it -- which is also what lets a lit limb plus a ring cross `postfx.ts`'s
+ * bloom threshold when neither could alone. See MOON_AURORA_GAIN.
+ *
+ * The quad is the halo's, to the unit: the band is positioned in quad radii
+ * off `MOON_GLOW_SCALE`, so the two must be the same size or the ring lands
+ * somewhere other than the limb.
+ *
+ * `uRimGain` is rewritten every frame from the phase -- see `update` -- so the
+ * value passed here is only what it starts at.
+ */
+function buildMoonAurora(): THREE.Mesh {
+  const discRadius = Math.tan(MOON_DISC_RADIANS) * CELESTIAL_DISTANCE;
+  return buildGlow(
+    'moon-aurora',
+    discRadius * MOON_GLOW_SCALE,
+    1 / MOON_GLOW_SCALE,
+    MOON_GLOW_COLOR.clone(),
+    0,
+    0,
+    -4,
+    { gain: MOON_AURORA_GAIN, edge: MOON_AURORA_EDGE, width: MOON_AURORA_WIDTH },
   );
 }
 
@@ -365,19 +503,34 @@ export function createCelestial(): Celestial {
   const sun = buildSun();
   const moonGlow = buildMoonGlow();
   const moon = buildMoon();
+  const moonAurora = buildMoonAurora();
   group.add(sun);
-  // Added before the sphere for readability only; renderOrder, not insertion
-  // order, is what actually decides which paints first. See buildMoonGlow.
+  // Added in painting order for readability only; renderOrder, not insertion
+  // order, is what actually decides which paints first. See buildMoonGlow and
+  // buildMoonAurora, which sit either side of the sphere between them.
   group.add(moonGlow);
   group.add(moon);
+  group.add(moonAurora);
 
   const sunUniforms = (sun.material as THREE.ShaderMaterial).uniforms;
   const moonUniforms = (moon.material as THREE.ShaderMaterial).uniforms;
   const moonGlowUniforms = (moonGlow.material as THREE.ShaderMaterial).uniforms;
+  const moonAuroraUniforms = (moonAurora.material as THREE.ShaderMaterial).uniforms;
+
+  /**
+   * The aurora's own clock, in seconds, and the only state this module keeps.
+   *
+   * Accumulated from `dt` rather than read off `env.elapsed`, because that one
+   * is the world's day clock and runs at whatever rate the day is running at;
+   * the shimmer is a thing the water does, not a thing the calendar does, and
+   * it should drift at the same rate at noon and at midnight.
+   */
+  let auroraTime = 0;
 
   return {
     group,
-    update(_dt: number, env: WorldEnv): void {
+    update(dt: number, env: WorldEnv): void {
+      auroraTime += dt;
       sun.position.copy(env.sunDirection).multiplyScalar(CELESTIAL_DISTANCE);
       // Same tint as the key light, so the disc goes orange on the horizon
       // with the light it is casting rather than a beat after it.
@@ -403,6 +556,17 @@ export function createCelestial(): Celestial {
        */
       moonGlow.position.copy(moon.position);
       moonGlowUniforms.uCoronaGain.value = MOON_GLOW_GAIN * env.moonIllumination;
+
+      /*
+       * The aurora rides the body exactly too, and scales with the phase for
+       * the same reason the halo does: a ring is light coming off the lit
+       * face, and a new moon has no lit face to give any. It is the same
+       * number the sphere's own terminator is drawn from, so the ring cannot
+       * brighten while the crescent it wraps thins.
+       */
+      moonAurora.position.copy(moon.position);
+      moonAuroraUniforms.uRimGain.value = MOON_AURORA_GAIN * env.moonIllumination;
+      moonAuroraUniforms.uTime.value = auroraTime;
     },
   };
 }

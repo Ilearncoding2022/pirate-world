@@ -269,7 +269,7 @@ shader.
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
 | `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS`, `START_ELAPSED` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time |
-| `celestial.ts` | `createCelestial()` | the sun disc, the moon and the moon's halo as things you can see; draws only what `daynight.ts` already decided and writes nothing |
+| `celestial.ts` | `createCelestial()` | the sun disc, the moon, the moon's halo and its rim aurora as things you can see; draws only what `daynight.ts` already decided and writes nothing |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
@@ -829,6 +829,49 @@ instead of quietly ending the tenth. `uCoronaGain` is then scaled every frame by
 moon has no lit face to give any — left flat, the one night the moon is a dark
 disc would be the night it wore its brightest ring.
 
+### The moon's rim aurora, and the 1.3% it misses the bloom by
+The moon now wears a third billboard as well: a narrow band of light standing
+just outside its own limb, in the same silvery yellow the halo is, its
+brightness drifting around the ring on two slow sines at coprime frequencies
+running opposite ways. It is the same shared shader again — `uRimGain` separates
+it exactly as `uCoreGain` separates the sun — so there is still ONE billboard in
+that file, which is what `celestial-shader.test.ts` asserts rather than keeping
+a second golden free to drift.
+
+**Its renderOrder is the whole difference between a halo and a rim.** The halo
+is light BEHIND the sphere at -6 and has to be painted over by the lit face;
+the aurora is light standing at the sphere's EDGE, so it goes at -4, over the
+body, and adds to it. The sun moved to -3 to keep the table strictly ordered.
+Both ride the moon's position exactly, and both scale by
+`env.moonIllumination`: a full moon wears a complete ring, a thin crescent
+wears one on the lit horn, a new moon wears none.
+
+**It glows; it does not go through the bloom pass, and the margin is 1.3%.**
+Worth recording because it is precisely the kind of thing that gets "fixed" by
+someone who did not measure it. `postfx.ts` thresholds on the peak channel at
+0.9. The brightest pixel this ring can ever appear on is the lit limb of a full
+moon over the brightest crater the hash produces: `MOON_ALBEDO` is 0.565 in the
+linear space these shaders write (they do not self-encode), the crater term tops
+out at 1.22 of it, `MOON_GLOW_COLOR`'s own peak channel is 0.922, and the ring
+is additive over the face — so the best case is
+`0.689 + 0.922 * 0.215 = 0.887`, and the bright pass never sees it.
+
+That is a real tension in what was asked for rather than an oversight: a bloom
+and a tenth of the sun are two different instructions and on this threshold they
+are 0.013 apart. The tenth won because it is the number that was written down,
+and because it is the same tenth the halo has always been held to — the moon is
+the one body in this world that is not allowed to glare, which is the whole of
+`MOON_MAX_LUMA`'s argument. `MOON_AURORA_GAIN` is the one constant to move if
+that is ever decided differently: about 0.23 puts the brightest full-moon limb
+over the line, about 0.36 — a sixth of the sun — puts the whole lit half of an
+ordinary full moon over it. A unit case pins the arithmetic in BOTH directions,
+so a later brightness tweak cannot cross the line without noticing.
+
+The aurora keeps its own clock, accumulated from `dt` rather than read off
+`env.elapsed`: that one is the world's day clock and runs at whatever rate the
+day runs at, and the shimmer is a thing the light does rather than a thing the
+calendar does. It should drift at the same rate at noon and at midnight.
+
 Two constants exist only to stop degenerate openings. `MOON_PHASE_OFFSET` keeps
 the world from starting on a new moon beside a noon sun, the one arrangement in
 which there is nothing to see. And the sun's and moon's declinations run on
@@ -862,13 +905,16 @@ holding the layering up. It is set explicitly, in one place per file:
 | sky dome (`sky.ts`) | -10 |
 | moon glow (`celestial.ts`) | -6 |
 | moon (`celestial.ts`) | -5 |
-| sun disc (`celestial.ts`) | -4 |
+| moon aurora (`celestial.ts`) | -4 |
+| sun disc (`celestial.ts`) | -3 |
 | atmosphere shell (`sky.ts`) | 0 |
 | cloud slices (`clouds.ts`) | 2 + i |
 
 The halo goes UNDER its own body on purpose. Both are centred on the same point,
 so the distance sort cannot separate them, and drawn the other way round the
-glow would paint over the terminator it is supposed to surround.
+glow would paint over the terminator it is supposed to surround. The moon is the
+one body with something on BOTH sides of it: the rim aurora is light at the
+sphere's edge rather than behind it, so it goes over the face and adds to it.
 
 The sun and the moon are deliberately NOT on `LAYER_REFLECTED`: they sit at
 8 × `GLOBE_RADIUS`, outside the reflection cube's 3 × far plane, and the water

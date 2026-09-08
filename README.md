@@ -99,7 +99,13 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   ahead. It carries a **halo** now, a silvery yellow-white a tenth as bright as
   the sun's — enough to read as a light source rather than a painted disc, and
   far enough under the bloom line that it can never be mistaken for a second
-  sun. The halo follows the phase, so a thin crescent wears a thin ring.
+  sun. The halo follows the phase, so a thin crescent wears a thin ring. And
+  now there is an **aurora on the rim** as well: a narrow band of the same
+  silvery yellow standing just off the moon's own edge, brighter in some arcs
+  than others and drifting slowly around the limb, so the moon has a moving
+  edge rather than a drawn one. It follows the phase too — a full moon wears a
+  complete ring, a crescent wears one on its lit horn, and a new moon wears
+  none at all.
 - **A sky, from the deck.** Blue overhead and pale at the horizon by day, warm
   along the whole limb at dawn and dusk, and a thin navy veil at night that the
   stars and the moon still show through. Zoom out and it thins away, because at

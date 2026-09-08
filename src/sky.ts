@@ -339,7 +339,12 @@ function buildStars(): THREE.Points {
    * sitting on top of them:
    *
    *   starfield -20 | sky dome -10 | moon glow -6 | moon -5 |
-   *   sun disc -4 | atmosphere 0 | clouds 2 + i
+   *   moon aurora -4 | sun disc -3 | atmosphere 0 | clouds 2 + i
+   *
+   * The moon is the one body with something on both sides of it: its halo is
+   * light behind the sphere and has to be painted over by the lit face, its
+   * aurora is light standing at the sphere's edge and has to be painted over
+   * it. See `celestial.ts`'s `buildMoonGlow` and `buildMoonAurora`.
    */
   points.renderOrder = -20;
   return points;
