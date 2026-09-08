@@ -292,7 +292,12 @@ function seaFragment(fine: boolean): string {
     '  col = mix(col, mix(uSky, uHorizon, fres) * (0.18 + 0.82 * uDayFactor), fres * 0.55);',
     '  vec3 halfway = normalize(sun + view);',
     '  col += uSunColor * (SPEC_STRENGTH * pow(max(dot(N, halfway), 0.0), SPEC_POWER) * uDayFactor);',
-    '  col = applyAerial(col, vWorldPos + ARENA_LIFT, cameraPosition + ARENA_LIFT, sun, uDayFactor);',
+    // No weather in the arena, and `vec2(0.0)` is how that is said: a fight
+    // is a second scene with its own flat sea nowhere on the globe, so a
+    // sample of an equirectangular world map would be meaningless here. What
+    // a storm outside DOES reach the arena through is `battlesea.ts`'s
+    // CALM/ROUGH switch, which is a decision made once when the fight opens.
+    '  col = applyAerial(col, vWorldPos + ARENA_LIFT, cameraPosition + ARENA_LIFT, sun, uDayFactor, vec2(0.0));',
     '  // A hand-written ShaderMaterial, so `postfx.ts` leaves it out of the',
     '  // self-encode patch and it does the linear to sRGB step itself, exactly',
     '  // as `water.ts` and `docks.ts` do on their last line.',

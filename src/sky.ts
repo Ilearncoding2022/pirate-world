@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import type { WorldEnv } from './env';
+import type { WeatherState } from './types';
 import { GLOBE_RADIUS } from './geo';
 import { LAYER_REFLECTED } from './layers';
 
 export interface Sky {
   group: THREE.Group;
-  update(dt: number, env: WorldEnv): void;
+  /** `weather` is optional and absent means clear. */
+  update(dt: number, env: WorldEnv, weather?: WeatherState): void;
 }
 
 /**
@@ -143,6 +145,34 @@ const SKY_HORIZON_NIGHT = new THREE.Color('#141c3a');
 const SKY_DUSK_GLOW = new THREE.Color('#ff8a4a');
 
 /**
+ * The colour the dome takes under a storm.
+ *
+ * A flat, faintly blue grey. What it replaces is the DAY pair only -- both
+ * zenith and horizon -- and it is applied before the day/night mix, so a
+ * storm at night is still night: there is nothing for a storm to darken once
+ * the sky is already the deep navy `SKY_ZENITH_NIGHT` is.
+ *
+ * The dome deliberately reads the AT-SHIP envelope and not `weathermap.ts`.
+ * The dome is what shows BETWEEN the clouds, and under a distant cell it is
+ * the cloud deck that carries the weather while the gaps stay the day's own
+ * colour -- which is exactly what a storm on the horizon looks like from
+ * under a clear sky.
+ */
+const SKY_STORM = new THREE.Color('#59626e');
+
+/**
+ * How far a full storm pulls the dome toward that grey, and how much white a
+ * full flash adds to it.
+ *
+ * The storm weight is high (0.75) because the dome is a large, flat area and
+ * a half-hearted grey reads as haze rather than as weather. The flash is
+ * low (0.35) because it is ADDITIVE and lands on the whole sky at once: much
+ * more and a strike blows the frame out to white rather than lighting it.
+ */
+const SKY_STORM_MIX = 0.75;
+const FLASH_SKY = 0.35;
+
+/**
  * How opaque the dome is at night.
  *
  * Not zero, and not one. A quarter leaves a deep navy veil that the stars and
@@ -196,6 +226,9 @@ const DOME_FRAGMENT = [
   'uniform vec3 uSunDirection;',
   'uniform float uDay;',
   'uniform float uNightOpacity;',
+  'uniform vec3 uStormColor;',
+  'uniform float uGloom;',
+  'uniform float uFlash;',
   'uniform float uGlobeRadius;',
   'uniform float uFadeLo;',
   'uniform float uFadeHi;',
@@ -218,8 +251,13 @@ const DOME_FRAGMENT = [
   '',
   '  // Blue overhead, pale at the horizon, and the whole ramp slides toward',
   '  // the night pair as the sun goes down.',
-  '  vec3 horizon = mix(uHorizonNight, uHorizonDay, uDay);',
-  '  vec3 zenithCol = mix(uZenithNight, uZenithDay, uDay);',
+  '  // The storm greys the DAY pair only, before the day/night mix below:',
+  '  // there is nothing for a storm to darken once the sky is already night,',
+  '  // and mixing after would have lifted a stormy midnight toward grey.',
+  '  vec3 horizonDay = mix(uHorizonDay, uStormColor, uGloom);',
+  '  vec3 zenithDay = mix(uZenithDay, uStormColor, uGloom);',
+  '  vec3 horizon = mix(uHorizonNight, horizonDay, uDay);',
+  '  vec3 zenithCol = mix(uZenithNight, zenithDay, uDay);',
   '  vec3 col = mix(horizon, zenithCol, smoothstep(0.0, 0.55, aboveLimb));',
   '',
   '  // Twilight peaks when the sun is ON the horizon, which is exactly where',
@@ -253,7 +291,9 @@ const DOME_FRAGMENT = [
   '  // this is a smooth gradient written into an 8-bit target, and without it',
   '  // the sky bands into visible steps.',
   '  float ditherAmt = (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;',
-  '  gl_FragColor = vec4(col + ditherAmt, alpha);',
+  '  // Lightning, after the dither and before the write: additive, so it',
+  '  // reads at night, which is when most of a storm is looked at.',
+  '  gl_FragColor = vec4(col + ditherAmt + uFlash, alpha);',
   '}',
 ].join('\n');
 
@@ -271,6 +311,11 @@ function buildSkyDome(): THREE.Mesh {
       uSunDirection: { value: new THREE.Vector3(0.62, 0.42, 0.66).normalize() },
       uDay: { value: 1 },
       uNightOpacity: { value: SKY_NIGHT_OPACITY },
+      uStormColor: { value: SKY_STORM.clone() },
+      // Zero in fair weather, which leaves both terms above inert and the
+      // dome exactly the dome it has always been.
+      uGloom: { value: 0 },
+      uFlash: { value: 0 },
       uGlobeRadius: { value: GLOBE_RADIUS },
       uFadeLo: { value: SKY_FADE_LO },
       uFadeHi: { value: SKY_FADE_HI },
@@ -365,12 +410,19 @@ export function createSky(): Sky {
 
   return {
     group,
-    update(dt: number, env: WorldEnv): void {
+    update(dt: number, env: WorldEnv, weather?: WeatherState): void {
       starPivot.rotation.y += dt * 0.004;
       atmoUniforms.uSunDirection.value.copy(env.sunDirection);
       domeUniforms.uSunDirection.value.copy(env.sunDirection);
       // The one clock: `fog.ts` mixes its horizon by this same number.
       domeUniforms.uDay.value = env.dayFactor;
+      // The dome carries the weather; the atmosphere shell does not. A limb
+      // is an orbital effect and a storm is a deck one, and the two already
+      // cross-fade against each other over camera altitude -- greying the
+      // shell as well would double the effect at exactly the altitude where
+      // both are half on.
+      domeUniforms.uGloom.value = weather ? weather.storm * SKY_STORM_MIX : 0;
+      domeUniforms.uFlash.value = weather ? weather.flash * FLASH_SKY : 0;
     },
   };
 }

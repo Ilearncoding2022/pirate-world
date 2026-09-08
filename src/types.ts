@@ -321,6 +321,17 @@ export interface WeatherState {
    */
   readonly flash: number;
   /**
+   * True when the live flash belongs to a SQUALL rather than to a cell.
+   *
+   * A squall has no place -- it is wherever the ship is -- so its lightning
+   * lights the whole cloud deck. A cell's lightning lights only its own
+   * cloud, which `weathermap.ts` marks in the map's blue channel. Without
+   * this distinction one of the two is always wrong: either a strike inside a
+   * storm on the horizon flashes the clear sky overhead, or a squall's strike
+   * lights nothing at all because no cell claimed it.
+   */
+  readonly flashLocal: boolean;
+  /**
    * How far the ship can see, world units, in [VIS_MIN, RADAR_RANGE].
    *
    * The one number the weather and the chart meet at: the scope masks itself

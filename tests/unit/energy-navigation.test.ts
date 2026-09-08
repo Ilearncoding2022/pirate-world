@@ -4,7 +4,7 @@ import { createEnergy } from '../../src/energy';
 import { createBattery } from '../../src/battery';
 import { OVERDRIVE_BURN_MULTIPLIER } from '../../src/overdrive';
 import { MOONGLASS_NIGHT_FRACTION } from '../../src/moonglass';
-import type { Dock, ShipState, Towns } from '../../src/types';
+import type { Dock, ShipState, Towns, WeatherState } from '../../src/types';
 import type { WorldEnv } from '../../src/env';
 
 /**
@@ -60,6 +60,112 @@ function drained(): ReturnType<typeof createEnergy> {
   for (let i = 0; i < 200; i++) energy.update(0.1, stoppedShip(), envWithSun(-1, 0));
   return energy;
 }
+
+/**
+ * A plant drained to about half, so a later charge has somewhere to go.
+ *
+ * `drained()` above takes 20 seconds off a full tank, which the solar charge
+ * makes back inside two and clamps at the ceiling -- and a clamped level
+ * reports a `rate` of exactly 0, which would make every comparison below
+ * pass or fail for the wrong reason. Twenty minutes of idle drain leaves
+ * about half, which no test here can refill.
+ */
+function halfDrained(): ReturnType<typeof createEnergy> {
+  const energy = createEnergy(NO_TOWNS, createBattery(0));
+  for (let i = 0; i < 12000; i++) energy.update(0.1, stoppedShip(), envWithSun(-1, 0));
+  return energy;
+}
+
+/** A weather with only the two envelopes the plant reads set. */
+function weatherWith(storm: number, fog: number): WeatherState {
+  return {
+    kind: 'storm',
+    cover: storm,
+    rain: storm,
+    storm,
+    fog,
+    flash: 0,
+    flashLocal: false,
+    visibility: 50,
+  };
+}
+
+describe('energy.ts — the weather on the panels', () => {
+  it('leaves a clear noon exactly as it was, with and without a weather argument', () => {
+    const clear = halfDrained();
+    const withArg = halfDrained();
+    for (let i = 0; i < 20; i++) {
+      clear.update(0.1, stoppedShip(), envWithSun(1));
+      withArg.update(0.1, stoppedShip(), envWithSun(1), false, 0, weatherWith(0, 0));
+    }
+    // The zero contract, on the one system where it can be measured to the
+    // last bit rather than looked at: no weather and clear weather are the
+    // same plant.
+    expect(withArg.state.level).toBe(clear.state.level);
+    expect(withArg.state.rate).toBe(clear.state.rate);
+  });
+
+  it('takes nearly all of the panels in a full storm and half in fog', () => {
+    const clear = halfDrained();
+    const storm = halfDrained();
+    const fog = halfDrained();
+    for (let i = 0; i < 20; i++) {
+      clear.update(0.1, stoppedShip(), envWithSun(1));
+      storm.update(0.1, stoppedShip(), envWithSun(1), false, 0, weatherWith(1, 0));
+      fog.update(0.1, stoppedShip(), envWithSun(1), false, 0, weatherWith(0, 1));
+    }
+    expect(clear.state.rate).toBeGreaterThan(0);
+    // A full storm leaves 5% of the charge, so the plant is draining rather
+    // than charging: a storm is a power problem, which is the whole point.
+    expect(storm.state.rate).toBeLessThan(0);
+    expect(storm.state.level).toBeLessThan(clear.state.level);
+    // Fog is half, and half of a noon is still a charge.
+    expect(fog.state.level).toBeLessThan(clear.state.level);
+    expect(fog.state.level).toBeGreaterThan(storm.state.level);
+  });
+
+  it('cuts the Moonglass Array by the same factor, so a night storm is no better', () => {
+    const clear = halfDrained();
+    const storm = halfDrained();
+    for (let i = 0; i < 20; i++) {
+      clear.update(0.1, stoppedShip(), envWithSun(-1, 1), false, MOONGLASS_NIGHT_FRACTION[3]);
+      storm.update(
+        0.1,
+        stoppedShip(),
+        envWithSun(-1, 1),
+        false,
+        MOONGLASS_NIGHT_FRACTION[3],
+        weatherWith(1, 0),
+      );
+    }
+    // Left uncut, a night storm would charge better than a day one, which is
+    // a strange thing for a game to teach.
+    expect(storm.state.level).toBeLessThan(clear.state.level);
+  });
+
+  it('charges at a berth whatever the sky is doing', () => {
+    // A berth is the one shelter the plant has, and the reason to run for one.
+    const dock: Dock = { town: null as never, dir: new Vector3(0, 1, 0), radius: 10 };
+    // Alongside only once `alongside` says so, so the drain below happens at
+    // sea rather than in the berth that is meant to be doing the charging.
+    let alongside = false;
+    const towns: Towns = { all: [], docks: [dock], dockAt: () => (alongside ? dock : null) };
+    const stormy = createEnergy(towns, createBattery(0));
+
+    // Twenty minutes at sea in the dark, to make room.
+    for (let i = 0; i < 12000; i++) stormy.update(0.1, stoppedShip(), envWithSun(-1, 0));
+    const low = stormy.state.level;
+    expect(low).toBeLessThan(0.9);
+
+    // Then alongside, at night, in the worst weather there is.
+    alongside = true;
+    for (let i = 0; i < 200; i++) {
+      stormy.update(0.1, stoppedShip(), envWithSun(-1, 0), false, 0, weatherWith(1, 1));
+    }
+    expect(stormy.state.mode).toBe('docked');
+    expect(stormy.state.level).toBeGreaterThan(low);
+  });
+});
 
 describe('energy.ts — Navigation offers', () => {
   it('burns a flat OVERDRIVE_BURN_MULTIPLIER x FULL_BURN while the coil is active', () => {

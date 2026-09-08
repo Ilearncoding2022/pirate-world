@@ -58,12 +58,22 @@ export interface AiBoats {
    * `suppressed` is `main.ts`'s verdict — docked, mid-blackout, or in a
    * maelstrom — and blocks both spawning and contact.
    */
+  /**
+   * `stormOdds` multiplies each kind's spawn probability, exactly as it does
+   * in `hazards.ts` and from the same number in `main.ts`: raiders work the
+   * weather too, and a storm that raised the sea without raising the odds of
+   * meeting one would be half a system.
+   *
+   * It multiplies the COMPARISON only. The draw stays unconditional, so the
+   * seeded stream replays whatever the sky is doing.
+   */
   update(
     dt: number,
     ship: ShipState,
     energy: EnergyState,
     hazards: HazardState,
     suppressed: boolean,
+    stormOdds?: number,
   ): void;
   /** Removes the boat a fight was fought with, and starts the grace period. */
   remove(boat: AiBoat): void;
@@ -516,12 +526,12 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
    *
    * The unconditional draw is the whole point; see ROLL_ORDER.
    */
-  function roll(ship: ShipState, suppressed: boolean): void {
+  function roll(ship: ShipState, suppressed: boolean, stormOdds: number): void {
     for (const kind of ROLL_ORDER) {
       const draw = rng();
       if (suppressed || state.grace > 0) continue;
       if (liveOf(kind) !== null) continue;
-      if (draw < ROLL_ODDS[kind]) trySpawn(kind, ship);
+      if (draw < ROLL_ODDS[kind] * stormOdds) trySpawn(kind, ship);
     }
   }
 
@@ -634,6 +644,7 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
     _energy: EnergyState,
     _hazards: HazardState,
     suppressed: boolean,
+    stormOdds = 1,
   ): void {
     // A frame that advanced no time draws no raiders. Returning leaves the
     // last true state standing rather than rewriting it with a stale zero.
@@ -649,7 +660,7 @@ export function createAiBoats(deps: AiBoatsDeps): AiBoats {
     rollTimer += dt;
     while (rollTimer >= ROLL_PERIOD) {
       rollTimer -= ROLL_PERIOD;
-      roll(ship, suppressed);
+      roll(ship, suppressed, stormOdds);
     }
 
     // ---- Steer, travel, and the coast -------------------------------

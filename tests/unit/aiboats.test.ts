@@ -316,6 +316,65 @@ describe('aiboats: pursuit', () => {
   });
 });
 
+describe('aiboats: the storm multiplier', () => {
+  it('raises nearly three times as many raiders under a full storm', () => {
+    const ship = stationaryShip();
+    const energy = energyState();
+    const dt = 0.1;
+
+    // Count SPAWNS rather than live boats: the population is capped at one of
+    // each kind, so a live count saturates before the odds show through.
+    function spawnsAt(stormOdds: number): number {
+      const boats = makeBoats(REAL_WORLD);
+      let spawns = 0;
+      let before = new Set(boats.state.live);
+      for (let i = 0; i < 6000 / dt; i++) {
+        boats.update(dt, ship, energy, NO_HAZARDS, false, stormOdds);
+        for (const b of boats.state.live) if (!before.has(b)) spawns++;
+        before = new Set(boats.state.live);
+      }
+      return spawns;
+    }
+
+    const calm = spawnsAt(1);
+    const storm = spawnsAt(3);
+    expect(calm).toBeGreaterThan(0);
+    /*
+     * Close to the tripling the multiplier asks for -- 219 spawns against 596
+     * over 100 minutes of sim, a ratio of 2.72 -- and the reason it lands so
+     * much nearer 3 than `hazards.ts` does is the roll period. The raiders
+     * roll once every TEN seconds at odds of 0.16 and 0.24, nowhere near
+     * saturating their one-of-each-kind cap, so tripling the probability
+     * genuinely triples the encounters. The hazards roll every second at 0.2
+     * and were already saturated; they get 1.46. See the matching case in
+     * `hazards.test.ts` for the full comparison.
+     */
+    const ratio = storm / calm;
+    expect(ratio).toBeGreaterThan(2.2);
+    expect(ratio).toBeLessThan(3.2);
+  });
+
+  it('defaults stormOdds to 1, so a caller that knows no weather is unchanged', () => {
+    const ship = stationaryShip();
+    const energy = energyState();
+    const dt = 0.1;
+
+    function trace(pass: (b: ReturnType<typeof makeBoats>) => void): string[] {
+      const boats = makeBoats(REAL_WORLD);
+      const out: string[] = [];
+      for (let i = 0; i < 1200 / dt; i++) {
+        pass(boats);
+        if (i % 100 === 0) out.push(boats.state.live.map((b) => b.kind).join('|'));
+      }
+      return out;
+    }
+
+    expect(trace((b) => b.update(dt, ship, energy, NO_HAZARDS, false))).toEqual(
+      trace((b) => b.update(dt, ship, energy, NO_HAZARDS, false, 1)),
+    );
+  });
+});
+
 describe('aiboats: the coast', () => {
   it('removes a boat whose centre steps onto land', () => {
     // Land east of 30 degrees of longitude, open water west of it, so a boat

@@ -17,6 +17,18 @@ import fixture from '../fixtures/sky-shader.json';
  *
  * "Modulo whitespace" collapses every run of whitespace (including
  * newlines) to a single space, matching `water-shader.test.ts`.
+ *
+ * The weather (docs/WEATHER_PLAN.md) moved the DOME's two fixtures and left
+ * the atmosphere shell's alone, which is itself the point. The dome gained
+ * `uStormColor`, `uGloom` and `uFlash`: the storm greys the day pair before
+ * the day/night mix (so a stormy midnight is still midnight) and the flash is
+ * added after the dither. The SHELL is untouched, because a limb is an
+ * orbital effect and a storm is a deck one, and the two already cross-fade
+ * against each other over camera altitude -- greying both would double the
+ * effect at exactly the altitude where each is half on.
+ *
+ * At zero weather `uGloom` and `uFlash` are zero, both terms vanish, and the
+ * dome renders what it always did.
  */
 function normalize(glsl: string): string {
   return glsl.replace(/\s+/g, ' ').trim();

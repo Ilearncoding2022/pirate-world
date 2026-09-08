@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { WorldEnv } from './env';
+import type { WeatherState } from './types';
 import { GLOBE_RADIUS } from './geo';
 import { SPAWN_LON_DEG } from './terrain';
 
@@ -7,7 +8,14 @@ export interface DayNight {
   /** Lights and any sun-following objects. Added to the world group. */
   group: THREE.Group;
   /** Advances time and rewrites `env` in place. Called before every consumer. */
-  update(dt: number, env: WorldEnv): void;
+  /**
+   * `weather` is optional and absent means clear. It reaches the LIGHTS only
+   * -- `daynight.ts` stays the sole writer of `WorldEnv`, and a storm must
+   * not move the sun's own colour or the day factor, because the fog, the
+   * sky and the water all mix by those and a grey sun would double the gloom
+   * in every one of them.
+   */
+  update(dt: number, env: WorldEnv, weather?: WeatherState): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -119,6 +127,31 @@ const GROUND_NIGHT = new THREE.Color('#0c1017');
 const GROUND_DAY = new THREE.Color('#4a4030');
 const HEMI_NIGHT = 0.16;
 const HEMI_DAY = 0.34;
+
+/**
+ * How much of the key light and the sky bounce a full storm takes away.
+ *
+ * The key loses most of itself (0.7): under a storm the sun is behind a
+ * kilometre of water and what reaches the deck is the sky, not the sun. The
+ * bounce loses much less (0.35), and that split is the whole look of the
+ * thing -- kill both equally and a storm is simply night, which the game
+ * already has. Keeping the ambient up while the key falls is what makes an
+ * overcast noon read as daylight with no shadows in it.
+ */
+const STORM_KEY_DIM = 0.7;
+const STORM_HEMI_DIM = 0.35;
+
+/**
+ * What a full lightning flash adds to each, ADDITIVELY.
+ *
+ * Additive rather than multiplicative for one reason: most of a storm is
+ * looked at after dark, and a multiplier on a key light that has already been
+ * dimmed to a fifth of itself would produce a flash nobody could see. 2.5 is
+ * a shade above `KEY_HIGH`, so a strike is momentarily brighter than noon,
+ * which is what a strike is.
+ */
+const FLASH_KEY = 2.5;
+const FLASH_HEMI = 0.8;
 
 /*
  * Moonlight: a cool fill, and now a body with somewhere of its own to be.
@@ -298,7 +331,7 @@ export function createDayNight(): DayNight {
     }),
   );
 
-  function update(dt: number, env: WorldEnv): void {
+  function update(dt: number, env: WorldEnv, weather?: WeatherState): void {
     if (!(dt > 0)) dt = 0;
     env.elapsed += dt;
 
@@ -341,7 +374,12 @@ export function createDayNight(): DayNight {
     sun.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE);
     sun.color.copy(env.sunColor);
     // Thicker air near the horizon: dim the key as the sun drops.
-    sun.intensity = KEY_LOW + (KEY_HIGH - KEY_LOW) * smoothstep(0.0, 0.42, elevation);
+    const key = KEY_LOW + (KEY_HIGH - KEY_LOW) * smoothstep(0.0, 0.42, elevation);
+    // Then the weather, which dims what the sun manages to deliver and adds
+    // what the lightning does. Both terms vanish exactly at zero weather.
+    const storm = weather ? weather.storm : 0;
+    const flash = weather ? weather.flash : 0;
+    sun.intensity = key * (1 - STORM_KEY_DIM * storm) + FLASH_KEY * flash;
 
     // ---- Where the moon is --------------------------------------------
     // Placed from elapsed time on its own period, in the same basis as the
@@ -376,7 +414,8 @@ export function createDayNight(): DayNight {
     moon.intensity =
       MOON_INTENSITY * (MOON_FLOOR + (1 - MOON_FLOOR) * env.moonIllumination);
 
-    hemi.intensity = HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * env.dayFactor;
+    const hemiBase = HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * env.dayFactor;
+    hemi.intensity = hemiBase * (1 - STORM_HEMI_DIM * storm) + FLASH_HEMI * flash;
     hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, env.dayFactor);
     hemi.groundColor.copy(GROUND_NIGHT).lerp(GROUND_DAY, env.dayFactor);
   }

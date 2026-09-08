@@ -101,6 +101,16 @@
           </span>
         </div>
 
+        <!-- The sky. One word, off `WeatherState.kind`, which is a label
+             derived from the envelopes and the only thing in the game allowed
+             to branch on it. It sits directly under WIND because the two are
+             one system read two ways: the wind is what the weather is doing
+             to the hull, this is what it is doing to everything else. -->
+        <div class="readout">
+          <span class="readout__key">SKY</span>
+          <span class="readout__val" id="hud-wx">CLEAR</span>
+        </div>
+
         <!-- The purse. It sits between the weather and the power because it
              is the one warm figure on a cold panel and the rule beneath the
              POWER block would otherwise separate it from the readouts it is

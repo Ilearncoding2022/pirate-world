@@ -1,4 +1,4 @@
-import type { EnergyMode, EnergyState, ShipState, WindState } from './types';
+import type { EnergyMode, EnergyState, ShipState, WeatherState, WindState } from './types';
 import type { Wallet } from './wallet';
 import type { GpuFrameStats } from './postfx';
 import type { SeaAnchorStore } from './seaanchor';
@@ -450,7 +450,7 @@ export function createHud(
   seaAnchor: SeaAnchorStore,
   overdrive: OverdriveStore,
 ): {
-  update(ship: ShipState, energy: EnergyState, wind: WindState): void;
+  update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void;
   /** Shows or hides the GPU/CPU/draw-call line. Off by default; main.ts calls this from its Backquote listener. */
   setDevTimingVisible(visible: boolean): void;
   /** Feeds this frame's rolling means to the dev line. A no-op while it is hidden costs nothing worth guarding. */
@@ -463,6 +463,7 @@ export function createHud(
   const writeHeading = textWriter(document.getElementById('hud-heading'));
   const writeSpeed = textWriter(document.getElementById('hud-speed'));
   const writeSpeedWind = textWriter(document.getElementById('hud-speed-wind'));
+  const writeWx = textWriter(document.getElementById('hud-wx'));
   // One modifier on the SPEED wrapper hides both the icon and the number,
   // the same way the WIND row hides its dart: the glyph and the figure it labels
   // cannot end up disagreeing about whether the wind is doing anything.
@@ -533,7 +534,11 @@ export function createHud(
   const writeOverdriveGate = reasonGateWriter(document.getElementById('btn-overdrive'));
 
   return {
-    update(ship: ShipState, energy: EnergyState, wind: WindState): void {
+    update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void {
+      // The one consumer of `WeatherState.kind`, and the reason it exists.
+      // Absent means clear, so a caller with no weather prints the sky the
+      // game always had.
+      writeWx(weather ? weather.kind.toUpperCase() : 'CLEAR');
       // The heading as a number. It used to drive a compass needle in the
       // D-pad's hub as well; that rose is gone, and the scope's own rim is
       // what carries the direction now.

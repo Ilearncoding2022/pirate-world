@@ -45,6 +45,23 @@ import { GOVERNOR_TIER_MAX, createGovernorStore } from './governor';
 export const SAVE_KEY = 'pirate-world.save';
 
 /**
+ * Where the explored chart lives. Its OWN key, beside this file rather than
+ * inside it.
+ *
+ * `SaveData` is two numbers and twenty counts, rewritten in full on every
+ * catch, purchase and whole percent of battery -- the comment on `writeSave`
+ * below says there is nothing to amortise, and for that file there is not.
+ * The chart is 87 KB and changes continuously while the ship explores, so it
+ * has the opposite cadence and would have dragged this one onto it. Kept
+ * apart, each writes at the rate it should: this one on every event, the
+ * chart at most every few seconds.
+ *
+ * The consequence, which is the price: clearing a player's progress means
+ * clearing two keys, not one. Recorded here so the second is not forgotten.
+ */
+export const CHART_KEY = 'pirate-world.chart';
+
+/**
  * The only version this build writes or accepts.
  *
  * A future version 2 loader keeps this constant and adds a migration; it does
@@ -298,6 +315,44 @@ export function writeSave(data: SaveData): void {
   }
   try {
     store.setItem(SAVE_KEY, JSON.stringify(data));
+  } catch (error) {
+    reportWriteFailure(String(error));
+  }
+}
+
+/**
+ * Reads the stored chart, or null.
+ *
+ * Returns the raw string; `chart.ts` owns the decoding and every one of its
+ * failure modes, because the shape of that data is its business and not this
+ * file's. What this file owns is the key and the fact that a missing or
+ * unreadable one is not damage.
+ */
+export function loadChart(): string | null {
+  try {
+    return storage()?.getItem(CHART_KEY) ?? null;
+  } catch {
+    console.warn(`save.ts: cannot read ${CHART_KEY}; the chart will start blank.`);
+    return null;
+  }
+}
+
+/**
+ * Writes the chart, and shrugs if it cannot.
+ *
+ * Same posture as `writeSave`, and it shares the same once-per-run failure
+ * report: a full quota fails both, and two console lines for one cause help
+ * nobody. The chart is by far the larger of the two, so in practice this is
+ * the call that discovers the quota is gone.
+ */
+export function writeChart(encoded: string): void {
+  const store = storage();
+  if (store === null) {
+    reportWriteFailure('storage is unavailable');
+    return;
+  }
+  try {
+    store.setItem(CHART_KEY, encoded);
   } catch (error) {
     reportWriteFailure(String(error));
   }

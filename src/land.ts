@@ -7,6 +7,7 @@ import { GLOBE_RADIUS } from './geo';
 import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
+import { WEATHERMAP_GLSL, weatherMapUniforms } from './weathermap';
 import { bakeTerrain, HORIZON_MAX_DEGREES } from './terrainbake';
 import type { Quality } from './quality';
 
@@ -315,6 +316,8 @@ const FRAGMENT_DECLARATIONS = [
   'uniform float uFacetBlend;',
   NOISE_GLSL,
   HEIGHTMAP_GLSL,
+  // After the height map, whose `dirToEquirect` it is built on.
+  WEATHERMAP_GLSL,
   FOG_GLSL,
   `const float SLOPE_DV = ${SLOPE_DV};`,
   `const float SLOPE_DU_BASE = ${SLOPE_DU_BASE};`,
@@ -596,7 +599,8 @@ const FRAGMENT_LIGHTS_INJECT = [
  * land and water always agree on the fog colours within a frame.
  */
 const FRAGMENT_OPAQUE_INJECT = [
-  'outgoingLight = applyAerial(outgoingLight, vTerrainWorldPos, cameraPosition, normalize(uSunDirection), uDayFactor);',
+  'vec2 landWx = aerialWeather(weatherAt(uWeatherMap, normalize(vTerrainWorldPos)));',
+  'outgoingLight = applyAerial(outgoingLight, vTerrainWorldPos, cameraPosition, normalize(uSunDirection), uDayFactor, landWx);',
   '#include <opaque_fragment>',
 ].join('\n');
 
@@ -761,6 +765,7 @@ export function createLand(terrain: Terrain, heightMap: HeightMap, quality: Qual
     // Aerial perspective (`fogglsl.ts`'s contract): the one shared object, so
     // land and water always agree on the fog within a frame.
     ...fogUniforms,
+    ...weatherMapUniforms,
   };
 
   material.onBeforeCompile = (shader): void => {

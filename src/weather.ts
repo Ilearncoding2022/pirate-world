@@ -177,6 +177,7 @@ interface MutableWeatherState {
   storm: number;
   fog: number;
   flash: number;
+  flashLocal: boolean;
   visibility: number;
 }
 
@@ -219,6 +220,7 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
     storm: 0,
     fog: 0,
     flash: 0,
+    flashLocal: false,
     visibility: RADAR_RANGE,
   };
 
@@ -281,7 +283,7 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
    * and whether either source is a lightning one — so the per-frame draw
    * below cannot desynchronise a replay that agrees about everything else.
    */
-  function updateFlash(dt: number, lightningLive: boolean): void {
+  function updateFlash(dt: number, lightningLive: boolean, local: boolean): void {
     if (strikeAge >= 0) {
       strikeAge += dt;
       let flash = 0;
@@ -304,6 +306,10 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
     if (rng() < dt / FLASH_MEAN) {
       strikeAge = 0;
       strikePulses = rng() < 0.5 ? 2 : 3;
+      // Recorded at the moment of the strike, not read per frame: a cell
+      // drifting off the ship mid-flash must not turn that flash into a
+      // placeless one halfway through its own decay.
+      state.flashLocal = local;
     }
   }
 
@@ -329,7 +335,9 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
       state.storm = Math.max(p.storm, cells.stormAtShip);
       state.rain = Math.max(p.rain, smoothstep01((state.storm - RAIN_ONSET) / (1 - RAIN_ONSET)));
       state.fog = Math.max(p.fog, cells.fogAtShip);
-      updateFlash(dt, pin === 'lightning' || cells.lightningAtShip);
+      // A pinned flash is placeless: `?weather=lightning` is for looking at
+      // the effect, and it should light the sky whether a cell is there or not.
+      updateFlash(dt, pin === 'lightning' || cells.lightningAtShip, pin === 'lightning');
     } else {
       // ---- The roll -------------------------------------------------------
       if (wind.phaseIndex !== rolledIndex) {
@@ -365,7 +373,7 @@ export function createWeather(seed = WEATHER_SEED, pin: WeatherPin | null = null
       // the sky darkens before the first drop falls.
       state.rain = smoothstep01((state.storm - RAIN_ONSET) / (1 - RAIN_ONSET));
 
-      updateFlash(dt, squallLightningClass || cells.lightningAtShip);
+      updateFlash(dt, squallLightningClass || cells.lightningAtShip, squallLightningClass);
     }
 
     // ---- What all of that comes to --------------------------------------
