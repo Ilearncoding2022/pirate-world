@@ -74,12 +74,16 @@ const TRUNK_WANDER = 0.28;
  * about: WebGL ignores `linewidth`, so every line in this renderer is one
  * pixel wide at every distance, and a one-pixel bolt reads as a scratch.
  * Three near-coincident strands, drawn ADDITIVELY, give both a width and a
- * hot core -- the middle is where all three overlap -- for a twentieth of the
- * cost of rebuilding the bolt as camera-facing quads.
+ * hot core -- the strands converge as the bolt recedes and their alpha adds
+ * where they land in the same pixel -- for a twentieth of the cost of
+ * rebuilding the bolt as camera-facing quads.
  *
- * The spread is deliberately tiny. At the ship it is a couple of pixels of
- * thickness; at a cell on the horizon the three collapse into one line, which
- * is exactly right, because that is what distance does to a bolt.
+ * They sit on a circle of this radius around the walk, evenly, so the bundle
+ * is centred on the trunk's own path and is about as thick from one bearing
+ * as from another. The spread is deliberately tiny: at the ship it is a
+ * couple of pixels of thickness; at a cell on the horizon the three collapse
+ * into one line, which is exactly right, because that is what distance does
+ * to a bolt.
  */
 const TRUNK_STRANDS = 3;
 const STRAND_SPREAD = 0.05;
@@ -222,11 +226,14 @@ export function buildBolt(positions: Float32Array, seed: number): number {
   // strand. Fixed and not re-rolled: three independent walks would be three
   // bolts, and what is wanted is one bolt with a thickness.
   for (let s = 0; s < TRUNK_STRANDS; s++) {
-    // Spread the strands around the axis rather than along one line, so the
-    // bolt has a width from every bearing the camera can take.
+    // Every strand offset, none of them left on the axis: three points on a
+    // circle project to a width of at least 1.5 spreads from ANY bearing,
+    // where a centre strand flanked by two would collapse to half a spread
+    // from the bearing that lines the flankers up -- a bolt half as thick
+    // from two directions out of every four, for nothing gained.
     const angle = (s / TRUNK_STRANDS) * Math.PI * 2;
-    const ox = s === 0 ? 0 : Math.cos(angle) * STRAND_SPREAD;
-    const oz = s === 0 ? 0 : Math.sin(angle) * STRAND_SPREAD;
+    const ox = Math.cos(angle) * STRAND_SPREAD;
+    const oz = Math.sin(angle) * STRAND_SPREAD;
     for (let i = 0; i < TRUNK_STEPS; i++) {
       const ay = BOLT_TOP - i * step;
       push(
@@ -303,13 +310,17 @@ export function createLightning(): Lightning {
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setDrawRange(0, 0);
 
-  const material = new THREE.MeshBasicMaterial({
+  // `LineBasicMaterial`, like `grid.ts`'s, and not the mesh one: Three routes
+  // both to the same `basic` shader, so a `MeshBasicMaterial` here would draw
+  // the same pixels -- but it would carry `side`, `wireframe` and the rest of
+  // a mesh's state onto an object that has no faces to apply them to, and the
+  // next reader would have to work out whether that was deliberate.
+  const material = new THREE.LineBasicMaterial({
     color: BOLT_COLOR.clone(),
     transparent: true,
     opacity: 0,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
-    fog: false,
   });
 
   const bolt = new THREE.LineSegments(geometry, material);
