@@ -115,12 +115,11 @@ const RAIN_ALPHA = 0.6;
  * bug rather than as weather.
  *
  * So the drops dim toward a wall -- but only toward THREE of the four, and
- * that asymmetry is the whole trick. The box is heading-aligned (see the
- * basis `update` builds), so `-z` is the wall astern, and the chase camera
- * sits behind and above the ship looking through it. Perspective then makes
- * those astern drops the nearest thing to the lens and by far the largest
- * part of the curtain on screen -- while the wall itself, exactly as
- * `RAIN_BOX` above says, falls behind the camera where no one can see it end.
+ * that asymmetry is the whole trick. The box is CAMERA-aligned (see the basis
+ * `update` builds), so `-z` is the wall toward the lens and `RAIN_BEHIND`
+ * puts it behind one: the camera looks through that wall rather than at it,
+ * and perspective makes the drops in front of it the nearest thing to the
+ * lens and by far the largest part of the curtain on screen.
  *
  * Fade it and the storm goes with it. That is not a guess: a symmetric fade
  * was tried at 0.6 and at 0.8, and both dimmed the rain back to roughly what
@@ -189,6 +188,32 @@ const RAIN_COVER = 0.7;
 const RAIN_BEHIND = 1.15;
 
 /**
+ * How far the sea falls away under a flat box, per unit of horizontal
+ * distance squared. The one number that made a big box possible at all.
+ *
+ * The drops live in a box, and a box is FLAT. The sea is not: this world is a
+ * sphere of radius 200, so a point `d` units from the box's own centre sits
+ * `d² / 2R` above the water rather than on it. At the 14-unit box this module
+ * shipped with that is 0.12 units and nobody could ever have seen it. At the
+ * 50 units the camera now asks for it is **6.2**, against a box only 10 tall
+ * -- the slab lifts clean off the sea, and what the player sees is the ring
+ * where the drops stop being underwater and start being visible all at once:
+ * a hard-edged raft of rain floating apart from the ship, or, if the box is
+ * far enough out, a bright bank of it standing past the horizon. Both were
+ * photographed before this line existed and neither is explicable from the
+ * box's own numbers, which are correct in every one of those frames.
+ *
+ * So the shader bends the box back onto the globe, one paraboloid term
+ * against the drop's own horizontal offset. It is the second-order expansion
+ * of the sphere rather than the sphere, which over a box this size is right to
+ * a few centimetres, and it costs a dot product.
+ *
+ * With it the box has no size limit worth worrying about, which is what makes
+ * every other number in this file free to answer to the camera.
+ */
+const RAIN_CURVE = 1 / (2 * GLOBE_RADIUS);
+
+/**
  * The camera distance `RAIN_LENGTH` was judged at, world units.
  *
  * A streak has to keep its length ON SCREEN, which means growing in world
@@ -238,6 +263,7 @@ const VERTEX_SHADER = [
   'uniform float uHalf;',
   'uniform float uFade;',
   'uniform vec2 uSpread;',
+  'uniform float uCurve;',
   // Each drop's own lane. x, z are its position in the box; y is a phase
   // offset in [0, 1) so the drops do not all fall in step.
   'attribute vec3 aLane;',
@@ -248,9 +274,10 @@ const VERTEX_SHADER = [
   'varying float vEdge;',
   'void main() {',
   '  // The drop dims as it nears a wall of the box, so the curtain has no',
-  '  // edge to see. Three walls, not four: the box is heading-aligned, so',
-  '  // -z is the wall ASTERN, the one the chase camera is looking through',
-  '  // rather than at, and `max(aLane.z, 0.0)` is what exempts it. See',
+  '  // edge to see. Three walls, not four: the box faces the CAMERA, so -z',
+  '  // is the wall toward the lens -- which RAIN_BEHIND puts behind it, so',
+  '  // the camera looks through that wall rather than at it, and',
+  '  // `max(aLane.z, 0.0)` is what exempts it from fading. See',
   '  // RAIN_FADE. Measured on the LANE and not on the drifted position, so',
   '  // a drop the wind carries keeps its brightness the whole way down',
   '  // instead of flickering as it goes.',
@@ -272,6 +299,12 @@ const VERTEX_SHADER = [
   '  // The wind carries the drop sideways as it falls, so the streak leans',
   '  // and the whole curtain slants with the weather.',
   '  pos += uWindDrift * fall;',
+  '  // And the box is bent back onto the globe, because the box is flat and',
+  '  // the sea is not. Applied AFTER the drift, so a drop the wind has carried',
+  '  // out to the edge is put on the water it has actually reached. See',
+  '  // RAIN_CURVE -- without this the far half of a wide box floats above the',
+  '  // sea and the curtain tears into a raft with an edge.',
+  '  pos.y -= dot(pos.xz, pos.xz) * uCurve;',
   '  // The tail sits back along the drop\'s own velocity, which is down plus',
   '  // whatever the wind is doing to it.',
   '  vec3 velocity = normalize(vec3(0.0, -1.0, 0.0) * uHeight + uWindDrift);',
@@ -342,6 +375,7 @@ export function createRain(drops: number): Rain {
     uHalf: { value: RAIN_BOX * 0.5 },
     uFade: { value: RAIN_FADE },
     uSpread: { value: new THREE.Vector2(1, 1) },
+    uCurve: { value: RAIN_CURVE },
     uColor: { value: RAIN_COLOR.clone() },
     uOpacity: { value: 0 },
   };
@@ -371,6 +405,7 @@ export function createRain(drops: number): Rain {
   const _quat = new THREE.Quaternion();
   const _matrix = new THREE.Matrix4();
   const _stb = new THREE.Vector3();
+  const _ship = new THREE.Vector3();
 
   let elapsed = 0;
 
@@ -385,26 +420,53 @@ export function createRain(drops: number): Rain {
     lines.visible = count > 0 && rain > RAIN_VISIBLE;
     if (!lines.visible) return;
 
-    // The box hangs on the ship's own local vertical, so "down" means down
-    // wherever on the globe the ship happens to be, and on the ship's heading,
-    // so `+z` is ahead and `-z` astern -- which is what lets both `RAIN_FADE`
-    // and `RAIN_BEHIND` talk about the wall the camera is behind. Where its
-    // centre ends up is settled further down, once the camera has said how big
-    // the box is; it is neither at the hull nor on the water.
+    // `ShipState.position` is a unit DIRECTION, not a world position, so the
+    // hull has to be pushed out to the water's own surface -- the same
+    // `multiplyScalar(GLOBE_RADIUS)` every other follower does.
+    _ship.copy(ship.position).multiplyScalar(GLOBE_RADIUS);
+
+    // The box stands on the ship's local vertical, so "down" means down
+    // wherever on the globe it is, and faces the CAMERA: `+z` runs away from
+    // the lens, `-z` toward it.
+    //
+    // Toward the camera, and not along the hull's heading, which is what this
+    // was written as and is the bug that took two screenshots to see. The box
+    // is no longer centred on the hull -- `RAIN_BEHIND` pushes it tens of
+    // units astern -- so the axis it is pushed along is now a POSITION and not
+    // just an orientation. Point that axis at the ship's bow and it agrees
+    // with the camera only while the two agree with each other: the chase
+    // camera damps, so it lags every turn, and a hull with no power aboard
+    // swings freely under it. The curtain slid off to one side of the frame,
+    // or straight out past the horizon where the slab foreshortened into a
+    // white pillar standing in the stars. Derived from the camera it cannot
+    // disagree with the camera, and `ship.forward` -- which can degenerate to
+    // nothing at all when the ship is adrift -- stops being consulted.
     _up.copy(ship.up).normalize();
-    _fwd.copy(ship.forward).addScaledVector(_up, -ship.forward.dot(_up));
+    if (camera) _fwd.copy(_ship).sub(camera.position);
+    else _fwd.copy(ship.forward);
+    _fwd.addScaledVector(_up, -_fwd.dot(_up));
     if (_fwd.lengthSq() < 1e-12) _fwd.set(0, 0, 1).addScaledVector(_up, -_up.z);
     _fwd.normalize();
-    _stb.crossVectors(_fwd, _up).normalize();
+    // `_up` CROSS `_fwd`, in that order, and the order is the whole of it:
+    // `makeBasis(x, y, z)` is a rotation only when x cross y is z, and this was
+    // written `_fwd` cross `_up` -- which is MINUS the starboard vector, so
+    // the basis had determinant -1 and was a reflection. `setFromRotationMatrix`
+    // is defined for rotations only: handed a reflection it returns an
+    // unnormalised quaternion, and for an axis-aligned case literally
+    // (0, 0, 0, 0.707), a box at half scale and no rotation at all.
+    //
+    // It survived years of frames because a box centred on the hull and
+    // symmetric in x looks identical reflected, and because the wind slant
+    // that came out mirrored had nothing to be compared against. The moment
+    // the box became asymmetric -- offset astern, and stretched differently
+    // across than along -- it started landing in arbitrary places: a raft of
+    // rain adrift from the ship, or a bright bank of it past the horizon.
+    // `lightning.ts` records the same trap at its own `tangentAt`.
+    _stb.crossVectors(_up, _fwd).normalize();
     _matrix.makeBasis(_stb, _up, _fwd);
     _quat.setFromRotationMatrix(_matrix);
     object.quaternion.copy(_quat);
-    // `ShipState.position` is a unit DIRECTION, not a world position, so the
-    // box has to be pushed out to the water's own surface -- the same
-    // `multiplyScalar(GLOBE_RADIUS)` every other follower does. The box's own
-    // dimensions stay ship-scale and do not grow with the radius; only where
-    // it is hung does.
-    object.position.copy(ship.position).multiplyScalar(GLOBE_RADIUS);
+    object.position.copy(_ship);
 
     // ---- How big the box is this frame, and whether it is drawn at all ----
     //
@@ -416,7 +478,7 @@ export function createRain(drops: number): Rain {
     // all the box keeps its authored size, which is what a headless caller
     // wants and what every test still gets.
     const distance = camera
-      ? Math.min(camera.position.distanceTo(object.position), RAIN_FAR_OUT)
+      ? Math.min(camera.position.distanceTo(_ship), RAIN_FAR_OUT)
       : RAIN_LENGTH_REF;
     // The frustum's own half-width where the hull is. See `RAIN_COVER`.
     const halfFrame = camera
