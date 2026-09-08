@@ -157,32 +157,14 @@ function bake(n: number): Baked {
   return { glsl, value: Math.fround(Number(glsl)) };
 }
 
-/**
- * `plateau`'s shoulder: a crest is flat out to 55% of its half-length and
- * rolls off to nothing over the outer 45%.
- *
- * Move it out and the wave becomes a long flat wall with an abrupt end; move
- * it in and the 20-unit front never reaches full height anywhere, so the hull
- * can cross the wave without ever climbing it.
- *
- * 0.40 rather than the 0.55 this shipped at. At 0.55 the crest carried a flat
- * top over more than half its length and ended in a square shoulder, and the
- * whole thing read as a sandbank rather than as water -- the ends are what a
- * wave dies out at. Eight units of the twenty still stand at full height,
- * which is two and a half hull lengths: the ship cannot cross it unclimbed.
+/*
+ * The crest's profile along its own length used to need two constants here --
+ * a shoulder position and the reciprocal of its width -- because it was
+ * `1 - smoothstep(edge, 1, |x|)`. `hazRidge` below needs neither, and that is
+ * worth a line: every baked constant is a number the shader's literal and the
+ * CPU's float32 have to be rounded from identically, so a profile that needs
+ * none of them is one fewer thing the two ports can drift on.
  */
-const PLATEAU_EDGE = bake(0.4);
-
-/**
- * The reciprocal of that shoulder's width, so the smoothstep is a multiply
- * rather than a divide.
- *
- * Not an optimisation: a division is the one operation in this file a GPU is
- * allowed to round differently from JS (the spec permits a couple of ULP),
- * and a division by a constant is free to remove. The two that remain — by a
- * slot's radius and half-width — cannot be, because those are uniforms.
- */
-const PLATEAU_INV = bake(1 / (1 - 0.4));
 
 /**
  * The crest's front and back half-widths, as multiples of `halfWidth`.
@@ -204,6 +186,22 @@ const PLATEAU_INV = bake(1 / (1 - 0.4));
  * allowed to exist: at `v` near zero both widths give a crest factor of very
  * nearly 1, and the two differ by O(v^2), so a GPU and a CPU that round `v`
  * to opposite sides of zero disagree by something around 1e-18.
+ *
+ * Both numbers were re-examined when `hazRidge` was reshaped and both are
+ * deliberately unchanged. The ask was a face that is steeper near the lip and
+ * gentler at the base, the way a spilling breaker is, and a height field
+ * cannot have one. `hazCrest` starts at the crest line with zero slope --
+ * which is what makes the crest line a rounded top rather than a knife edge,
+ * and what lets the two branches meet there without a crease -- so its
+ * steepest point is necessarily inside the face rather than at its lip. It
+ * already is: on a great wave the front runs 0 degrees at the lip, 64 at 45%
+ * of the way down and back toward flat at the foot. Buying a steeper lip means
+ * either a slope discontinuity along the crest line, which is the same hard
+ * corner `hazRidge` was reshaped to remove, only turned ninety degrees, or
+ * a surface that folds over itself, which no height field is. And there is
+ * nowhere to spend the difference anyway: the front is 2.0 world units against
+ * a vertex every 0.5, so the whole face is four quads and redistributing slope
+ * inside four quads is arithmetic nobody can see.
  */
 export const CREST_FRONT_RATIO = 0.8;
 export const CREST_BACK_RATIO = 2.4;
@@ -337,8 +335,6 @@ export const HAZARD_GLSL: string = [
   'uniform vec4 uHazShape[MAX_HAZARDS];',
   `const float HAZ_CREST_FRONT = ${CREST_FRONT.glsl};`,
   `const float HAZ_CREST_BACK = ${CREST_BACK.glsl};`,
-  `const float HAZ_PLATEAU_E0 = ${PLATEAU_EDGE.glsl};`,
-  `const float HAZ_PLATEAU_INV = ${PLATEAU_INV.glsl};`,
   `const float HAZ_RIM_C = ${RIM_CENTRE.glsl};`,
   `const float HAZ_RIM_INV = ${RIM_INV.glsl};`,
   `const float HAZ_RIM_RATIO = ${RIM_RATIO.glsl};`,
@@ -351,18 +347,40 @@ export const HAZARD_GLSL: string = [
   '  float t = max(1.0 - x * x, 0.0);',
   '  return t * t;',
   '}',
-  '// 1 - smoothstep(0.55, 1.0, |x|), written out rather than called: the',
-  '// built-in is free to evaluate its own way, and this has to match the CPU',
-  '// port term for term.',
   '// (1 - x*x)^3: `hazBump` sharpened by one more factor, so the crest peaks',
   '// on a line instead of over a broad top. Still polynomial, still C2.',
   'float hazCrest(float x) {',
   '  float t = max(1.0 - x * x, 0.0);',
   '  return t * t * t;',
   '}',
-  'float hazPlateau(float x) {',
-  '  float t = clamp((abs(x) - HAZ_PLATEAU_E0) * HAZ_PLATEAU_INV, 0.0, 1.0);',
-  '  return 1.0 - t * t * (3.0 - 2.0 * t);',
+  // The crest's profile ALONG its own length, and it is `hazBump` again with
+  // x*x handed to it -- (1 - x^4)^2 -- rather than the third shape this file
+  // used to carry.
+  //
+  // That third shape was `1 - smoothstep(0.4, 1, |x|)`, and it held FULL
+  // height across the inner 40% before it began to fall at all: eight flat
+  // units of the twenty, ending at a shoulder where the profile's curvature
+  // stepped from nothing to 16.7 in the space of one vertex. That is a mesa,
+  // and it photographed as one. It was tolerable while a great wave's face was
+  // a dark slab; once the face was lit as water and came out LIGHTER than the
+  // sea behind it, the tabletop and its two corners became the most
+  // conspicuous thing about the whole hazard.
+  //
+  // Reusing the bump fixes both faults at once and introduces no arithmetic
+  // the two ports have to be kept in step over. There is no interior
+  // curvature step anywhere, because the whole thing is one polynomial, so
+  // nothing along the ridge catches the light as an edge; and the maximum is
+  // reached once, at x = 0, so the wave peaks on a line rather than over a
+  // top. It is not a narrower wave -- it still reaches exactly zero at
+  // x = 1, so the footprint `hazards.ts` runs its contact test against has
+  // not moved -- and it is not a steeper one: its steepest shoulder is 2.42
+  // of profile per half-length against the plateau's 2.50, which on a great
+  // wave is 30 degrees where the plateau was 31. What moved is where the
+  // height sits BETWEEN those two ends, and at the ends it moved in the
+  // wave's favour: three quarters of the way out this still carries 0.47 of
+  // full height where the plateau had fallen to 0.38.
+  'float hazRidge(float x) {',
+  '  return hazBump(x * x);',
   '}',
   'float hazardHeight(vec3 p) {',
   '  float h = 0.0;',
@@ -375,7 +393,7 @@ export const HAZARD_GLSL: string = [
   '    if (sh.x < 0.5) {',
   '      float b = max(sh.z, HAZ_MIN_SIZE);',
   '      float bw = b * (v > 0.0 ? HAZ_CREST_FRONT : HAZ_CREST_BACK);',
-  '      h += sh.w * (hazPlateau(u / a) * hazCrest(v / bw));',
+  '      h += sh.w * (hazRidge(u / a) * hazCrest(v / bw));',
   '    } else {',
   // The bowl is `hazBump(r)` -- (1 - r*r)^2 -- and not the (1 - r)^3 this
   // shipped with. A cube of (1 - r) has a CONE APEX at the centre: it is not
@@ -435,10 +453,15 @@ function crestCPU(x: number): number {
   return F(F(t * t) * t);
 }
 
-function plateauCPU(x: number): number {
-  const raw = F(F(Math.abs(x) - PLATEAU_EDGE.value) * PLATEAU_INV.value);
-  const t = Math.min(Math.max(raw, 0), 1);
-  return F(1 - F(F(t * t) * F(3 - F(2 * t))));
+/**
+ * The GLSL's `hazRidge`, and deliberately written the same way it is: the
+ * square is taken once, into its own float32, and handed to the bump. Inlining
+ * the fourth power here instead would be the same value in exact arithmetic
+ * and a different one in float32 the moment the rounding order differed, which
+ * is the class of desync this whole file is built to make impossible.
+ */
+function ridgeCPU(x: number): number {
+  return bumpCPU(F(x * x));
 }
 
 /** GLSL `dot(p, q)`, left to right, float32 at every step. */
@@ -485,7 +508,7 @@ export function hazardHeight(dir: { x: number; y: number; z: number }, hazards: 
       // Multiply first, then divide -- the same two operations in the same
       // order the GLSL does them, which is what keeps the two bit-identical.
       const bw = F(b * (v > 0 ? CREST_FRONT.value : CREST_BACK.value));
-      h = F(h + F(w * F(plateauCPU(F(u / a)) * crestCPU(F(v / bw)))));
+      h = F(h + F(w * F(ridgeCPU(F(u / a)) * crestCPU(F(v / bw)))));
     } else {
       // Same three terms in the same order as the GLSL: the radius, the bowl
       // that radius sits in, the lip that replaces the bowl near the rim.

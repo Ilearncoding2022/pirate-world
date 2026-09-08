@@ -22,12 +22,18 @@ import { GLOBE_RADIUS } from '../../src/geo';
  *
  * `tests/smoke/wave-parity.spec.ts` is what proves this port agrees with the
  * GLSL the player actually sees; this file only proves the SHAPE is the shape
- * the plan specifies -- that a crest peaks at its amplitude, that it stops at
- * its own footprint rather than tinting the whole ocean, that a funnel is as
- * deep as it says it is, and that the profile is symmetric across the crest
- * line. Each of those is something a plausible edit (a swapped u/v, a dropped
- * envelope, a sign flip on the funnel) would break without breaking parity,
- * because parity only says the two sides are wrong together.
+ * the plan specifies -- that a crest peaks at its amplitude, that it peaks
+ * there once and on a line, that it stops at its own footprint rather than
+ * tinting the whole ocean, that its shoulders roll rather than corner, that a
+ * funnel is as deep as it says it is, and that the profile is symmetric across
+ * the crest line. Each of those is something a plausible edit (a swapped u/v, a
+ * dropped envelope, a sign flip on the funnel) would break without breaking
+ * parity, because parity only says the two sides are wrong together.
+ *
+ * Every threshold here is a fraction of the constant it is measuring against.
+ * That is not tidiness: an absolute one in this file has already turned a shape
+ * assertion into a scale assertion once, silently, when `FUNNEL_DEPTH` was
+ * retuned. See the maelstrom's first-step case for the full account.
  */
 
 /** A hazard at the north pole, so `east`/`north` are exactly the world X and Z axes and `u`/`v` are exactly the offsets fed in. */
@@ -88,25 +94,127 @@ describe('hazardfield: the crest profile', () => {
     }
   });
 
-  it('holds full height across the plateau and reaches zero at the footprint', () => {
+  it('peaks on a line rather than over a plateau, and reaches zero at the same footprint', () => {
     const h = makeHazard('greatwave', { amplitude: GREAT_CREST_HEIGHT });
-    // Flat out to 40% of the half-length: a hull crossing the middle of the
-    // wave climbs the whole thing, wherever along it it crosses.
-    expect(hazardHeight(at(CREST_HALF_LENGTH * 0.35, 0), [h])).toBeCloseTo(GREAT_CREST_HEIGHT, 5);
+
+    /*
+     * The profile along the crest's own length was `1 - smoothstep(0.4, 1, |x|)`
+     * and this case used to say so, in the one word that has now stopped being
+     * true: it HELD full height out to 40% of the half-length. That flat top is
+     * what read as a mesa on the water, so the shape it was pinning is the
+     * shape that changed, and this case is the record of what replaced it.
+     *
+     * Every bound below is a FRACTION of the amplitude, never a world-unit
+     * height. This file has been caught once by an absolute threshold that
+     * quietly turned a shape assertion into a scale assertion when a constant
+     * moved (see the maelstrom's first-step case), and a crest's amplitude is
+     * exactly the sort of constant that gets retuned by eye.
+     */
+    const at0 = (u: number) => hazardHeight(at(u, 0), [h]) / GREAT_CREST_HEIGHT;
+
+    // Falling already at a quarter of the way out, which is the whole point:
+    // a plateau is any profile that is still at exactly 1 here. Falling by
+    // under 5%, which is the other half of the point -- the wave has no
+    // tabletop and it has not become a spike either, so a hull crossing the
+    // middle third still climbs essentially the whole thing.
+    expect(at0(CREST_HALF_LENGTH * 0.25)).toBeLessThan(1);
+    expect(at0(CREST_HALF_LENGTH * 0.25)).toBeGreaterThan(0.95);
+
+    // Halfway out it is still most of a wave; three quarters out it is still
+    // real water rather than a skirt. These two are what stop the profile
+    // being replaced by something that merely has no plateau, such as
+    // `hazBump` itself, which would be down to 0.56 at half the half-length
+    // and would let the hull cross the ends of a great wave unclimbed.
+    expect(at0(CREST_HALF_LENGTH * 0.5)).toBeGreaterThan(0.75);
+    expect(at0(CREST_HALF_LENGTH * 0.5)).toBeLessThan(0.95);
+    expect(at0(CREST_HALF_LENGTH * 0.75)).toBeGreaterThan(0.3);
+    expect(at0(CREST_HALF_LENGTH * 0.75)).toBeLessThan(0.6);
+
+    // The maximum is reached ONCE, on the crest's middle line, and the profile
+    // only ever falls away from it. A second bump anywhere along the length is
+    // a ridge the hull could be caught between, and it is the failure mode a
+    // hand-shaped polynomial grows without anyone noticing.
+    let previous = at0(0);
+    expect(previous).toBeCloseTo(1, 5);
+    for (let u = 0.05; u <= CREST_HALF_LENGTH + 1e-9; u += 0.05) {
+      const here = at0(u);
+      expect(here).toBeLessThan(previous + 1e-9);
+      previous = here;
+    }
+
     // And nothing at all beyond the ends, or beyond the tail -- if this ever
     // becomes merely small rather than zero, the crest is tilting the normal
-    // and foaming across the whole visible sea. The tail is the far edge now:
-    // the profile is asymmetric, so `CREST_BACK` half-widths astern is where
-    // the water is finally flat again.
+    // and foaming across the whole visible sea. The footprint is deliberately
+    // unchanged by the reshaping above: `hazards.ts` runs its contact test
+    // against `extent` and `halfWidth`, and a wave that stopped short of its
+    // own footprint would be shoving the hull from water it was not standing
+    // in. The tail is the far edge: the profile is asymmetric, so `CREST_BACK`
+    // half-widths astern is where the water is finally flat again.
     expect(hazardHeight(at(CREST_HALF_LENGTH + 0.01, 0), [h])).toBe(0);
     expect(hazardHeight(at(0, CREST_HALF_WIDTH * CREST_FRONT_RATIO + 0.01), [h])).toBe(0);
     expect(hazardHeight(at(0, -CREST_HALF_WIDTH * CREST_BACK_RATIO - 0.01), [h])).toBe(0);
     expect(hazardHeight(at(40, 40), [h])).toBe(0);
   });
 
+  it('has no step in its curvature along the length: the shoulders roll, they do not corner', () => {
+    const h = makeHazard('greatwave', { amplitude: GREAT_CREST_HEIGHT });
+
+    /*
+     * The reason the old profile read as a mesa was not only the flat top. It
+     * was two corners: `1 - smoothstep(edge, 1, |x|)` is C1 at its shoulder but
+     * NOT C2, so at |x| = 0.4 the profile's curvature stepped from exactly zero
+     * to its full value inside one vertex, and a curvature step is what the eye
+     * reads as an edge on a lit surface however smooth the height itself is.
+     *
+     * The replacement is a single polynomial over the whole half-length, so its
+     * curvature is continuous everywhere inside the footprint and the shoulders
+     * roll instead. This measures that with second differences, and the number
+     * it asserts is a RATIO -- the largest step between neighbouring curvatures
+     * over the largest curvature -- so it says nothing about how tall or how
+     * long the wave is, only about whether the profile has a corner in it.
+     *
+     * At this probe spacing the old profile scores 0.51 and the current one
+     * 0.09. The threshold sits between them with room on both sides rather
+     * than hugging either.
+     *
+     * The spacing is a fiftieth of the half-length, which is a fifth of the
+     * displacement patch's own vertex step. Probed at a whole vertex step
+     * instead, the two profiles score 0.57 and 0.47 and this case would not
+     * separate them at all -- which is worth knowing rather than hiding, and is
+     * exactly why `hazardcrest.ts` breaks the crest's outline per-pixel as well.
+     * Geometry alone does not win this at 0.5 world units a vertex.
+     */
+    const step = CREST_HALF_LENGTH * 0.01;
+    const curvature: number[] = [];
+    for (let u = -CREST_HALF_LENGTH + step; u <= CREST_HALF_LENGTH - step + 1e-9; u += step) {
+      curvature.push(
+        hazardHeight(at(u - step, 0), [h]) - 2 * hazardHeight(at(u, 0), [h]) + hazardHeight(at(u + step, 0), [h]),
+      );
+    }
+
+    let largest = 0;
+    let biggestStep = 0;
+    for (let i = 0; i < curvature.length; i++) {
+      largest = Math.max(largest, Math.abs(curvature[i]));
+      if (i > 0) biggestStep = Math.max(biggestStep, Math.abs(curvature[i] - curvature[i - 1]));
+    }
+    expect(largest).toBeGreaterThan(0);
+    expect(biggestStep / largest).toBeLessThan(0.2);
+  });
+
   it('is symmetric along its length but NOT across it: a steep face, a long back', () => {
     const h = makeHazard('wave');
-    // Along the crest line the wave is the same either side of its middle.
+    /*
+     * Along the crest line the wave is the same either side of its middle.
+     *
+     * This case is unchanged by the reshaping the two above record, and it is
+     * worth saying why rather than leaving it looking untouched: the old
+     * profile was even because it took `abs(x)` before doing anything else, and
+     * the new one is even because it reaches `x` only through `x * x`. The
+     * second is the stronger guarantee -- there is no branch and no absolute
+     * value anywhere in it to get dropped -- so this case is now cheap
+     * insurance rather than the thing holding the symmetry up.
+     */
     for (const u of [1, 4, 7, 9.5]) {
       expect(hazardHeight(at(u, 0.6), [h])).toBeCloseTo(hazardHeight(at(-u, 0.6), [h]), 6);
     }
