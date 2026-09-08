@@ -40,6 +40,10 @@ export interface Rain {
  *
  * Bigger is not better here: the box is a fixed number of drops, so widening
  * it thins the rain rather than extending it.
+ *
+ * Still 14 across with `RAIN_FADE` below in front of it: the fade dissolves
+ * the walls, it does not move them, so the box reaches exactly as far as it
+ * always did and the count it spreads over is unchanged.
  */
 const RAIN_BOX = 14;
 const RAIN_HEIGHT = 10;
@@ -73,12 +77,50 @@ const RAIN_DRIFT = 0.35;
  * alpha as the only two levers that cost nothing, and is why they carry most
  * of the increase rather than the drop count.
  *
- * The alpha stays under half because the drops are ADDITIVE and there are
- * thousands of them, and because a streak crossing the moon or a lit window
- * adds to it: the density does the work, not the individual drop.
+ * 0.6 is the alpha at the CENTRE of the box and the brightest a drop ever
+ * gets; `RAIN_FADE` below takes it to nothing by the edge. It is deliberately
+ * short of 1 because the drops are ADDITIVE and there are thousands of them,
+ * and because a streak crossing the moon or a lit window adds to it: the
+ * density does the work, not the individual drop.
  */
 const RAIN_LENGTH = 0.85;
 const RAIN_ALPHA = 0.6;
+
+/**
+ * Where the curtain starts fading out, as a fraction of the box's half-width.
+ *
+ * The box has always been a box, and at the alpha this module opened with
+ * that did not matter: the drops were faint enough that nobody could see
+ * where they stopped. Raising the alpha made the rain visible and made its
+ * FOOTPRINT visible with it -- a hard-edged rectangle of streaks sitting on
+ * the water around the hull with dry sea on all four sides, which reads as a
+ * bug rather than as weather.
+ *
+ * So the drops dim toward a wall -- but only toward THREE of the four, and
+ * that asymmetry is the whole trick. The box is heading-aligned (see the
+ * basis `update` builds), so `-z` is the wall astern, and the chase camera
+ * sits behind and above the ship looking through it. Perspective then makes
+ * those astern drops the nearest thing to the lens and by far the largest
+ * part of the curtain on screen -- while the wall itself, exactly as
+ * `RAIN_BOX` above says, falls behind the camera where no one can see it end.
+ *
+ * Fade it and the storm goes with it. That is not a guess: a symmetric fade
+ * was tried at 0.6 and at 0.8, and both dimmed the rain back to roughly what
+ * it had been before the alpha was ever raised -- the change undone by its
+ * own fix. A radial version, which additionally inscribes a disc and leaves a
+ * blob of rain hanging round the mast, was worse still. Screenshots caught
+ * all three; no test would have.
+ *
+ * So: the two side walls and the wall ahead dissolve, and the wall astern is
+ * left alone because it is not visible to begin with. 0.7 puts the dissolve
+ * over the outer 2.1 units, wide enough that a boundary reads as rain
+ * thinning rather than as rain stopping.
+ *
+ * Cheap enough to be free: one varying off the lane the drop already carries,
+ * constant along a streak because both its vertices share a lane, so there is
+ * no gradient down a drop and no second attribute.
+ */
+const RAIN_FADE = 0.7;
 
 /** Below this much rain the whole object is hidden, so fair weather costs no draw call. */
 const RAIN_VISIBLE = 0.02;
@@ -91,13 +133,26 @@ const VERTEX_SHADER = [
   'uniform float uHeight;',
   'uniform vec3 uWindDrift;',
   'uniform float uLength;',
+  'uniform float uHalf;',
+  'uniform float uFade;',
   // Each drop's own lane. x, z are its position in the box; y is a phase
   // offset in [0, 1) so the drops do not all fall in step.
   'attribute vec3 aLane;',
   // 0 for the head of a segment, 1 for its tail: one attribute is all it
   // takes to turn a pair of vertices into a streak along the velocity.
   'attribute float aTail;',
+  // How much of the curtain's alpha this drop keeps. See RAIN_FADE.
+  'varying float vEdge;',
   'void main() {',
+  '  // The drop dims as it nears a wall of the box, so the curtain has no',
+  '  // edge to see. Three walls, not four: the box is heading-aligned, so',
+  '  // -z is the wall ASTERN, the one the chase camera is looking through',
+  '  // rather than at, and `max(aLane.z, 0.0)` is what exempts it. See',
+  '  // RAIN_FADE. Measured on the LANE and not on the drifted position, so',
+  '  // a drop the wind carries keeps its brightness the whole way down',
+  '  // instead of flickering as it goes.',
+  '  float wall = max(abs(aLane.x), max(aLane.z, 0.0)) / uHalf;',
+  '  vEdge = 1.0 - smoothstep(uFade, 1.0, wall);',
   '  // How far this drop has fallen, wrapped into the box. `fract` is what',
   '  // recycles a drop from the ground back to the top with no CPU work and',
   '  // no per-drop state at all.',
@@ -117,8 +172,10 @@ const VERTEX_SHADER = [
 const FRAGMENT_SHADER = [
   'uniform vec3 uColor;',
   'uniform float uOpacity;',
+  'varying float vEdge;',
   'void main() {',
-  '  gl_FragColor = vec4(uColor * uOpacity, uOpacity);',
+  '  float alpha = uOpacity * vEdge;',
+  '  gl_FragColor = vec4(uColor * alpha, alpha);',
   '}',
 ].join('\n');
 
@@ -171,6 +228,8 @@ export function createRain(drops: number): Rain {
     uWindDrift: { value: new THREE.Vector3() },
     uHeight: { value: RAIN_HEIGHT },
     uLength: { value: RAIN_LENGTH },
+    uHalf: { value: RAIN_BOX * 0.5 },
+    uFade: { value: RAIN_FADE },
     uColor: { value: RAIN_COLOR.clone() },
     uOpacity: { value: 0 },
   };
