@@ -80,7 +80,7 @@ const TITLES: Record<BattleOutcome, string> = {
  * disagreeing, so the rule is copied rather than reinvented: see
  * **Persistence** in docs/ARCHITECTURE.md.
  */
-const THIN_SPACE = ' ';
+const THIN_SPACE = '\u2009';
 
 function formatGold(gold: number): string {
   const n = Math.abs(Math.round(gold));

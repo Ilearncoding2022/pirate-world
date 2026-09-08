@@ -146,8 +146,18 @@ export interface ShopPanel {
   dispose(): void;
 }
 
-/** U+2009 THIN SPACE, as everywhere else a gold figure is printed. */
-const THIN_SPACE = ' ';
+/**
+ * U+2009 THIN SPACE, as everywhere else a gold figure is printed.
+ *
+ * Written as an ESCAPE and not as the character itself, which is the whole
+ * fix: it was the character, and somewhere along the way it was flattened to
+ * an ordinary space (0x20). The two are indistinguishable in a diff and very
+ * nearly so on screen, so the purse in here quietly stopped matching the one
+ * on the HUD and stayed that way. `hud.ts` has always written the escape and
+ * has always been right; this file and `battleui.ts` were the two literals,
+ * and both of them had been flattened. Do not put the character back.
+ */
+const THIN_SPACE = '\u2009';
 
 /** "1 000" — grouped from four digits up, matching the Fish Book's footer. */
 function formatGold(gold: number): string {

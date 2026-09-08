@@ -2282,13 +2282,25 @@ It is the only reading on the telemetry panel not taken off a live sim state
 each frame.
 
 **Gold is grouped from four digits up**, with a thin space: `1 565`. The same
-purse is printed in three places — the telemetry row, the card's chrome and the
-book's footer — so the rule is one rule; the one failure that matters is the
-HUD reading `1565` while the book reads `1 565`. `FISHING_PLAN.md` contradicts
-itself on this (its prose says no separator under 10 000, its mock-ups group
-from four), and the mock-ups won. The separator is written out by hand rather
-than through `toLocaleString`, which would print `12,400` here and `12.400` on
-a German machine: the HUD is one instrument in one language.
+purse is printed in five places now — the telemetry row, the card's chrome, the
+book's footer, the chandlery and the battle strip — so the rule is one rule;
+the one failure that matters is the HUD reading `1565` while the book reads
+`1 565`. `FISHING_PLAN.md` contradicts itself on this (its prose says no
+separator under 10 000, its mock-ups group from four), and the mock-ups won.
+The separator is written out by hand rather than through `toLocaleString`,
+which would print `12,400` here and `12.400` on a German machine: the HUD is
+one instrument in one language.
+
+**Write the separator as `' '`, never as the character.** Two of the five
+had been flattened to an ordinary space (0x20) at some point and nobody saw it:
+a thin space and a plain space are identical in a diff, they survive a build,
+and on screen the difference is a fraction of an em on a figure most players
+glance at. So the chandlery and the battle strip disagreed with the HUD about
+the exact thing this rule exists to keep them agreeing on — the failure the
+paragraph above names, arrived at from the one direction it did not anticipate.
+`hud.ts` was the only file that had written the escape and the only one still
+correct, which is the argument for the escape by itself. `tests/smoke/game.spec.ts`
+is what finally caught it, asserting `10 000` on a real click.
 
 
 ## The chandlery
