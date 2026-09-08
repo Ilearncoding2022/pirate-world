@@ -72,11 +72,18 @@ export interface QualitySettings {
   /**
    * How many raindrops `rain.ts` builds, and whether it is built at all.
    *
-   * A quarter more than the counts this table opened with (1500 and 3000).
-   * The curtain was hard to see, and the fix is mostly `rain.ts`'s own alpha
-   * and streak length -- both free -- rather than vertices; the extra quarter
-   * is what closes the gaps those two cannot, at a cost that stays well
-   * inside one draw call.
+   * Six times the counts this table opened with (1500 and 3000), and the jump
+   * is structural rather than a nicer-looking number. `rain.ts` no longer
+   * draws a fixed-size box: it stretches one to the camera's frustum, so a
+   * storm covers the frame at every zoom instead of standing on the boat as a
+   * column. Coverage is paid for in density -- the box holds a FIXED count, so
+   * roughly three and a half times the width is roughly twelve times the
+   * footprint -- and these are what keep the curtain thick across it.
+   *
+   * Affordable because of what a drop actually is: two vertices through a ten-
+   * instruction vertex shader, one draw call, no per-frame allocation and no
+   * CPU work at all. 24 000 drops is 48 000 vertices, well under the land
+   * mesh's own triangle count and nowhere near its per-pixel cost.
    *
    * 0 means the module is ABSENT rather than idle, the same convention
    * `reflectionSize` uses: on the low tier a storm is a dark sky, a dimmed
@@ -125,7 +132,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 1,
     landDetail: 80,
     landFacetBlend: 0.8,
-    rainDrops: 1875,
+    rainDrops: 12000,
   },
   high: {
     pixelRatioCap: 2,
@@ -137,7 +144,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     reflectionFacesPerFrame: 2,
     landDetail: 96,
     landFacetBlend: 0.85,
-    rainDrops: 3750,
+    rainDrops: 24000,
   },
 };
 

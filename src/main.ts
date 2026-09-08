@@ -1403,8 +1403,10 @@ async function startGame(): Promise<void> {
       view.camera,
     );
     // After `globe.update`: the box hangs on the hull the camera has just
-    // been framed against, and nothing reads it until the render.
-    rain?.update(dt, ship.state, wind.state, weather.state);
+    // been framed against, and nothing reads it until the render. The camera
+    // is not a courtesy — the box is SIZED off its distance, so it has to be
+    // this frame's camera and not last frame's.
+    rain?.update(dt, ship.state, wind.state, weather.state, view.camera);
     // Alongside the rain and for the same reason: it hangs on the hull the
     // camera has just been framed against, and nothing reads it until the
     // render at the foot of the frame.
