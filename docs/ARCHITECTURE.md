@@ -839,6 +839,20 @@ Four things about it are easy to undo by accident:
   the same term `clouds.ts` has with the opposite sense. The threshold is also
   DROPPED by the bank's strength, so a strengthening bank fills in its gaps and
   closes over the ship instead of merely thickening where it already was.
+- **The ship keeps an eye of clear air around itself.** `FOG_CLEAR_CORE` is
+  the hull's half-length plus one beam (3.06 units, from the 3.12 x 1.5 hull
+  `islets.ts` sizes islands against), feathered out to `FOG_CLEAR_EDGE` over
+  two and a half more beams so the clearing reads as the fog thinning rather
+  than as a circle stamped out of the bank. It is a COLUMN about the ship's
+  vertical axis, not a bubble, and the difference is not cosmetic: the chase
+  camera sits ~9.5 units up and 21 back, INSIDE the layer, so its line of
+  sight to the hull is 23 units of fog travelled almost horizontally — a
+  bubble clears the last three of those, a column clears every part of that
+  line within `EDGE` of the boat, which is exactly the stretch
+  `FOG_NEAR_FULL` has already let back up to full strength. It costs no
+  uniform and cannot drift out of sync with the ship: in the cap's object
+  space the ship's axis IS +Y, so the vertex shader reads the distance
+  straight off `length(dir.xz)`.
 - **Per-slice opacity is derived, not chosen**, exactly as the deck's is:
   `sliceOpacity(n)` solves `1 - (1 - a)^n = STACK_OPACITY`, so nine slices are
   as DENSE as fourteen and what a lower tier loses is smoothness in the

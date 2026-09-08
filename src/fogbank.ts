@@ -153,6 +153,48 @@ const FOG_CAP_ANGLE = FOG_CAP_ARC / GLOBE_RADIUS;
 const FOG_BASE_LIFT = 0.2;
 
 /**
+ * The hull, in world units, and the unit the clearing below is quoted in.
+ *
+ * 3.12 long and 1.5 across, which is `ship.ts`'s `MODEL_SCALE` measured
+ * against `wake.ts`'s bow and stern offsets -- `islets.ts` sizes the smallest
+ * surviving island off the same two numbers, and takes them from the same
+ * place, so a retuned model moves both together.
+ */
+const HULL_LENGTH = 3.12;
+const HULL_WIDTH = 1.5;
+
+/**
+ * The eye of clear air the ship keeps around itself, in world units: fully
+ * clear inside `FOG_CLEAR_CORE`, full bank again beyond `FOG_CLEAR_EDGE`.
+ *
+ * A thick bank is meant to swallow the boat, and it still does -- but a boat
+ * that is only a smudge is a boat you cannot steer, and the whole point of
+ * `STACK_OPACITY` stopping short of opaque was to leave a silhouette to read.
+ * That silhouette is worth much more with a hull's width of clear air around
+ * it, which is what this is: the hull's own half-length (1.56) plus one
+ * `HULL_WIDTH`, so the clearing stands exactly one hull width off the boat at
+ * its widest point.
+ *
+ * The feather out to `EDGE` is deliberately much wider than the core -- two
+ * and a half hull widths of it. A clearing that reached full fog at its own
+ * radius would read as a circle stamped out of the bank, which is a worse
+ * artefact than the haze it removes; over four units it reads as the fog
+ * thinning around the boat instead.
+ *
+ * It is a COLUMN, not a bubble: the distance measured is from the ship's own
+ * local vertical axis, so the clearing runs from the water to the top of the
+ * layer. A sphere of this radius would be nearly useless, and the reason is
+ * pure geometry -- the chase camera sits about 9.5 units up and 21 back,
+ * INSIDE the layer, so its line of sight to the hull is 23 units of fog
+ * travelled almost horizontally. A sphere clears the last three of those; a
+ * column clears every part of that line within `EDGE` of the boat, which is
+ * the stretch nearest the ship and the stretch that `FOG_NEAR_FULL` has
+ * already let back up to full strength.
+ */
+const FOG_CLEAR_CORE = HULL_LENGTH * 0.5 + HULL_WIDTH;
+const FOG_CLEAR_EDGE = FOG_CLEAR_CORE + HULL_WIDTH * 2.5;
+
+/**
  * Total opacity the whole stack composites to in the core of a full bank, and
  * the per-slice value that gets there.
  *
@@ -228,11 +270,21 @@ const VERTEX_SHADER = [
   '// height above the cap centre is what says how far out toward the rim this',
   '// vertex is. Passing it as a varying keeps an `acos` out of the fragment.',
   'varying float vRim;',
+  '// How far this vertex is from the SHIP\'s own local vertical axis, in world',
+  '// units. Free to compute here and needs no uniform: the cap is built around',
+  '// +Y and then turned so that +Y is the ship\'s up, so in object space that',
+  '// axis IS +Y, and `dir.xz` is the radial part of a unit direction. The',
+  '// ship\'s axis passes through the globe centre (its position and its up are',
+  '// the same unit vector), and the cap is concentric with the globe, so the',
+  '// world radius of this vertex times that radial part is the distance from',
+  '// the axis exactly, on every slice, with no per-slice uniform for the scale.',
+  'varying float vAxisDist;',
   'uniform float uCapCos;',
   'void main() {',
   '  vec3 dir = normalize(position);',
   '  vRim = clamp((1.0 - dir.y) / max(1.0 - uCapCos, 1e-4), 0.0, 1.0);',
   '  vec4 wp = modelMatrix * vec4(position, 1.0);',
+  '  vAxisDist = length(wp.xyz) * length(dir.xz);',
   '  vWorldPos = wp.xyz;',
   '  gl_Position = projectionMatrix * viewMatrix * wp;',
   '}',
@@ -266,6 +318,7 @@ const FRAGMENT_SHADER = [
   '// `clouds.ts`: declaring it here as well fails to compile.',
   'varying vec3 vWorldPos;',
   'varying float vRim;',
+  'varying float vAxisDist;',
   SIMPLEX_GLSL,
   HEIGHTMAP_GLSL,
   WEATHERMAP_GLSL,
@@ -313,6 +366,12 @@ const FRAGMENT_SHADER = [
   '  // Rim: hand off to the aerial tint over the outer fifth of the cap',
   '  // rather than ending the layer at a visible circular edge.',
   '  fade *= 1.0 - smoothstep(0.8, 1.0, vRim);',
+  '  // And the eye of clear air the ship keeps around itself, so the hull',
+  '  // stays a boat inside a bank rather than a smudge. See FOG_CLEAR_CORE:',
+  '  // it is a column about the ship\'s vertical axis, not a bubble, and it is',
+  '  // applied here with the other fades so a pixel near the hull discards',
+  '  // before it costs a single octave.',
+  '  fade *= smoothstep(FOG_CLEAR_CORE_C, FOG_CLEAR_EDGE_C, vAxisDist);',
   '  if (fade < 0.004) discard;',
   '  float t = uTime;',
   '  vec3 p = nWorld * uScale;',
@@ -433,7 +492,9 @@ const FRAGMENT_SHADER = [
   .replace(/FOG_ALT_GONE_C/g, FOG_ALT_GONE.toFixed(1))
   .replace(/FOG_ALT_FULL_C/g, FOG_ALT_FULL.toFixed(1))
   .replace(/FOG_NEAR_MIN_C/g, FOG_NEAR_MIN.toFixed(1))
-  .replace(/FOG_NEAR_FULL_C/g, FOG_NEAR_FULL.toFixed(1));
+  .replace(/FOG_NEAR_FULL_C/g, FOG_NEAR_FULL.toFixed(1))
+  .replace(/FOG_CLEAR_CORE_C/g, FOG_CLEAR_CORE.toFixed(3))
+  .replace(/FOG_CLEAR_EDGE_C/g, FOG_CLEAR_EDGE.toFixed(3));
 
 /* ------------------------------------------------------------------ */
 /* Build                                                               */
@@ -652,4 +713,14 @@ export function createFogBank(slices: number): FogBank {
   };
 }
 
-export { FOG_LAYER_DEPTH, FOG_CAP_ARC, FOG_SLICE_MAX, STACK_OPACITY, FOG_WAKE_RANGE };
+export {
+  FOG_LAYER_DEPTH,
+  FOG_CAP_ARC,
+  FOG_SLICE_MAX,
+  STACK_OPACITY,
+  FOG_WAKE_RANGE,
+  FOG_CLEAR_CORE,
+  FOG_CLEAR_EDGE,
+  HULL_WIDTH,
+  HULL_LENGTH,
+};

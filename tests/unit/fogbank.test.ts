@@ -1,11 +1,17 @@
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
+import type { Mesh, ShaderMaterial } from 'three';
 import {
   createFogBank,
   fogInRange,
   sliceOpacity,
+  FOG_CLEAR_CORE,
+  FOG_CLEAR_EDGE,
+  FOG_CAP_ARC,
   FOG_SLICE_MAX,
   FOG_WAKE_RANGE,
+  HULL_LENGTH,
+  HULL_WIDTH,
   STACK_OPACITY,
 } from '../../src/fogbank';
 import { FOG_GLSL } from '../../src/fogglsl';
@@ -108,6 +114,43 @@ describe('fog bank stack', () => {
 
   it('starts invisible, so a caller that never updates costs nothing', () => {
     expect(createFogBank(9).object.visible).toBe(false);
+  });
+});
+
+describe('the clear air the ship keeps around itself', () => {
+  it('stands a full hull width off the boat at its widest point', () => {
+    // The ask, in the units it was made in: a hull's width of clear air
+    // around the boat. Measured from the ship's axis, that is its own
+    // half-length plus one beam, and nothing here may quietly shrink it.
+    expect(FOG_CLEAR_CORE).toBeCloseTo(HULL_LENGTH * 0.5 + HULL_WIDTH, 6);
+    expect(FOG_CLEAR_CORE - HULL_LENGTH * 0.5).toBeGreaterThanOrEqual(HULL_WIDTH);
+  });
+
+  it('feathers rather than stamping a circle out of the bank', () => {
+    expect(FOG_CLEAR_EDGE).toBeGreaterThan(FOG_CLEAR_CORE);
+    // Wide enough to read as the fog thinning: at least two hull widths of
+    // ramp, or the clearing's own rim becomes the artefact.
+    expect(FOG_CLEAR_EDGE - FOG_CLEAR_CORE).toBeGreaterThanOrEqual(HULL_WIDTH * 2);
+  });
+
+  it('is small against the bank it is cut out of', () => {
+    // A clearing is a hole in weather, not the weather. If this ever grows
+    // past a fraction of the cap the ship is no longer sailing in fog.
+    expect(FOG_CLEAR_EDGE).toBeLessThan(FOG_CAP_ARC * 0.1);
+  });
+
+  it('measures from the ship axis and fades before any noise is sampled', () => {
+    const slice = createFogBank(9).object.children[0] as Mesh;
+    const material = slice.material as ShaderMaterial;
+    // A COLUMN, not a bubble: the varying is built from the radial part of
+    // the object-space direction, which is the distance from the ship's own
+    // vertical axis. See FOG_CLEAR_CORE for why a bubble would not work.
+    expect(material.vertexShader).toContain('vAxisDist = length(wp.xyz) * length(dir.xz);');
+    const frag = material.fragmentShader;
+    const clearAt = frag.indexOf('vAxisDist');
+    const noiseAt = frag.indexOf('float a0 = snoise');
+    expect(clearAt).toBeGreaterThan(-1);
+    expect(noiseAt).toBeGreaterThan(clearAt);
   });
 });
 
