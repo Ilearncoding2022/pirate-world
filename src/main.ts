@@ -113,8 +113,17 @@ async function startGame(): Promise<void> {
 
   /*
    * `?clock=<hour>` -- start the world at a fixed local hour on the spawn
-   * meridian instead of at dawn. `?clock=13.5` is half past one in the
+   * meridian instead of at daybreak. `?clock=13.5` is half past one in the
    * afternoon; out-of-range and unparseable values are ignored.
+   *
+   * The hour here is the GEOMETRIC one -- 0 is local midnight, 12 the sun at
+   * its highest -- and it is deliberately the last hour left in the project.
+   * The dial stopped reading hours because they could not be made to agree
+   * with the horizon a player can see (`solartime.ts`), but pinning the sun
+   * for a screenshot wants a uniform angle and nothing else, so this stayed.
+   * Do not read a phase off it: at the equator `?clock=5` is already
+   * daylight, because the disc clears the sea around 04:13 on this scale
+   * and is not gone again until about 19:47.
    *
    * For looking at shading, not for playing. A day lasts DAY_LENGTH = 1200
    * seconds, so the sun moves a degree every three and a bit seconds and two

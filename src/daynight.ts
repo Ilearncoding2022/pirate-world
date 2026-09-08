@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import type { WorldEnv } from './env';
 import type { WeatherState } from './types';
 import { GLOBE_RADIUS } from './geo';
-import { SPAWN_LON_DEG } from './terrain';
+import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
+import { SUN_APPEARS_SIN } from './horizon';
 
 export interface DayNight {
   /** Lights and any sun-following objects. Added to the world group. */
@@ -25,10 +26,12 @@ export interface DayNight {
 /**
  * Real seconds for one full orbit of the sun around the globe.
  *
- * Twenty minutes: ten of day and ten of night, for a ship sitting still on the
- * equator. Away from the equator the split is uneven and drifts with the
- * season, exactly as it does on Earth, because the sun's latitude wanders --
- * see AXIAL_TILT below.
+ * Twenty minutes for one full turn of the sun. That is not ten of day and ten
+ * of night: the day is measured from the DRAWN horizon, which on a globe this
+ * small sits well below eye level, so the sun's disc is visible for about
+ * 15.6 of every 24 local hours at the equator and longer than that toward the
+ * poles. See `horizon.ts` for where that number comes from and `solartime.ts`
+ * for what is done with it.
  *
  * A moving ship gets a different day entirely, and gets it for free. The sun
  * is placed in world space from elapsed time alone, and every shader decides
@@ -53,55 +56,106 @@ export interface DayNight {
 export const DAY_LENGTH = 1200;
 
 /**
- * Local solar time the world opens at, in the same [0, 1) the time dial reads:
- * 0 is local midnight, 0.5 local noon. A quarter is **06:00**.
+ * Days in one seasonal cycle, and how far the subsolar latitude wanders on it.
  *
- * The world used to open at local noon, with the sun overhead and behind the
- * chase camera, so the one thing the sky is for was the one thing the player
- * could not see. At dawn the sun is dead ahead instead: the ship spawns on
- * heading 090 (`main.ts`), and by definition a sunrise is in the east.
+ * **The tilt is zero, and that is the setting, not an oversight.** The season
+ * machinery below is left standing and still runs, because the choice it
+ * encodes is a tuning one and the argument on both sides is worth keeping.
  *
- * Worth knowing before reading the horizon: the sun is at 0 degrees elevation
- * at 06:00, but the VISIBLE horizon on a globe this small is about 17 degrees
- * below eye level, so a sun on the geometric horizon still clears the limb
- * comfortably. See **The sky, and the two views it serves** in
- * docs/ARCHITECTURE.md.
+ * What the tilt bought was variety: a terminator that ran at an angle instead
+ * of pole to pole, a sunrise that was not always due east, and a day whose
+ * length moved with the season. What it cost was that no two days at the same
+ * latitude were alike -- and at SEASON_DAYS of 6, a whole year inside six
+ * game days, they were not remotely alike. At latitude 40 the sun's visible
+ * day ran 16.8 hours one day and 21.3 the next. A player cannot learn a sky
+ * that changes that fast, and with the dial now measuring PROGRESS through the
+ * day rather than naming an hour, having a learnable day length is worth more
+ * than having a varied one.
+ *
+ * So the sun tracks the equator, every day at a latitude is the last one, and
+ * the sunrise is always due east. Raise AXIAL_TILT back toward 0.41 to undo
+ * that; everything downstream, `solartime.ts` and `START_ELAPSED` included, is
+ * written in the general form and follows without further edits. Raise
+ * SEASON_DAYS with it, or the days will not resemble each other.
  */
-const START_LOCAL_TIME = 0.25;
+const SEASON_DAYS = 6;
+/** Peak subsolar latitude, radians. Zero: see above. Earth's is 0.41. */
+const AXIAL_TILT = 0;
+/** Season phase at t = 0. Inert while AXIAL_TILT is zero. */
+const SEASON_PHASE = 0.95;
 
 /**
- * `env.elapsed` at world creation, so the ship's FIRST frame is at
- * `START_LOCAL_TIME` on its own meridian.
+ * Sine of the sun's declination at `elapsed`: the latitude it stands over.
  *
- * Derived, not written down as a number, and that is the point. Local time
- * here is the angle between the ship's meridian and the sun's -- never a clock
- * the world carries -- so the elapsed seconds that put the spawn at dawn
- * depend on where the spawn is and how long a day lasts. Both of those are
- * documented as retunable. Inverting `solartime.ts`'s own relation
- * (`time = fract(0.5 + tod + lon / 2PI)`) means changing either one moves this
- * with it instead of silently opening at the wrong hour.
+ * Pulled out of `update` so the opening frame can be solved for below without
+ * running a frame, and so the two can never disagree about where the sun is.
+ */
+function declinationAt(elapsed: number): number {
+  const season = (elapsed / (DAY_LENGTH * SEASON_DAYS)) * Math.PI * 2 + SEASON_PHASE;
+  return Math.sin(season) * AXIAL_TILT;
+}
+
+/**
+ * Local solar position, in the same [0, 1) `solartime.ts` measures, at which
+ * the sun's disc appears over the DRAWN horizon at this latitude.
  *
- * `elapsedAtLocalTime` is that inversion, exported because `?clock=` (see
- * `main.ts`) needs it for any hour, not only for dawn: a day here lasts 1200
- * seconds, so two screenshots taken a minute apart are lit differently, and
- * comparing shading changes by eye is impossible without pinning the sun.
+ * The same sunrise equation `solartime.ts` solves, and it has to stay the same
+ * one: this is what puts the world's first frame on the moment of daybreak, so
+ * if the two ever disagreed the game would open a little before or after the
+ * sunrise it claims to open on.
+ *
+ * Where there is no crossing -- a sun that never sets, which above about 63
+ * degrees of latitude is now permanent -- there is no daybreak to open on, so
+ * this falls back to the sun at eye level.
+ */
+function daybreakLocalTime(latRad: number, declination: number): number {
+  const denominator = Math.cos(latRad) * Math.cos(declination);
+  if (denominator < 1e-9) return 0.25;
+  const cosH0 =
+    (SUN_APPEARS_SIN - Math.sin(latRad) * Math.sin(declination)) / denominator;
+  if (cosH0 >= 1 || cosH0 <= -1) return 0.25;
+  return 0.5 - Math.acos(cosH0) / (Math.PI * 2);
+}
+
+/**
+ * The `env.elapsed` that puts the spawn meridian at a given solar position.
+ *
+ * The inversion of `solartime.ts`'s own relation,
+ * `solarTime = fract(0.5 + tod + lon / 2PI)`. Where the sun stands over the
+ * ship is the angle between two meridians and never a clock the world carries,
+ * so the elapsed seconds that land on a given position depend on where the
+ * spawn is and how long a day lasts -- both documented as retunable, and both
+ * therefore carried by this rather than by a number written down.
+ *
+ * Exported because `?clock=` (see `main.ts`) needs it for any position, not
+ * only for the one the world opens on: a day here lasts 1200 seconds, so two
+ * screenshots taken a minute apart are lit differently, and comparing shading
+ * changes by eye is impossible without pinning the sun.
  */
 export function elapsedAtLocalTime(localTime: number): number {
   return (DAY_LENGTH * (((localTime - 0.5 - SPAWN_LON_DEG / 360) % 1) + 1)) % DAY_LENGTH;
 }
 
-export const START_ELAPSED = elapsedAtLocalTime(START_LOCAL_TIME);
-
 /**
- * Days in one seasonal cycle. The subsolar latitude drifts on this much slower
- * beat, so the terminator runs tilted and its tilt keeps changing. Without it
- * the sun would track dead along the equator and read as a machine.
+ * Elapsed seconds that put the world's first frame on daybreak at the spawn.
+ *
+ * Solved rather than written down, and solved as a FIXED POINT rather than
+ * inverted, because the two halves depend on each other: the moment the disc
+ * appears depends on the sun's declination, and the declination depends on the
+ * elapsed seconds being solved for. With the axial tilt at zero the second
+ * dependency vanishes and the first pass is already exact, which is why four
+ * iterations is generous. Restore the tilt and this keeps working, where a
+ * closed-form inversion would quietly land minutes off.
  */
-const SEASON_DAYS = 6;
-/** Peak subsolar latitude, radians (~23.5 degrees, Earth's axial tilt). */
-const AXIAL_TILT = 0.41;
-/** Season phase at t = 0, so the world never opens on a flat equatorial sun. */
-const SEASON_PHASE = 0.95;
+export const START_ELAPSED = ((): number => {
+  const lat = (SPAWN_LAT_DEG * Math.PI) / 180;
+  let elapsed = elapsedAtLocalTime(daybreakLocalTime(lat, 0));
+  for (let i = 0; i < 4; i++) {
+    elapsed = elapsedAtLocalTime(daybreakLocalTime(lat, declinationAt(elapsed)));
+  }
+  return elapsed;
+})();
+
 
 /** How far out the key light sits. Directional, so only the direction matters. */
 const SUN_DISTANCE = GLOBE_RADIUS * 6;
@@ -110,6 +164,16 @@ const SUN_DISTANCE = GLOBE_RADIUS * 6;
 const HORIZON_TINT = new THREE.Color('#ff7c3c');
 const GOLDEN_TINT = new THREE.Color('#ffc27e');
 const NOON_TINT = new THREE.Color('#fff4e4');
+
+/**
+ * Elevation, in sine, at which the day/night crossfade is complete.
+ *
+ * Unchanged from when the fade ran from -0.2 to here. Only its far end moved,
+ * down to wherever the drawn horizon is, so the world now starts brightening
+ * as the disc appears rather than a quarter of the sky later. About 12.7
+ * degrees above eye level, which on this globe is a good way into the morning.
+ */
+const DAY_FULL_SIN = 0.22;
 
 /* Key light. Graded down as the sun drops, standing in for air extinction. */
 const KEY_LOW = 1.15;
@@ -203,9 +267,13 @@ export const MOON_MONTH_DAYS = 8;
  */
 const MOON_DAY_LENGTH = (DAY_LENGTH * MOON_MONTH_DAYS) / (MOON_MONTH_DAYS - 1);
 /**
- * Peak lunar declination, radians. A little over the sun's AXIAL_TILT, so the
- * moon's track across the sky is visibly its own rather than the sun's path
- * walked at a different hour.
+ * Peak lunar declination, radians.
+ *
+ * This is now the ONLY body that leaves the equator: with AXIAL_TILT at zero
+ * the sun tracks it exactly, every day. So the moon's track is visibly its
+ * own, rather than the sun's path walked at a different hour, by a wider
+ * margin than before -- and it is the only thing keeping a tilt in the sky at
+ * all, which is a second reason not to flatten it to match.
  */
 const MOON_DECL_TILT = 0.5;
 /**
@@ -343,8 +411,9 @@ export function createDayNight(): DayNight {
     env.timeOfDay = tod;
 
     const sunLon = -tod * Math.PI * 2;
-    const season = (env.elapsed / (DAY_LENGTH * SEASON_DAYS)) * Math.PI * 2 + SEASON_PHASE;
-    const declination = Math.sin(season) * AXIAL_TILT;
+    // Shared with the START_ELAPSED solve above, so the opening frame and
+    // every frame after it place the sun by the same arithmetic.
+    const declination = declinationAt(env.elapsed);
     const cosDec = Math.cos(declination);
 
     // Mutated in place: consumers hold this reference.
@@ -357,16 +426,38 @@ export function createDayNight(): DayNight {
     // ---- How lit the side of the planet we are looking at is ----------
     _viewDir.copy(viewDir);
     if (_viewDir.lengthSq() < 1e-8) _viewDir.copy(DEFAULT_VIEW_DIR);
-    // Sine of the sun's elevation above the horizon at the sub-camera point.
+    // Sine of the sun's elevation above EYE LEVEL at the sub-camera point.
     const elevation = env.sunDirection.dot(_viewDir);
-    env.dayFactor = smoothstep(-0.2, 0.22, elevation);
+
+    /*
+     * Where the sea is, in the same units.
+     *
+     * Every ramp below starts here rather than at zero, and that is the whole
+     * change: on a globe this small the drawn horizon is some 25 degrees under
+     * eye level, so grading the light from zero meant the sun rose out of the
+     * water, climbed a quarter of the sky, and only THEN was allowed to look
+     * like it had risen. A disc hanging in plain sight over a sea lit as
+     * midnight was the result. The tops of the ramps are unchanged: what moved
+     * is where they begin.
+     *
+     * `SUN_APPEARS_SIN` is the horizon at ONE framing, the deck view the game
+     * is played from, and not the live camera's -- even though the live one is
+     * known here and really does drop as the camera climbs. Tracking it would
+     * mean the whole sea brightening as a player pulled the wheel back at
+     * dusk, which is a worse lie than a fixed offset and a far more visible
+     * one. `dayFactor` is a property of the world; only the sky dome, which
+     * fades out with altitude anyway, needs the horizon it is actually drawn
+     * against, and `sky.ts` recomputes that per pixel for itself.
+     */
+    env.dayFactor = smoothstep(SUN_APPEARS_SIN, DAY_FULL_SIN, elevation);
 
     // ---- Sun tint -----------------------------------------------------
-    // Deep orange with the sun on the horizon, through gold, to a neutral
-    // warm white overhead. Below the horizon it holds at the horizon tint:
-    // the only part of the lit hemisphere still visible from a night-side
-    // camera is the sliver either side of the terminator, which is warm.
-    const low = smoothstep(-0.02, 0.16, elevation);
+    // Deep orange with the sun on the water, through gold as it clears eye
+    // level, to a neutral warm white overhead. Below the sea it holds at the
+    // horizon tint: the only part of the lit hemisphere still visible from a
+    // night-side camera is the sliver either side of the terminator, which is
+    // warm.
+    const low = smoothstep(SUN_APPEARS_SIN, 0.0, elevation);
     const high = smoothstep(0.16, 0.46, elevation);
     env.sunColor.copy(HORIZON_TINT).lerp(GOLDEN_TINT, low).lerp(NOON_TINT, high);
 
@@ -374,7 +465,7 @@ export function createDayNight(): DayNight {
     sun.position.copy(env.sunDirection).multiplyScalar(SUN_DISTANCE);
     sun.color.copy(env.sunColor);
     // Thicker air near the horizon: dim the key as the sun drops.
-    const key = KEY_LOW + (KEY_HIGH - KEY_LOW) * smoothstep(0.0, 0.42, elevation);
+    const key = KEY_LOW + (KEY_HIGH - KEY_LOW) * smoothstep(SUN_APPEARS_SIN, 0.42, elevation);
     // Then the weather, which dims what the sun manages to deliver and adds
     // what the lightning does. Both terms vanish exactly at zero weather.
     const storm = weather ? weather.storm : 0;
