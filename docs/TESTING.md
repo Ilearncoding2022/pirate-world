@@ -101,6 +101,23 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
 - `?quality=low|medium|high` picks the tier. The hazard streams have to be
   looked at on all three: `low` registers no reflection plugin at all, and the
   displacement patch drops from 160 segments to 96.
+- `?battle=1` puts an orange raider on the hull so a fight starts at once,
+  rather than waiting on a 16%-and-24%-per-ten-seconds draw. `?boat=red|orange`
+  spawns one 45 units ahead instead, leaving the approach to play out. Wait on
+  `#battle` losing its `hidden` attribute; do not time it.
+- `?calm=1` switches off all three of `battlesea.ts`'s systems for every fight
+  in the session -- the same `CALM` the gunner's own unit cases are pinned
+  against. Tuning the gunner against a hull that is also being shoved, fouled
+  and blocked is tuning it against noise.
+
+**The chandlery cannot be reached from the browser tier at all.** `#btn-shop`
+ships `disabled`, only a berth enables it, and `main.ts` re-tests the berth on
+the click rather than trusting the button -- so there is no query that opens
+it and nothing on `__pirateWorld` to call. At a tenth of wall clock no
+container will sail to a berth. Check its markup against `shop.ts` instead,
+remembering that offers are addressed by template literal
+(`` `shop-${prefix}-price` ``), so grepping a literal id finds nothing and
+proves nothing. The panel itself is owner-eye-only.
 
 ## Rules
 

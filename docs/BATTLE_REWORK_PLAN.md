@@ -1,6 +1,10 @@
 # Ship battle rework: implementation plan
 
-Status: **draft, awaiting owner review. No code written.**
+Status: **Complete. All seven decisions landed.** Merged to `main` on
+2026-09-08, alongside the texture work and the chandlery rework. What the
+seven decisions actually produced is measured in **What it measured, once it
+was built** at the foot of this file; those figures are a robot's, and no
+human has played the reworked fight yet.
 
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially
