@@ -89,7 +89,7 @@ const NO_WIND: WindState = {
   across: 0,
 };
 
-function energyState(mode: EnergyState['mode'] = 'drain'): EnergyState {
+function energyState(mode: EnergyState['mode'] = 'burn'): EnergyState {
   return { level: 1, reserve: 0, rate: 0, mode, dock: null, canThrust: true };
 }
 

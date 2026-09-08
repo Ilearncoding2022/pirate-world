@@ -131,7 +131,7 @@ describe('hazards — the roll', () => {
   it('raises both kinds over an hour of rolls, and keeps each inside its live budget', () => {
     const hazards = makeHazards();
     const ship = stationaryShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
     const dt = 0.1;
     const seen = new Set<HazardKind>();
     let sawTwoWaves = false;
@@ -194,7 +194,7 @@ describe('hazards — a crest rolls its own width and its own life', () => {
   function survey(seconds: number): Survey {
     const hazards = makeHazards();
     const ship = stationaryShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
     const dt = 0.1;
     const widths: number[] = [];
     const lives: number[] = [];
@@ -344,7 +344,7 @@ describe('hazards — the push', () => {
   it('shoves the hull the way the crest went, peaking at PUSH_PEAK and gone by DISSIPATE', () => {
     const hazards = makeHazards();
     const ship = stationaryShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
     const dt = 0.05;
 
     // Dead astern of the bow: a crest travelling the way the ship points is
@@ -410,7 +410,7 @@ describe('hazards — capture', () => {
     let sunk = 0;
     const hazards = makeHazards(() => sunk++);
     const ship = stationaryShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
     const dt = 0.05;
 
     // Five units off the bow: outside the funnel while it is small, inside it
@@ -559,7 +559,7 @@ describe('hazards — a crest breaks on the shore', () => {
   it('keeps the stretch still over water and loses the part that met land', () => {
     const hazards = coastHazards();
     const ship = coastShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
     const dt = 0.05;
 
     // Fifteen units due north of the hull, running north: far enough that the
@@ -624,7 +624,7 @@ describe('hazards — a crest breaks on the shore', () => {
   it('drops a crest with no open water left under it, on the frame it has none', () => {
     const hazards = coastHazards();
     const ship = coastShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
 
     // Well inland: every probe along the front is dry.
     const inland = latLonToDir(0, 45);

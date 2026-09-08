@@ -549,14 +549,21 @@ body {
 /* ---------------------------------------------------------------------
    POWER — percentage, ten-notch bar, mode tag, signed rate
 
-   The four colour states are nothing but a custom-property swap on .pwr,
+   The five colour states are nothing but a custom-property swap on .pwr,
    set by hud.ts as a single class. Everything under it draws from those
    properties, so a state change repaints in one pass with no rule for each
    combination of part and state.
+
+   They are SEVERITIES and not causes — hud.ts's PwrSeverity, derived from
+   level, rate and canThrust, while the tag beside them names the cause. Ten
+   causes share five colours, which is the whole reason the two were split:
+   the class list here stopped growing a name every time the plant learned to
+   tell one situation from another.
    ------------------------------------------------------------------- */
 
 .pwr {
-  /* drain: the resting state, same cyan as the rest of the instrument */
+  /* steady: nothing gained, nothing worth warning about. The instrument's
+     own cyan, and the palette .pwr--steady deliberately leaves alone. */
   --pwr-accent: var(--cyan);
   --pwr-glow: rgba(63, 224, 255, 0.45);
   --pwr-rail: rgba(63, 224, 255, 0.09);
@@ -564,23 +571,35 @@ body {
   margin-top: 5px;
 }
 
-/* charging, from the sun or from a berth */
-.pwr--solar,
-.pwr--docked {
+/* gain: the tank is going up, whatever is filling it */
+.pwr--gain {
   --pwr-accent: #4bf0a6;
   --pwr-glow: rgba(75, 240, 166, 0.42);
   --pwr-rail: rgba(75, 240, 166, 0.09);
   --pwr-rail-edge: rgba(75, 240, 166, 0.24);
 }
 
-.pwr--low {
+/* warn: a low tank falling, a backup cell in use, or a helm on its way back */
+.pwr--warn {
   --pwr-accent: #ffb445;
   --pwr-glow: rgba(255, 180, 69, 0.45);
   --pwr-rail: rgba(255, 180, 69, 0.1);
   --pwr-rail-edge: rgba(255, 180, 69, 0.26);
 }
 
-.pwr--empty {
+/* hot: an Overdrive Coil burning four times the full-speed draw. Its own
+   colour rather than the amber above, because this one is not a warning
+   about a tank — it is a window the player opened and is paying for, and it
+   ends on its own. */
+.pwr--hot {
+  --pwr-accent: #ff7ae0;
+  --pwr-glow: rgba(255, 122, 224, 0.5);
+  --pwr-rail: rgba(255, 122, 224, 0.14);
+  --pwr-rail-edge: rgba(255, 122, 224, 0.34);
+}
+
+/* dead: no thrust, and nothing coming in to change that */
+.pwr--dead {
   --pwr-accent: #ff5470;
   --pwr-glow: rgba(255, 84, 112, 0.5);
   /* Warmer rails than the other states: at zero there is nothing lit, and an
@@ -644,9 +663,13 @@ body {
 }
 
 /* Opacity on two elements and nothing else: no layout, no repaint of the ten
-   segments, and it stops on the frame hud.ts swaps the class off. */
-.pwr--empty .pwr__bar,
-.pwr--empty .pwr__tag {
+   segments, and it stops on the frame hud.ts swaps the class off.
+
+   Only `dead` flashes. A plant that has already started climbing back out of
+   zero is `warn`, and holds still: an alarm that runs through a recovery the
+   player cannot hurry is one they learn to read past. */
+.pwr--dead .pwr__bar,
+.pwr--dead .pwr__tag {
   animation: pwr-alarm 900ms ease-in-out infinite;
 }
 
@@ -663,7 +686,7 @@ body {
 /* ---------------------------------------------------------------------
    BACKUP — the bought cell, under the POWER block
 
-   Deliberately a different instrument. The power block above swaps four
+   Deliberately a different instrument. The power block above swaps five
    colour states on one wrapper; this has exactly one colour and never
    changes it, because the cell has exactly one behaviour — it goes down.
    Violet rather than any of the plant's colours (cyan, green, amber, red),
@@ -1223,9 +1246,9 @@ kbd {
   .dbtn {
     transition: none;
   }
-  /* The empty alarm still reads: red rails, red tag, an empty bar. */
-  .pwr--empty .pwr__bar,
-  .pwr--empty .pwr__tag {
+  /* The dead alarm still reads: red rails, red tag, an empty bar. */
+  .pwr--dead .pwr__bar,
+  .pwr--dead .pwr__tag {
     animation: none;
   }
   .pwr__seg {
@@ -1245,7 +1268,7 @@ kbd {
 
 /*
  * Rides on .readout__val for its size and its tabular figures, and only
- * recolours — the same arrangement .pwr__val and .wnd__val use, so the four
+ * recolours — the same arrangement .pwr__val and .wnd__val use, so the five
  * readings on the panel cannot end up different sizes. Tabular numerals are
  * inherited rather than restated: a purse ticking 995 -> 1005 must not shuffle
  * the digits to its left, and one declaration is one place to keep that true.

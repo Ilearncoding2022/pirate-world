@@ -101,17 +101,52 @@ export interface Towns {
 /**
  * What the power plant is doing, for the HUD to label and colour.
  *
- * `empty` outranks the rest: it holds until the plant has recovered past the
- * restart threshold, so the tag does not flicker between EMPTY and SOLAR while
- * the panels trickle the first percent back in. It now means BOTH tanks are
- * dry — a ship coasting on its backup cell is very much still under way.
+ * Ten names for what used to be five, because each of the five was covering
+ * situations a player has to tell apart. `drain` was both a hull under full
+ * throttle at 1.1 %/s and a hull at rest after dark paying only the hotel
+ * load at 0.04 %/s. `empty` was both a ship adrift in the dark and a ship
+ * whose panels are already climbing back through the first percent — and that
+ * one was not merely coarse, it was a lie: the tag read EMPTY beside a
+ * positive rate, which is a plant that has failed rather than one restarting.
  *
- * `reserve` is that state: the main tank is empty and the frame's draw came
- * out of the bought cell. It sits between `docked` and `solar` in the ranking
- * because it is the one reading a player must not miss — the charge going down
- * is the one that no berth and no sunrise will put back.
+ * These name the CAUSE and nothing else. How alarming any of them is belongs
+ * to `hud.ts`, which derives its colour from `level`, `rate` and `canThrust`
+ * instead. One enum trying to carry both jobs is what forced `low` to exist as
+ * a HUD-only sixth state and left `reserve` — the one reading that cannot be
+ * undone — sharing the neutral colour of a healthy ship under way.
+ *
+ * The order they are decided in is a precedence ladder, not a list, and two
+ * rungs of it are load-bearing:
+ *
+ *   - `dead` and `restart` outrank everything, a berth included: while the
+ *     first percent trickles back the plant is still refusing thrust, and
+ *     that is the one thing the player needs to know.
+ *   - `docked` is the project's single definition of "at a berth" — the shop
+ *     gate, the wind's shelter, the hazard suppression and the dock glow all
+ *     test it — so no state may shadow it while the ship is connected. A full
+ *     tank at a berth is still `docked`; saying TANK FULL is the HUD's job.
  */
-export type EnergyMode = 'docked' | 'solar' | 'drain' | 'empty' | 'reserve';
+export type EnergyMode =
+  /** Both tanks dry, nothing coming in. No thrust: the ship drifts. */
+  | 'dead'
+  /** Both tanks dry but climbing again. Still no thrust — see RESTART_LEVEL. */
+  | 'restart'
+  /** Shore power, connected. The one definition of "at a berth". */
+  | 'docked'
+  /** Inside a berth's ring with the dwell clock running, not yet connected. */
+  | 'mooring'
+  /** Main tank on the floor; this frame's shortfall came out of the cell. */
+  | 'reserve'
+  /** An Overdrive Coil burning its flat multiple of the full-speed draw. */
+  | 'overdrive'
+  /** Under way on the engine, paying the speed-squared propulsion draw. */
+  | 'burn'
+  /** At rest with the sun on the panels. */
+  | 'solar'
+  /** At rest after dark, charging off a Moonglass Array. */
+  | 'moon'
+  /** At rest with nothing coming in: the hotel load, and only that. */
+  | 'hotel';
 
 /** Read-only view of the ship's power, produced by `energy.ts`. */
 export interface EnergyState {

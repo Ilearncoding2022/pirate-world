@@ -114,10 +114,13 @@
 
         <!-- Reserve power. hud.ts swaps one pwr--* modifier on this wrapper
              and every colour below it follows, so the number, the bar and the
-             tag can never end up in different states. Segments ship lit and
-             the tag ships SOLAR to match the full tank the sim starts with;
-             hud.ts reads both back at construction rather than assuming. -->
-        <div class="pwr pwr--solar" id="hud-pwr">
+             tag can never end up in different states. The modifier is a
+             SEVERITY, not a cause: the tag beside the bar is what names the
+             cause, and ten of those share five colours. Segments ship lit and
+             the pair ship steady/TANK FULL to match the full tank the sim
+             starts with, at rest and gaining nothing; hud.ts reads both back
+             at construction rather than assuming. -->
+        <div class="pwr pwr--steady" id="hud-pwr">
           <div class="readout">
             <span class="readout__key">POWER</span>
             <span class="readout__val pwr__val" id="hud-pwr-value">100%</span>
@@ -147,12 +150,12 @@
           </div>
 
           <div class="pwr__status">
-            <span class="pwr__tag" id="hud-pwr-mode">SOLAR</span>
+            <span class="pwr__tag" id="hud-pwr-mode">TANK FULL</span>
             <span class="pwr__rate" id="hud-pwr-rate">+0.00 %/s</span>
           </div>
 
           <!-- The bought backup cell. Deliberately NOT the same instrument as
-               the tank above it: violet rather than the power block's four
+               the tank above it: violet rather than the power block's five
                states, five notches rather than ten, and a hairline rule over
                it so it reads as a second tank bolted on rather than as more of
                the first. A cell that looked like the main reserve would be a

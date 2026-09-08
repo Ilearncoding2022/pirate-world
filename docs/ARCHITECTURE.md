@@ -274,7 +274,7 @@ shader.
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
-| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState`; `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
+| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` and the ten-rung `EnergyMode` ladder that names what the plant is doing; `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast |
 | `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards** |
 | `aiboats.ts` | `createAiBoats(deps)`, `AiBoatsDeps`, `AiBoats`, `ROLL_PERIOD`, the spawn and pursuit constants | the raider sim: the roll, spawning, transport, pursuit, conversion, contact and the post-fight grace. Owns `AiBoatState`, mutated in place; DOM-free, scene-free and seeded, exactly as `hazards.ts` is; see **AI boats and the battle** |
@@ -304,7 +304,7 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
 | `camera.ts` | `createFollowCamera(aspect)` | follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
+| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
 | `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?)`; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
@@ -1196,7 +1196,7 @@ about the *net* result rather than the gross.
 | Berth | 2.0%/s net (50 s to full), overrides solar rather than stacking |
 | Mooring | 2 s continuously inside the ring — see below |
 | Backup cell | drawn on only once `level` is 0; never charged by anything |
-| Empty | thrust refused until `RESTART_LEVEL` (3%) of **both tanks together** |
+| No thrust | refused at zero until `RESTART_LEVEL` (3%) of **both tanks together** |
 
 `MAX_FORWARD` is exported from `ship.ts` and imported here rather than copied,
 so a change to top speed moves the fuel economy with it instead of silently
@@ -1221,10 +1221,38 @@ Three consequences worth holding on to:
 - **`canThrust` is over the total too**, so a ship that runs its tank dry with
   a cell aboard never stops — it changes which tank it is drinking from, and
   the `reserve` mode says so on the panel.
-- **`EnergyMode` gained `reserve`**, ranked above both charging states. A ship
-  drifting at night on its cell is doing what a drifting ship always does, and
-  calling that `drain` would let a bought battery empty itself without the
-  panel ever naming the tank going down.
+- **`reserve` is ranked above both burns.** A ship drifting at night on its
+  cell is doing what a drifting ship always does, and calling that `burn`
+  would let a bought battery empty itself without the panel ever naming the
+  tank going down.
+
+**The tag names a cause; the colour names a severity.** `EnergyMode` is ten
+names for what the plant is doing, and `hud.ts` derives the colour separately
+from `level`, `rate` and `canThrust`. One enum carrying both jobs is what
+forced `low` to exist as a HUD-only sixth state and left `reserve` — the one
+reading that cannot be undone — wearing the same neutral cyan as a healthy
+ship under way.
+
+| | |
+|---|---|
+| `dead` / `restart` | no thrust, and whether the rate says it is coming back |
+| `docked` / `mooring` | connected, or inside the ring with the dwell running |
+| `reserve` | the main tank is on the floor and the cell is paying |
+| `overdrive` / `burn` | the coil's flat bill, or the ordinary speed-squared draw |
+| `solar` / `moon` / `hotel` | at rest: sun on the panels, moonglass, or neither |
+
+Severities are `dead` (red, and the only one that flashes), `warn`, `hot`,
+`gain` and `steady`. The panel's own `full` tag lives on that side too, because
+a tank at its ceiling is a fact about `level` — and because making it a mode
+would have put it in front of `docked`, which five modules test as the single
+definition of being at a berth. The shop gate must not close because the tank
+filled up.
+
+Two of the ten exist because the old five said something untrue. `empty`
+covered both a ship adrift in the dark and one whose panels were already
+climbing back through the first percent — the tag read EMPTY beside a positive
+rate, which is a plant that has failed rather than one restarting. And a
+Moonglass Array charging at midnight claimed `solar`.
 
 **A berth connects on a dwell, not on a speed.** It used to require the ring
 *and* under 3 kn of ground speed, which was a proxy and wrong at both ends:
@@ -1250,8 +1278,9 @@ Three subtleties worth keeping:
   Relighting at the first positive level would spend it on thrust inside the
   same frame and drop straight back to empty, stuttering the thrusters and
   strobing the HUD tag every frame the panels trickled.
-- **`mode: 'empty'` outranks everything**, a berth included, because it is a
-  statement about thrust rather than about charge.
+- **`dead` and `restart` outrank everything**, a berth included, because they
+  are statements about thrust rather than about charge. Which of the two shows
+  is the sign of `rate`, so a plant already climbing back says so.
 
 `energy.update` runs before `ship.update` and therefore bills last frame's
 speed. That is deliberate: the alternative is the ship spending power it turns

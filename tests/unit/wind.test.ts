@@ -41,7 +41,7 @@ describe('wind', () => {
     const heightMap = createHeightMap(terrain, 256, 128);
     const wind = createWind(terrain, heightMap);
     const ship = stationaryShip();
-    const energy = energyState('drain');
+    const energy = energyState('burn');
     const dt = 0.05;
 
     let sawGust = false;
@@ -75,7 +75,7 @@ describe('wind', () => {
     const dt = 0.05;
 
     // Run undocked until the wind is actually pushing the hull.
-    const sailing = energyState('drain');
+    const sailing = energyState('burn');
     let steps = 0;
     while ((wind.state.along === 0 && wind.state.across === 0) && steps < 400 / dt) {
       wind.update(dt, ship, sailing);

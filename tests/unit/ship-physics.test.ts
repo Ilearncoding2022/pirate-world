@@ -32,7 +32,7 @@ const NO_WIND: WindState = {
 };
 
 function energy(canThrust: boolean): EnergyState {
-  return { level: 1, rate: 0, mode: 'drain', dock: null, canThrust };
+  return { level: 1, rate: 0, mode: 'burn', dock: null, canThrust };
 }
 
 function input(overrides: Partial<InputState> = {}): InputState {

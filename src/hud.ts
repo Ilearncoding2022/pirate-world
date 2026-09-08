@@ -300,39 +300,89 @@ const PWR_SEGMENTS = 10;
 const RSV_SEGMENTS = 5;
 
 /**
- * A quarter tank, under which a *falling* reserve reads LOW and goes amber.
+ * A quarter tank, under which a *falling* tank goes amber.
  *
- * `energy.ts` has no such mode — it reports only docked/solar/drain/empty — so
- * LOW is the panel's own judgement rather than sim state. It is deliberately
- * not raised while charging: a reserve climbing back through 20% is good news,
- * and a warning there would cry wolf every time the ship leaves a berth.
+ * `energy.ts` has no such mode, and should not have one: how full the tank is
+ * is a fact about `level`, not about what the plant is doing to it. It is
+ * deliberately only read against a FALLING rate: a tank climbing back through
+ * 20% is good news, and a warning there would cry wolf every time the ship
+ * leaves a berth.
  */
 const PWR_LOW_LEVEL = 0.25;
 
-/** The mode as the panel tells it: the sim's four, plus the HUD-only LOW. */
-type PwrState = EnergyMode | 'low';
+/**
+ * What the tag says: the sim's ten causes, plus the panel's own FULL.
+ *
+ * `full` is here rather than in `EnergyMode` because a tank at its ceiling is
+ * a fact about `level`, and making it a mode would have put it in front of
+ * `docked` — which five other modules test as the single definition of being
+ * at a berth. The shop gate is not allowed to turn off because the tank
+ * filled up.
+ */
+type PwrTag = EnergyMode | 'full';
 
-function powerState(energy: EnergyState): PwrState {
-  return energy.mode === 'drain' && energy.level < PWR_LOW_LEVEL ? 'low' : energy.mode;
+/**
+ * The tank is at its ceiling and something is holding it there.
+ *
+ * Worth its own tag because the alternative reading of a charging state at
+ * +0.00 %/s is "the sun has gone down", and that misreading has cost time
+ * more than once. The rate test is what tells the two apart: a plant still
+ * paying for something reads negative within a frame of the ceiling.
+ */
+function powerTag(energy: EnergyState): PwrTag {
+  return energy.level >= 1 && energy.rate >= 0 ? 'full' : energy.mode;
 }
 
 /**
- * What the tag reads, per state.
+ * What the tag reads, per cause. Total rather than partial on purpose: a new
+ * mode with no wording is a compile error rather than a raw enum name leaking
+ * onto the panel.
  *
- * The two charging states say so in as many words. They are the states the
- * player is waiting out rather than reacting to, and "SOLAR" alone named the
- * source without answering the question actually being asked of the panel --
- * is this thing filling up? The other three are self-evident and stay a word.
- *
- * The state itself is still what drives the colour, through the modifier class
- * on the wrapper, so this map only ever decides wording. A state missing from
- * it falls back to its own name upper-cased, which is what the tag always did.
+ * Each one answers the question the panel is actually being asked, which is
+ * never "what state am I in" but "is this thing filling up, and may I move".
+ * That is why the charging states say CHARGING in as many words, why the two
+ * no-thrust states differ by whether the helm is coming back, and why the
+ * three at-rest states name what is on the panels rather than all reading
+ * IDLE.
  */
-const PWR_TAG: Partial<Record<PwrState, string>> = {
-  solar: 'IDLE - SOLAR CHARGING',
-  docked: 'DOCKED - CHARGING',
+const PWR_TAG: Record<PwrTag, string> = {
+  dead: 'NO POWER - ADRIFT',
+  restart: 'NO THRUST - RESTARTING',
+  docked: 'BERTH - CHARGING',
+  mooring: 'BERTH - CONNECTING',
   reserve: 'ON BACKUP CELL',
+  overdrive: 'OVERDRIVE - 4x BURN',
+  burn: 'UNDER WAY - BURN',
+  solar: 'IDLE - SOLAR CHARGING',
+  moon: 'IDLE - MOONGLASS',
+  hotel: 'IDLE - NO SUN',
+  full: 'TANK FULL',
 };
+
+/**
+ * How alarming it is, which is a different question from what is happening.
+ *
+ * The whole point of splitting this off the mode: the tag names the cause and
+ * this names the severity, so the panel can say RESTARTING in amber without
+ * inventing a mode for it, and a backup cell draining away can stop wearing
+ * the same neutral colour as a healthy ship under way.
+ *
+ * `dead` is the only one that flashes, and it keeps its single meaning: the
+ * ship cannot move and nothing is bringing it back. A plant already climbing
+ * out of zero is `warn` instead — an alarm that stays on through a recovery
+ * the player can do nothing to hurry is an alarm they learn to ignore.
+ */
+type PwrSeverity = 'dead' | 'warn' | 'hot' | 'gain' | 'steady';
+
+function powerSeverity(energy: EnergyState): PwrSeverity {
+  if (!energy.canThrust) return energy.rate > 0 ? 'warn' : 'dead';
+  // Both irreversible: the coil is spending four times the full-speed draw,
+  // and the cell is spending charge no berth and no sunrise will put back.
+  if (energy.mode === 'overdrive') return 'hot';
+  if (energy.mode === 'reserve') return 'warn';
+  if (energy.rate < 0 && energy.level < PWR_LOW_LEVEL) return 'warn';
+  return energy.rate > 0 ? 'gain' : 'steady';
+}
 
 /**
  * Segments to light, out of `count`. Ceil rather than round, so that any charge
@@ -471,8 +521,8 @@ export function createHud(
   const writeLon = textWriter(document.getElementById('hud-lon'));
 
   // Calm versus blowing is one modifier on the wrapper, exactly as the power
-  // block does its four states: the dart and the number take their colour and
-  // their visibility from it, so they cannot end up disagreeing.
+  // block does its five severities: the dart and the number take their colour
+  // and their visibility from it, so they cannot end up disagreeing.
   const writeWndState = modifierWriter(document.getElementById('hud-wnd'), 'wnd');
   const writeWndArrow = transformWriter(document.getElementById('hud-wnd-arrow'));
   const writeWndValue = textWriter(document.getElementById('hud-wnd-value'));
@@ -567,13 +617,11 @@ export function createHud(
       const level = energy.level;
       const clamped = level < 0 ? 0 : level > 1 ? 1 : level;
       const percent = String(Math.round(clamped * 100));
-      const state = powerState(energy);
-
-      writePwrState(state);
+      writePwrState(powerSeverity(energy));
       writePwrValue(`${percent}%`);
       writePwrAria(percent);
       writePwrSegments(litSegments(clamped, PWR_SEGMENTS));
-      writePwrMode(PWR_TAG[state] ?? state.toUpperCase());
+      writePwrMode(PWR_TAG[powerTag(energy)]);
       writePwrRate(formatRate(energy.rate));
 
       // The backup cell. Hidden outright at zero rather than shown empty: a
@@ -599,9 +647,10 @@ export function createHud(
       // same test -- so the key cannot disagree with the plant about whether
       // the ship has arrived.
       writeShopGate(energy.mode === 'docked');
-      // `energy.canThrust` is deliberately not read: `empty` holds for exactly
-      // as long as thrust is refused, so a second indicator would say the same
-      // thing twice and could only ever contradict the tag.
+      // `energy.canThrust` is deliberately not read: `dead` and `restart`
+      // between them hold for exactly as long as thrust is refused, so a
+      // second indicator would say the same thing twice and could only ever
+      // contradict the tag.
 
       writeAnchorGate(seaAnchor.canDeploy, seaAnchor.isDeployed ? 'Already deployed' : 'None stowed');
       writeOverdriveGate(overdrive.canEngage, overdrive.isActive ? 'Already burning' : 'None stowed');

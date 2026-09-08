@@ -245,6 +245,16 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   sun overhead, which is three and a half minutes from empty, stretching past
   seven at a low sun and going negative after dark. Run dry and you keep the
   helm but lose the engines, drifting until the sun comes up.
+  **The panel says which of those is happening.** It names the cause in as many
+  words — `UNDER WAY - BURN`, `IDLE - SOLAR CHARGING`, `IDLE - MOONGLASS`,
+  `IDLE - NO SUN`, `BERTH - CONNECTING`, `BERTH - CHARGING`, `ON BACKUP CELL`,
+  `OVERDRIVE - 4x BURN`, `TANK FULL` — and colours itself by how much trouble
+  you are in, which is a different question. The one that matters most is the
+  pair at the bottom: a dead ship reads `NO POWER - ADRIFT` in flashing red,
+  and the moment the panels start putting charge back it turns amber and reads
+  `NO THRUST - RESTARTING`. The helm comes back at three percent, a few seconds
+  later. It used to say EMPTY for both, which read as a plant that had failed
+  rather than one already coming back.
 - **Ports.** Every one of the world's 40 settlements is a port — a town that
   could not find water the ship can reach is never founded — so a settlement on
   the scope is always somewhere you can charge. Each has a lit ring on the

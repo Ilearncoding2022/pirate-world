@@ -367,7 +367,7 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     level: 1,
     reserve: battery.level,
     rate: 0,
-    mode: 'drain',
+    mode: 'hotel',
     dock: null,
     canThrust: true,
   };
@@ -422,6 +422,15 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     const docked = berth !== null && dwell >= DOCK_DWELL_SECONDS;
 
     let charge = 0;
+    /**
+     * Whether the charge below is the sun's doing rather than the moon's.
+     *
+     * Hoisted out of the block that decides it purely so the mode ladder can
+     * tell SOLAR from MOONGLASS. Recomputing the dot product down there would
+     * give the file two answers to the same question, which is exactly the
+     * split the panels and the shaders are kept out of.
+     */
+    let sunUp = false;
     if (docked) {
       charge = DOCK_RATE;
     } else if (ship.speed === 0) {
@@ -435,6 +444,7 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
       // give the game two different definitions of "stopped" to keep in sync,
       // and the panels would light while the hull was still visibly making way.
       const sunElevation = ship.up.dot(env.sunDirection);
+      sunUp = sunElevation > 0;
       charge = SOLAR_PEAK * Math.max(0, sunElevation);
 
       // A Moonglass Array's own tier fraction of SOLAR_PEAK, gated to hours
@@ -479,21 +489,45 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
 
     state.dock = docked ? berth : null;
 
-    // `empty` outranks everything, a berth included: while the first percent
-    // trickles back the plant is still refusing thrust, and a tag that flipped
-    // to SOLAR the instant the level left zero would be lying about the one
-    // thing the player needs to know.
-    //
-    // `reserve` comes next, ahead of both charging states, because it is the
-    // reading that cannot be undone. A ship drifting at night on its cell is
-    // technically doing what a drifting ship always does, and calling that
-    // DRAIN would let a bought battery empty itself without the panel ever
-    // saying which tank was going down.
-    if (!state.canThrust) state.mode = 'empty';
+    /*
+     * The mode ladder. Precedence, not a list -- see EnergyMode in `types.ts`
+     * for what each name means and why there are ten of them.
+     *
+     * No thrust outranks everything, a berth included: while the first percent
+     * trickles back the plant is still refusing to move the ship, and a tag
+     * that flipped to SOLAR the instant the level left zero would be lying
+     * about the one thing the player needs to know. The two halves of it are
+     * split on the rate, because "adrift in the dark" and "panels up, helm
+     * back in a few seconds" are the same predicament only on paper.
+     *
+     * `docked` comes next and is deliberately unconditional: five modules test
+     * it as the single definition of being at a berth, so nothing may shadow
+     * it while shore power is connected.
+     *
+     * `reserve` then outranks both burns, because it is the reading that
+     * cannot be undone. A ship drifting at night on its cell is technically
+     * doing what a drifting ship always does, and calling that a burn would
+     * let a bought battery empty itself without the panel ever saying which
+     * tank was going down.
+     *
+     * `overdrive` sits above `burn` for the same reason in reverse: the coil
+     * bills a flat four times the full-speed draw whatever the hull is
+     * actually doing, so reading it as an ordinary burn would leave the
+     * player to explain a rate the speed does not account for.
+     *
+     * `mooring` sits BELOW `burn` on purpose. The dwell clock counts whatever
+     * the hull is doing, drifting arrivals included, but a ship motoring
+     * through the ring is burning and calling that CONNECTING would be the
+     * same class of lie the old EMPTY tag told.
+     */
+    if (!state.canThrust) state.mode = state.rate > 0 ? 'restart' : 'dead';
     else if (docked) state.mode = 'docked';
     else if (fromReserve > 0) state.mode = 'reserve';
-    else if (state.rate >= 0) state.mode = 'solar';
-    else state.mode = 'drain';
+    else if (overdriveActive) state.mode = 'overdrive';
+    else if (ship.speed !== 0) state.mode = 'burn';
+    else if (berth !== null) state.mode = 'mooring';
+    else if (charge > 0) state.mode = sunUp ? 'solar' : 'moon';
+    else state.mode = 'hotel';
   }
 
   /**
