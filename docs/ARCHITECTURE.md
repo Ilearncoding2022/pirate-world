@@ -563,13 +563,26 @@ different questions:
   off the frame instead and the wall lands short of the lens at every zoom —
   15 units against a camera 21 back — and the whole foreground of every frame
   is dry water while it rains on the middle distance.
-- **Height** answers to NEITHER. `RAIN_HEIGHT` puts the ceiling nine units
-  over the water and `RAIN_BELOW` hangs three under it, so a drop is seen to
-  travel before it arrives and then falls through the sea rather than winking
-  out on it. Only three units are spent below the waterline, not half the box:
-  raising the ceiling by 80% cost about a sixth of the density rather than
-  nearly half. The fall speed, the wind drift and the streak length are
-  physical for the same reason and stay in world units.
+- **Height** answers to the camera's ALTITUDE, which is a different question
+  again. A ceiling is a plane, and a plane in shot is a line the rain begins
+  at -- drops arriving out of clear air partway up the frame. Whether that line
+  is in shot depends on how much sky the frame holds, and on a globe this small
+  that is a strong function of altitude: the horizon sits `acos(R / (R + A))`
+  below level, nearly 23 degrees from 17 units up, so at the framings the game
+  is played at roughly half the frame is sky. From far up the camera pitches
+  down hard enough that the ceiling never crosses the frame at all, which is
+  why the tall view looked right when the low one did not. So the ceiling
+  climbs past the lens as the lens climbs (`RAIN_TOP_LIFT`), stopping at
+  `RAIN_TOP_MAX` where the pitch has taken the line out of frame on its own.
+  `RAIN_BELOW` hangs three units under the water so a drop falls THROUGH the
+  sea rather than winking out on it -- three, not half the box, because every
+  unit below the waterline is drops nobody can see.
+- **The top has no wall to hide behind.** `RAIN_FADE` dissolves the sides and
+  the far edge and the near one is behind the lens, but the ceiling is simply
+  where drops stop, and lifting a hard edge only moves it. `RAIN_TOP_FADE`
+  dissolves the last third as well, which turns the ceiling into rain thinning
+  out overhead. The fall speed, the wind drift and the streak length stay in
+  world units throughout.
 
 That split is load-bearing and was learned the hard way: written first as a
 uniform `object.scale`, it stretched the height too — ten units became fifty,
@@ -605,6 +618,13 @@ x looks identical reflected, so nothing could see it; offsetting the box
 astern and stretching it differently across than along made the orientation
 observable for the first time. `lightning.ts` records the same trap at its own
 `tangentAt`, and got it right there.
+
+**The phase must be integrated, not derived.** `uTime` is the fall in box
+heights, and both the ceiling and `RAIN_HEIGHT` move now, so
+`elapsed * RAIN_FALL / height` jumps the instant the height does and every drop
+in the curtain teleports at once. Integrating the rate keeps it continuous. The
+rate itself is world-constant: 18 u/s under any ceiling and at any zoom, so a
+taller box simply takes longer to fall through.
 
 **The rain fell upward.** `fract(aLane.y + uTime)` climbs with time, and
 `pos.y` is that number times the box height, so every drop walked steadily out

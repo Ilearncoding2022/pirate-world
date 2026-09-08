@@ -90,6 +90,49 @@ const RAIN_HEIGHT = 12;
 const RAIN_BELOW = 3;
 
 /**
+ * How the ceiling rises with the camera, and where it stops.
+ *
+ * A fixed ceiling is a plane, and a plane in shot is a line the rain begins
+ * at -- drops arriving out of clear air partway up the frame. Whether that
+ * line is IN shot is entirely a question of how much sky the frame holds, and
+ * on a globe this small that is a strong function of altitude: the horizon
+ * sits `acos(R / (R + A))` below level, which from 17 units up is nearly 23
+ * degrees, so at the framings the game is actually played at roughly half the
+ * frame is sky and the ceiling draws a line straight across it. From far up
+ * the camera pitches down hard enough that the ceiling never crosses the
+ * frame at all, which is why the tall view already looked right and only the
+ * low one did not.
+ *
+ * So the ceiling climbs past the lens as the lens climbs. `* 1.2 + 6` keeps
+ * it comfortably overhead through the whole band where sky is in shot, and
+ * `RAIN_TOP_MAX` stops it there -- past that the pitch has taken the line out
+ * of frame on its own and further height would only buy thinner rain.
+ *
+ * `RAIN_TOP` is the floor under all of it: the ceiling the low view was
+ * judged at, and what a caller with no camera gets.
+ */
+const RAIN_TOP = 9;
+const RAIN_TOP_LIFT = 1.2;
+const RAIN_TOP_RISE = 6;
+const RAIN_TOP_MAX = 30;
+
+/**
+ * Where the curtain starts thinning toward its own ceiling, as a fraction of
+ * the box's height.
+ *
+ * Height is the one axis with no wall to hide behind: `RAIN_FADE` dissolves
+ * the sides and the far edge, and the near edge is behind the lens, but the
+ * top is simply where drops stop -- and a hard top is the whole complaint,
+ * lifting it only moves it. So the last third dissolves too, which turns the
+ * ceiling from an edge into rain thinning out overhead the way it does under
+ * real cloud.
+ *
+ * It also earns its keep directly overhead, where a drop at full alpha would
+ * otherwise be a streak drawn the length of the lens.
+ */
+const RAIN_TOP_FADE = 0.68;
+
+/**
  * How fast a drop falls, world units per second, and how far the wind carries
  * it as it does.
  *
@@ -285,6 +328,7 @@ const VERTEX_SHADER = [
   'uniform float uLength;',
   'uniform float uHalf;',
   'uniform float uFade;',
+  'uniform float uTopFade;',
   'uniform vec2 uSpread;',
   'uniform float uCurve;',
   // Each drop's own lane. x, z are its position in the box; y is a phase
@@ -316,6 +360,9 @@ const VERTEX_SHADER = [
   '  // falling drop would. Rain rising with the tails of falling rain is',
   '  // exactly what it looks like.',
   '  float fall = fract(aLane.y - uTime);',
+  '  // And thins toward the ceiling, which is the one boundary with no wall',
+  '  // to hide behind. See RAIN_TOP_FADE.',
+  '  vEdge *= 1.0 - smoothstep(uTopFade, 1.0, fall);',
   '  // The lane is where the drop lives in the box; uSpread is how wide the',
   '  // box is this frame -- x across the frame, y astern-to-ahead, and they',
   '  // are different numbers. HORIZONTAL only, and that is the whole point:',
@@ -406,6 +453,7 @@ export function createRain(drops: number): Rain {
     uLength: { value: RAIN_LENGTH },
     uHalf: { value: RAIN_BOX * 0.5 },
     uFade: { value: RAIN_FADE },
+    uTopFade: { value: RAIN_TOP_FADE },
     uSpread: { value: new THREE.Vector2(1, 1) },
     uCurve: { value: RAIN_CURVE },
     uColor: { value: RAIN_COLOR.clone() },
@@ -438,8 +486,10 @@ export function createRain(drops: number): Rain {
   const _matrix = new THREE.Matrix4();
   const _stb = new THREE.Vector3();
   const _ship = new THREE.Vector3();
+  const _toCam = new THREE.Vector3();
 
-  let elapsed = 0;
+  /** The fall, in box heights, wrapped into [0, 1). Integrated -- see `update`. */
+  let phase = 0;
 
   function update(
     dt: number,
@@ -536,6 +586,15 @@ export function createRain(drops: number): Rain {
     const deep = Math.max(half, (ahead - astern) * 0.5);
     uniforms.uSpread.value.set(wide / half, deep / half);
 
+    // How high the ceiling stands this frame, off the camera's own altitude
+    // over the water at the ship. See `RAIN_TOP_LIFT`.
+    const altitude = camera ? _toCam.copy(camera.position).sub(_ship).dot(_up) : 0;
+    const top = Math.min(
+      RAIN_TOP_MAX,
+      Math.max(RAIN_TOP, altitude * RAIN_TOP_LIFT + RAIN_TOP_RISE),
+    );
+    uniforms.uHeight.value = top + RAIN_BELOW;
+
     // Dropped under the waterline, so the drops fall THROUGH the sea rather
     // than winking out on it. Unscaled, like the height it belongs to.
     object.position.addScaledVector(_up, -RAIN_BELOW);
@@ -543,11 +602,18 @@ export function createRain(drops: number): Rain {
     // now that the curtain reaches further back than forward.
     object.position.addScaledVector(_fwd, (astern + ahead) * 0.5);
 
-    elapsed += dt;
-    // Turns over once per RAIN_HEIGHT / RAIN_FALL seconds, which is what the
-    // shader's `fract` wraps on. Untouched by the spread, because the height
-    // is: a drop falls 18 u/s at every zoom.
-    uniforms.uTime.value = (elapsed * RAIN_FALL) / RAIN_HEIGHT;
+    // INTEGRATED, not derived from a running clock, and that matters now
+    // that the ceiling moves: `elapsed * RAIN_FALL / height` jumps the instant
+    // the height does, and every drop in the curtain teleports to a new
+    // altitude at once. Integrating the rate leaves the phase continuous
+    // through any ceiling change.
+    //
+    // The rate stays world-constant either way: `RAIN_FALL` is 18 u/s under
+    // any ceiling and at any zoom, so a taller box simply takes longer to
+    // fall through. This is what the shader's `fract` wraps on.
+    phase += (dt * RAIN_FALL) / uniforms.uHeight.value;
+    phase -= Math.floor(phase);
+    uniforms.uTime.value = phase;
     // The streak grows with the camera's distance so it keeps its length ON
     // SCREEN, and takes nothing from the spread -- widening the curtain to
     // fill the frame must not lengthen every drop in it. See
@@ -569,7 +635,7 @@ export function createRain(drops: number): Rain {
 
     // The wind's own direction, resolved into the box's local axes: the
     // shader works in the box's frame and the wind is a world vector.
-    const drift = RAIN_DRIFT * RAIN_HEIGHT * (wind.speed / RAIN_FALL);
+    const drift = RAIN_DRIFT * uniforms.uHeight.value * (wind.speed / RAIN_FALL);
     uniforms.uWindDrift.value.set(
       wind.direction.dot(_stb) * drift,
       0,
