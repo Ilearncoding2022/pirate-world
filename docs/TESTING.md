@@ -87,7 +87,7 @@ seconds, so waiting for one is a vigil rather than a comparison. Both are
 pinned with dev queries, passed through `--query`:
 
 ```
-npm run shots -- --label before --query "?clock=10&hazard=greatwave&quality=high"
+npm run shots -- --label before --query "?clock=10&hazard=wave&quality=high"
 npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&quality=high"
 ```
 
@@ -95,7 +95,7 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
   (`?clock=13.5` is 13:30). Out-of-range or unparseable values are ignored.
   10:00 is the hour `docs/TEXTURE_PLAN.md`'s waves compare at: high enough for
   a real sun road on the water, low enough that land relief still casts.
-- `?hazard=wave|greatwave|maelstrom` raises one, 25 units dead ahead, three
+- `?hazard=wave|maelstrom` raises one, 25 units dead ahead, three
   seconds in. Already existed; it is listed here because the two are only
   useful together.
 - `?quality=low|medium|high` picks the tier. The hazard streams have to be

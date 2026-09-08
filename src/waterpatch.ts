@@ -81,7 +81,7 @@ export function createWaterPatch(water: Water, quality: Quality): WaterPatch {
    *
    * The two features the rise was for are the maelstrom's lip, 3.6 units
    * wide (hazardfield.ts's HAZ_RIM_C +/- 1/HAZ_RIM_INV, on a radius of 10),
-   * and the great wave's front face, 2.0 units (CREST_HALF_WIDTH *
+   * and the tallest wave's front face, 2.0 units (CREST_HALF_WIDTH *
    * CREST_FRONT_RATIO). At 160 the lip gets 3.6 vertices from crown to outer
    * edge and the face about 4 quads; at 192, 4.3 and 4.8. That is the whole
    * purchase: one more sample on each, for 25,600 vertices a frame becoming

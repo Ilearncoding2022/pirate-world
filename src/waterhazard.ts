@@ -46,8 +46,9 @@ import {
   HAZ_STEP_DIR,
   HAZ_STEP_WORLD,
   FUNNEL_DEPTH,
-  GREAT_CREST_HEIGHT,
+  CREST_HEIGHT_MAX,
   hazardExtentDir,
+  hazardBow,
   hazardHalfWidthDir,
   hazardShapeKind,
   hazardStrength,
@@ -63,11 +64,14 @@ import {
  * Turns `uHazShape.w` (world units of height) back into a 0..1 strength for
  * the art, by dividing out the largest amplitude either kind can carry.
  *
- * A great wave at full envelope therefore foams at 1.0 and a strong one at
- * 0.67, which is the ordering the sizes already imply, and both fade to
- * nothing with the envelope for free.
+ * A wave grown to the top of its range foams at 1.0 and one that rose at the
+ * bottom of it foams at 0.5, which is the ordering the heights already imply,
+ * and all of them fade to nothing with the envelope for free. There is no
+ * longer a great wave to normalise against -- CREST_HEIGHT_MAX is the ceiling
+ * growth may carry ANY wave to, which is the same 2.4 that constant always
+ * was.
  */
-const FOAM_STRENGTH_NORM = 1 / GREAT_CREST_HEIGHT;
+const FOAM_STRENGTH_NORM = 1 / CREST_HEIGHT_MAX;
 
 /** The same, for a maelstrom: `uHazShape.w` over the funnel's full depth is the growth envelope. */
 const FUNNEL_ENV_NORM = 1 / FUNNEL_DEPTH;
@@ -92,6 +96,7 @@ export function packHazards(
   easts: THREE.Vector3[],
   norths: THREE.Vector3[],
   shapes: THREE.Vector4[],
+  bows: number[],
 ): number {
   const count = Math.min(live.length, MAX_HAZARDS);
   for (let i = 0; i < count; i++) {
@@ -100,6 +105,9 @@ export function packHazards(
     easts[i].copy(h.east);
     norths[i].copy(h.north);
     shapes[i].set(hazardShapeKind(h), hazardExtentDir(h), hazardHalfWidthDir(h), hazardStrength(h));
+    // The bow is its own uniform rather than a fifth component of `shapes`
+    // because `shapes` is a vec4 and all four of its lanes are spoken for.
+    bows[i] = hazardBow(h);
   }
   // Slots at or past the count are never read -- `hazardHeight` breaks out of
   // its loop there -- so they are left holding whatever they last held rather
@@ -112,11 +120,13 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
   const easts: THREE.Vector3[] = [];
   const norths: THREE.Vector3[] = [];
   const shapes: THREE.Vector4[] = [];
+  const bows: number[] = [];
   for (let i = 0; i < MAX_HAZARDS; i++) {
     centres.push(new THREE.Vector3(0, 1, 0));
     easts.push(new THREE.Vector3(1, 0, 0));
     norths.push(new THREE.Vector3(0, 0, 1));
     shapes.push(new THREE.Vector4());
+    bows.push(0);
   }
 
   const uniforms: Record<string, THREE.IUniform> = {
@@ -125,6 +135,7 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
     uHazEast: { value: easts },
     uHazNorth: { value: norths },
     uHazShape: { value: shapes },
+    uHazBow: { value: bows },
   };
 
   let source: HazardState | null = null;
@@ -171,6 +182,11 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
       '      float hu = dot(n, uHazEast[hi]);',
       '      float hv = dot(n, uHazNorth[hi]);',
       '      float ha = max(hsh.y, HAZ_MIN_SIZE);',
+      // The art has to read the SAME along-travel coordinate the height field
+      // does or the foam band, the streaks and the spray all stay on the
+      // straight line the geometry no longer follows. A maelstrom's bow is
+      // packed as 0, so this is `hv` again on that branch.
+      '      hv = hazBowV(hu, hv, ha, uHazBow[hi]);',
       '      if (hsh.x < 0.5) {',
       `        float hstr = clamp(hsh.w * ${FOAM_STRENGTH_NORM.toFixed(6)}, 0.0, 1.0);`,
       '        float hb = max(hsh.z, HAZ_MIN_SIZE);',
@@ -209,6 +225,8 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
       '    float hu = dot(n, uHazEast[hi]);',
       '    float hv = dot(n, uHazNorth[hi]);',
       '    float ha = max(hsh.y, HAZ_MIN_SIZE);',
+      // Same bow as the `slope` hook above, and for the same reason.
+      '    hv = hazBowV(hu, hv, ha, uHazBow[hi]);',
       '    if (hsh.x < 0.5) {',
       `      float hstr = clamp(hsh.w * ${FOAM_STRENGTH_NORM.toFixed(6)}, 0.0, 1.0);`,
       '      float hb = max(hsh.z, HAZ_MIN_SIZE);',
@@ -240,7 +258,9 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
       // Unbound, or bound to a state with nothing on the water, the count is
       // 0 and every consumer skips the loop entirely -- which is what makes
       // this plugin free on the frames where nothing is happening.
-      uniforms.uHazCount.value = source ? packHazards(source.live, centres, easts, norths, shapes) : 0;
+      uniforms.uHazCount.value = source
+        ? packHazards(source.live, centres, easts, norths, shapes, bows)
+        : 0;
     },
   };
 }

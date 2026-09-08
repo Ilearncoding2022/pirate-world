@@ -11,7 +11,7 @@ import {
 } from './waveconstants';
 import {
   CREST_HEIGHT,
-  GREAT_CREST_HEIGHT,
+  CREST_HEIGHT_MAX,
   HAZ_CREST_RATIO_GLSL,
   HAZARD_PROFILE_GLSL,
 } from './hazardfield';
@@ -68,7 +68,7 @@ import {
  *   compiles, not a transcription of them;
  * - the crest's art -- the lip band, the torn ends, the streaks down the
  *   face, the thickness tint, the Fresnel rim -- from `hazardcrest.ts`'s own
- *   constants, so retuning a great wave out at sea retunes the one in here.
+ *   constants, so retuning a wave out at sea retunes the one in here.
  *
  * **What is still not shared, and must not be.** `water.ts` and
  * `waterpatch.ts` are still off limits (see `battlescene.ts`'s own module
@@ -622,7 +622,7 @@ export function crestFragment(fine: boolean): string {
     '  // at sea and no harder. The square root is hazardcrest.ts\'s: the crest',
     '  // profile is already a cube, and multiplying two copies of it together',
     '  // would leave the tint on the lip alone.',
-    `  float thick = sqrt(clamp(hazHeight0 * ${(1 / GREAT_CREST_HEIGHT).toFixed(6)}, 0.0, 1.0))`,
+    `  float thick = sqrt(clamp(hazHeight0 * ${(1 / CREST_HEIGHT_MAX).toFixed(6)}, 0.0, 1.0))`,
     `             * clamp(mask * ${CREST_SCOPE.toFixed(1)}, 0.0, 1.0);`,
     '',
     '  // ---- hazardcrest.ts, verbatim in this frame -----------------------',

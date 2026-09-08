@@ -39,7 +39,8 @@ import {
   CREST_HALF_LENGTH,
   CREST_HALF_WIDTH,
   CREST_HEIGHT,
-  GREAT_CREST_HEIGHT,
+  CREST_BOW_MAX,
+  CREST_HEIGHT_MAX,
   MAELSTROM_RADIUS,
   FUNNEL_DEPTH,
   hazardHeight,
@@ -273,11 +274,20 @@ function runWaveProbe(): void {
  *
  * One of every profile the field can draw, laid out so that all three, and
  * the ground each fades to nothing over, land inside the 45-unit half-span:
- * a great crest square to the patch, a strong one turned 45 degrees so the
- * dot products are exercised off-axis, and a maelstrom at nine tenths of full
- * size so the `extent * size` path is exercised too. The envelopes are
- * deliberately not 1: a probe that only ever multiplied by one would not
- * notice a side that had dropped the envelope entirely.
+ * a tall crest square to the patch and BOWED to the limit of the range, a
+ * shorter straight one turned 45 degrees so the dot products are exercised
+ * off-axis, and a maelstrom at nine tenths of full size so the
+ * `extent * size` path is exercised too. The envelopes are deliberately not
+ * 1: a probe that only ever multiplied by one would not notice a side that
+ * had dropped the envelope entirely.
+ *
+ * The two crests carry DIFFERENT bows, and both cases matter. The bowed one
+ * is the arithmetic itself: `hazBowV` is one more multiply-add in each port
+ * and float32 is not associative, so a transcription that reordered it would
+ * show up here and nowhere else. The straight one is the claim that a zero
+ * bow costs nothing -- `0.0 * a * anything` is exactly zero on both sides, so
+ * that crest has to come back bit-for-bit the crest this probe measured
+ * before the bow existed.
  *
  * They do not overlap. Two hazards summing is arithmetic the loop does
  * anyway; three profiles each drawn wrong in its own way is what this is
@@ -290,6 +300,7 @@ interface Placement {
   readonly turn: number;
   readonly extent: number;
   readonly halfWidth: number;
+  readonly bow: number;
   readonly amplitude: number;
   readonly envelope: number;
   readonly size: number;
@@ -297,13 +308,14 @@ interface Placement {
 
 const HAZARD_PLACEMENTS: readonly Placement[] = [
   {
-    kind: 'greatwave',
+    kind: 'wave',
     lon: 0,
     lat: 26,
     turn: 0,
     extent: CREST_HALF_LENGTH,
     halfWidth: CREST_HALF_WIDTH,
-    amplitude: GREAT_CREST_HEIGHT,
+    bow: CREST_BOW_MAX,
+    amplitude: CREST_HEIGHT_MAX,
     envelope: 0.85,
     size: 1,
   },
@@ -314,6 +326,7 @@ const HAZARD_PLACEMENTS: readonly Placement[] = [
     turn: Math.PI / 4,
     extent: CREST_HALF_LENGTH,
     halfWidth: CREST_HALF_WIDTH,
+    bow: 0,
     amplitude: CREST_HEIGHT,
     envelope: 1,
     size: 1,
@@ -325,6 +338,7 @@ const HAZARD_PLACEMENTS: readonly Placement[] = [
     turn: 0.6,
     extent: MAELSTROM_RADIUS,
     halfWidth: 0,
+    bow: 0,
     amplitude: FUNNEL_DEPTH,
     envelope: 0.75,
     size: 0.9,
@@ -357,6 +371,11 @@ function buildProbeHazards(): Hazard[] {
       north,
       extent: p.extent,
       halfWidth: p.halfWidth,
+      bow: p.bow,
+      // Not read by the field at all -- it is what makes a crest travel, and
+      // nothing travels in a probe -- but `Hazard` is the shape the game
+      // hands the plugin and this harness feeds both sides the real thing.
+      speed: 0,
       amplitude: p.amplitude,
       envelope: p.envelope,
       size: p.size,
@@ -376,7 +395,9 @@ function runHazardProbe(): void {
   const easts: THREE.Vector3[] = [];
   const norths: THREE.Vector3[] = [];
   const shapes: THREE.Vector4[] = [];
+  const bows: number[] = [];
   for (let i = 0; i < MAX_HAZARDS; i++) {
+    bows.push(0);
     centres.push(new THREE.Vector3(0, 1, 0));
     easts.push(new THREE.Vector3(1, 0, 0));
     norths.push(new THREE.Vector3(0, 0, 1));
@@ -385,7 +406,7 @@ function runHazardProbe(): void {
   // `waterhazard.ts`'s own packing, not a copy of it: the uniforms under test
   // are then the uniforms the game ships, down to which float32 each number
   // rounds to.
-  const count = packHazards(hazards, centres, easts, norths, shapes);
+  const count = packHazards(hazards, centres, easts, norths, shapes, bows);
 
   const fragmentShader = [
     'precision highp float;',
@@ -408,6 +429,7 @@ function runHazardProbe(): void {
     uHazEast: { value: easts },
     uHazNorth: { value: norths },
     uHazShape: { value: shapes },
+    uHazBow: { value: bows },
   };
 
   const dir = new THREE.Vector3();

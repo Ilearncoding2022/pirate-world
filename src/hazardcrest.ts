@@ -28,7 +28,7 @@
  *   colour  `hazCrestMask`, `hazSlope`, `hazHeight0`, and everything the
  *           water shader has by then (`col`, `N`, `fres`, `skyCol`, ...).
  */
-import { GREAT_CREST_HEIGHT } from './hazardfield';
+import { CREST_HEIGHT_MAX } from './hazardfield';
 import { freq } from './waveconstants';
 
 /* ------------------------------------------------------------------ */
@@ -245,7 +245,7 @@ export const LIP_HI = 0.9;
 export const LIP_RIM = 0.4;
 
 /** `hazHeight0` over a full great wave, so the thickness term is 0..1 in the shader. */
-const INV_CREST_HEIGHT = 1 / GREAT_CREST_HEIGHT;
+const INV_CREST_HEIGHT = 1 / CREST_HEIGHT_MAX;
 
 /**
  * Raises `hazCrestMask`, `steep`, `crestLift` and `tiltBoost`.

@@ -845,7 +845,7 @@ async function startGame(): Promise<void> {
   await loading.done();
 
   /*
-   * `?hazard=wave|greatwave|maelstrom` -- one forced hazard, 25 units dead
+   * `?hazard=wave|maelstrom` -- one forced hazard, 25 units dead
    * ahead, three seconds after the first frame.
    *
    * A maelstrom is a 1% draw every ten seconds. Waiting for one is not a test,
@@ -859,7 +859,7 @@ async function startGame(): Promise<void> {
    */
   const hazardQuery = new URLSearchParams(window.location.search).get('hazard');
   let forcedHazard: HazardKind | null =
-    hazardQuery === 'wave' || hazardQuery === 'greatwave' || hazardQuery === 'maelstrom'
+    hazardQuery === 'wave' || hazardQuery === 'maelstrom'
       ? hazardQuery
       : null;
   /** Seconds of sailing before the forced hazard rises. Long enough to see the sea it rises out of. */

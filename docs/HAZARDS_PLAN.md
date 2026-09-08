@@ -24,7 +24,7 @@ unworkable, say so and stop rather than substituting another.
 
 | Question | Decision |
 |---|---|
-| Roll cadence | One roll **every 10 s**, three **independent** draws: 10% strong wave, 5% great wave, 1% maelstrom. A draw for a kind that already has a live instance is skipped, so at most one of each kind exists at once (three hazards total). |
+| Roll cadence | One roll **every 10 s**, three **independent** draws: 10% strong wave, 5% great wave, 1% maelstrom. A draw for a kind that already has a live instance is skipped, so at most one of each kind exists at once (three hazards total). *(Superseded — see **The wave, amended**: one roll a second, two kinds, and a live budget of two crests and one maelstrom.)* |
 | Where they rise | **18 to 30 world units** from the ship, in reachable open ocean, **ahead-biased**: three draws in four put the bearing within ±60° of the bow, the fourth anywhere. Never within a berth's clearance. |
 | Wave shape | A **travelling crest line**: 20 units long across the direction of travel, 5 units wide along it, moving at **6 units/s** for a **10 s** life. |
 | Wave push | **Contact consumes the wave.** On contact the crest starts dissipating over **3 s** (strong) or **5 s** (great), and over those same seconds the hull is pushed in the crest's direction of travel by a hump of ground velocity peaking at **5 units/s** (strong) or **10 units/s** (great). A crest that never touches the hull lives its 10 s and fades on its own. |
@@ -87,17 +87,19 @@ Authored in world units at the top of `hazardfield.ts` and converted once.
 `bump(x) = (1 - x²)²` for `|x| < 1`, else 0. `plateau(x) = 1 - smoothstep(0.55, 1, |x|)`.
 Both are polynomial. `env` is the hazard's envelope, 0..1, computed on the CPU.
 
-**Crest** (kinds `wave` and `greatwave`), half-length `L = 10`, half-width `W = 2.5`:
+**Crest** (kind `wave`), half-length `L`, half-width `W`:
 
 ```
-h(u, v) = A · env · plateau(u / L) · bump(v / W)
+vq      = v + bow · L · (u / L)²
+h(u, v) = A · env · plateau(u / L) · bump(vq / W)
 ```
 
-`A` is `CREST_HEIGHT` = **1.6** for a strong wave, `GREAT_CREST_HEIGHT` =
-**2.4** for a great one. The ordinary sea peaks at `DISPLACE_AMPLITUDE` (0.3)
-in a full gale, so a strong wave is five times the worst weather and a great
-one eight. The hull's freeboard is about a unit; the great wave is meant to
-tower over it.
+`A` is the height, and it is no longer one of two fixed numbers. See
+**The wave, amended** below: `L`, `W`, `A`, `bow` and the wave's speed are all
+rolled per wave, and `L` and `A` then grow over its life. The ordinary sea
+peaks at `DISPLACE_AMPLITUDE` (0.3) in a full gale, so even the smallest wave
+is four times the worst weather; the hull's freeboard is about a unit, and a
+wave grown to `CREST_HEIGHT_MAX` = **2.4** is meant to tower over it.
 
 **Maelstrom**, radius `R = 10` at full size (the radius itself scales with the
 growth envelope, see below), with `r = sqrt(u² + v²) / R`:
@@ -196,7 +198,7 @@ Owns one `HazardState`, **mutated in place for the life of the run**, as
 vectors, and it is the module the unit tests exercise.
 
 ```ts
-export type HazardKind = 'wave' | 'greatwave' | 'maelstrom';
+export type HazardKind = 'wave' | 'maelstrom';
 
 export interface Hazard {
   readonly kind: HazardKind;
@@ -265,7 +267,8 @@ export function createHazards(deps: HazardsDeps): {
 
 A timer fires every `ROLL_PERIOD = 1` s — one tick for every kind, waves and
 maelstroms alike. For each kind in a fixed order
-(`wave`, `greatwave`, `maelstrom`): if no live hazard of that kind exists and
+(`wave`, `maelstrom`): if that kind is under its live budget (see
+**The wave, amended**: two crests, one maelstrom) and
 `rng() < P[kind]`, spawn one. Always draw the number, even when the kind is
 live, so the seeded stream stays in step regardless of what is on the water.
 
@@ -292,9 +295,9 @@ Up to 24 attempts, then give up until the next roll:
 ### Envelopes
 
 Crest: rises over `CREST_RISE = 1` s (smoothstep), holds, and either fades
-over the last `CREST_FADE = 1.5` s of `CREST_LIFE = 10` s, or — once
-`consumed` at age `tc` — over `DISSIPATE[kind]` = 3 s / 5 s from `tc`, after
-which it is removed.
+over the last `CREST_FADE = 1.5` s of its own rolled life, or — once
+`consumed` at age `tc` — over `DISSIPATE` = 3 s from `tc`, after which it is
+removed.
 
 Land is not an envelope. See **The coast clip** below: a crest that meets the
 shore loses the part that met it on that frame, with no dissipation, and is
@@ -309,8 +312,9 @@ The distance fade above multiplies `envelope` last.
 
 ### Transport
 
-A crest's `centre` is advanced along `north` by `CREST_SPEED = 6` units/s each
-frame (great-circle step). `north` is carried by parallel transport across
+A crest's `centre` is advanced along `north` by **its own rolled speed**,
+2 to 12 units/s — which is 2 to 12 knots, since the hull's `MAX_FORWARD` of 10
+units/s is what the HUD reads out as 10 kn — each frame (great-circle step). `north` is carried by parallel transport across
 that step, `wind.ts`'s way, and `east` is rebuilt from it. A maelstrom does not
 move.
 
@@ -345,11 +349,13 @@ between two probes and be passed over.
 ### Contact and push
 
 Each frame, for each live, unconsumed crest: with the ship's position in the
-crest's frame (`u`, `v` in world units), contact is `|u| < extent + HULL_REACH`
-and `|v| < halfWidth + HULL_REACH`, `HULL_REACH = 1.0` — half a hull. On
-contact, and not docked, mark it consumed and start its push.
+crest's frame (`u`, `v` in world units, `v` displaced onto the crest's own arc
+by the same `bow` term the height field uses), contact is
+`|u| < extent + HULL_REACH` and `|v| < halfWidth + HULL_REACH`,
+`HULL_REACH = 1.0` — half a hull. On contact, and not docked, mark it consumed
+and start its push.
 
-The push is a hump: `p(t) = PEAK[kind] · sin(π · t / DISSIPATE[kind])` for
+The push is a hump: `p(t) = PUSH_PEAK · (speed / 6) · sin(π · t / DISSIPATE)` for
 `t` since contact (`sin` is fine here; nothing on the GPU reads it). Its
 direction is the crest's `north` projected onto the ship's tangent plane, and
 it is resolved onto the hull exactly as the wind is:
@@ -361,8 +367,11 @@ across = p · dot(dir, starboard)          // starboard = normalize(cross(forwar
 
 No eight-sector table, and no easing: the hump is already smooth and it is
 meant to shove the hull the way the water went, not on a point of sail. Docked
-→ both zero. Over 3 s at a 5 units/s peak the hull is carried about 9.5 units;
-the great wave's 5 s at 10 carries it about 32 — a third of the scope.
+→ both zero. The peak is **proportional to the wave's own speed**, anchored so
+that a wave travelling 6 units/s — the speed every crest used to travel at —
+peaks at exactly the 5 it always did. Over 3 s at that 5 the hull is carried
+about 9.5 units; the fastest wave the sea can raise peaks at 10 and carries it
+about 19.
 
 ### Capture
 
@@ -520,7 +529,7 @@ halt.
 by the rotation between the last and current ship positions, and a large
 rotation is still a rotation. Note it in `ARCHITECTURE.md`, do not "fix" it.
 
-**Dev query.** `?hazard=wave|greatwave|maelstrom` calls `hazards.force` once,
+**Dev query.** `?hazard=wave|maelstrom` calls `hazards.force` once,
 three seconds after the first frame, 25 units dead ahead with `north` pointing
 back at the ship. Guarded exactly like `?quality=` (a `URLSearchParams` read,
 never `import.meta.env.MODE`), because the owner will use it against a
@@ -544,16 +553,25 @@ house style of `energy.ts`.
 | Constant | Value | File |
 |---|---|---|
 | `ROLL_PERIOD` | 10 s | hazards |
-| `P_WAVE` / `P_GREATWAVE` / `P_MAELSTROM` | 0.10 / 0.05 / 0.01 | hazards |
-| `SPAWN_MIN` / `SPAWN_MAX` | 18 / 30 units | hazards |
+| `P_WAVE` / `P_MAELSTROM` | 0.45 / 0.02 | hazards |
+| `MAX_WAVES` | 2 (of `MAX_HAZARDS` = 3) | hazards |
+| `SPAWN_LEAD_MIN` / `_MAX` | 3 / 5 s of closing | hazards |
+| `SPAWN_DIST_MIN` / `_MAX` | 12 / 32 units | hazards |
+| `MAELSTROM_SPAWN_MIN` / `_MAX` | 18 / 30 units | hazards |
 | `AHEAD_SHARE` / `AHEAD_HALF_ARC` | 0.75 / 60° | hazards |
 | `BERTH_MARGIN` | 4 units (added to `DOCK_RADIUS + extent`) | hazards |
-| `CREST_HALF_LENGTH` / `CREST_HALF_WIDTH` | 10 / 2.5 units | hazardfield |
-| `CREST_HEIGHT` / `GREAT_CREST_HEIGHT` | 1.6 / 2.4 units | hazardfield |
-| `CREST_SPEED` | 6 units/s | hazards |
-| `CREST_LIFE` / `CREST_RISE` / `CREST_FADE` | 10 / 1 / 1.5 s | hazards |
-| `DISSIPATE` | 3 s (wave) / 5 s (greatwave) | hazards |
-| `PUSH_PEAK` | 5 / 10 units/s | hazards |
+| `CREST_HALF_LENGTH` / `CREST_HALF_WIDTH` | 10 / 2.5 units (nominal; see below) | hazardfield |
+| `CREST_HALF_LENGTH_MIN` / `_MAX` / `_CAP` | 3 / 12 / 20 units | hazardfield |
+| `CREST_HEIGHT_MIN` / `CREST_HEIGHT_MAX_START` / `CREST_HEIGHT_MAX` | 1.2 / 2.0 / 2.4 units | hazardfield |
+| `CREST_BOW_MAX` | 0.35 of the half-length | hazardfield |
+| `CREST_SPEED_MIN` / `_MAX` / `_REF` | 2 / 12 / 6 units/s (= knots) | hazards |
+| `CREST_TRAVEL_MIN` / `_MAX` | 34 / 57 units | hazards |
+| `CREST_LIFE_MIN` / `CREST_LIFE_MAX` | 2.5 / 20 s | hazards |
+| `CREST_RISE` / `CREST_FADE` | 1 / 1.5 s | hazards |
+| `LENGTH_GROWTH` / `LENGTH_GROWTH_CAP` / `HEIGHT_GROWTH` | +10%/s / 3x / +5%/s | hazards |
+| `BOW_LENGTH_FLOOR` / `BOW_ROLL_FLOOR` | 0.15 / 0.3 | hazards |
+| `DISSIPATE` | 3 s | hazards |
+| `PUSH_PEAK` | 5 units/s at `CREST_SPEED_REF` | hazards |
 | `HULL_REACH` | 1.0 unit | hazards |
 | `MAELSTROM_RADIUS` | 10 units | hazardfield |
 | `FUNNEL_DEPTH` / `RIM_HEIGHT` | 3.0 / 0.35 units | hazardfield |
@@ -566,6 +584,75 @@ house style of `energy.ts`.
 | `WRECK_KEEP` | 0.25 | energy |
 | `FADE_IN` / `HOLD` / `FADE_OUT` | 0.7 / 0.4 / 1.0 s | blackout |
 | `HAZARD_SEED` | any fixed hex | hazards |
+
+## The wave, amended
+
+The plan above describes two crest kinds at two fixed strengths, every wave the
+same 20 units long, the same 6 units/s, and a straight wall of water. All of
+that has been replaced; the rest of the plan — the field's polynomial rule, the
+parity contract, the coast clip, the maelstrom, the spiral — stands unchanged.
+
+**One kind.** `greatwave` is gone. Every property that separated it from `wave`
+is now a continuous roll, so a second kind carrying nothing but a second pair of
+constants had stopped being a distinction. What was the great wave is the top of
+the range: `CREST_HEIGHT_MAX` is the 2.4 that constant always was, and the
+fastest wave's push peak is the 10 the great wave was worth.
+
+**Two on the water.** The live budget was one of each of three kinds and is now
+two crests and one maelstrom — the same `MAX_HAZARDS` = 3, so the shader's
+uniform block and its fragment loop are untouched. `P_WAVE` is the sum of the
+two old crest odds. Between them the sea is no busier and no quieter than it
+was; it is the same sea, drawn from one continuous range instead of two fixed
+strengths. Two crests may now overlap, and where they cross the water genuinely
+stands higher: `hazardHeight` has summed its slots since the day it was written.
+
+**Rolled per wave, at spawn.** Half-length (`CREST_HALF_LENGTH_MIN`..`_MAX`),
+half-width (unchanged), height (`CREST_HEIGHT_MIN`..`CREST_HEIGHT_MAX_START`),
+speed (`CREST_SPEED_MIN`..`_MAX`) and bow. Every one of them is drawn inside
+`build`, so a wave forced by a test or by `?hazard=` is as varied as one the
+weather raised.
+
+**Curved.** `hazBowV` displaces the along-travel coordinate by
+`bow · L · (u/L)²`, so the crest line runs from the centre back to `bow · L`
+behind it at each end: a front whose middle arrives first. A parabola and not a
+circular arc, because polynomial is the one rule the field has. The bow is a
+genuine draw off `rng` scaled by the wave's length, so a long front tends to be
+an arc and a short one tends to be a straight stub without either being
+guaranteed — `BOW_LENGTH_FLOOR` and `BOW_ROLL_FLOOR` are the two shares that
+keep "tends to" honest in both directions. `bow = 0` multiplies the whole term
+by exactly zero on both ports, so a straight crest is bit-for-bit the crest the
+field drew before the bow existed; the parity probe carries one of each.
+
+**Growing.** Length gains 10% and height 5% of what they currently are per
+second, both compounding, both recomputed from the wave's age rather than
+accumulated — so a long frame or a clamped `dt` cannot leave one wave
+permanently smaller than another that rolled the same numbers. Length is capped
+at `LENGTH_GROWTH_CAP` times what the wave rose at and at
+`CREST_HALF_LENGTH_CAP` absolutely; height at `CREST_HEIGHT_MAX`.
+
+Growth meets the coast clip, whose standing rule is that a broken end never
+comes back. Both hold at once because the loss is carried as a **share** of the
+wave's ideal length rather than as a length: the part of the front that broke on
+the shore is gone for good, and what is left of the wave goes on building.
+
+**Spawned on a lead time.** A crest rises `SPAWN_LEAD_MIN`..`_MAX` seconds of
+closing off the bow rather than a fixed distance, clamped to
+`SPAWN_DIST_MIN`..`_MAX` — near enough that a 2-knot wave is not born crawling
+in the far distance, far enough that a 12-knot one is still born at full
+strength inside `FADE_NEAR`. At the 6 units/s every wave used to travel at, the
+pair reproduces the old 18-to-30 band exactly. Its life is likewise rolled as a
+**travel distance** (`CREST_TRAVEL_MIN`..`_MAX`) and divided by its speed, so
+every wave still crosses its own spawn band whatever it rolled.
+
+**Pushing in proportion to its speed.** `PUSH_PEAK · speed / CREST_SPEED_REF`.
+`DISSIPATE` stays flat: a fast wave hits harder, not longer, or the two would
+compound into a fast wave carrying the hull four times as far as a slow one
+rather than six-fifths as hard.
+
+**What is deliberately not affected.** The arena's own wall of water
+(`battlewave.ts`) still compiles the shared profile functions and draws a
+straight crest at a fixed size: it is a scripted set piece rather than weather,
+and it reads none of the rolls. The maelstrom is untouched in every respect.
 
 ## Performance
 
@@ -625,7 +712,7 @@ energy.wreck();  camera.snap(ship)                                              
 `npm run test:all` **once**. Then launch a preview and look, per the memory
 note on headless screenshots and the budget in `docs/TESTING.md`:
 
-- `?hazard=greatwave`: the crest rises ahead, displaces the sea, the hull
+- `?hazard=wave`: the crest rises ahead, displaces the sea, the hull
   climbs it, the SPEED readout jumps as the push lands, the crest dissolves
   behind, the scope shows a magenta bar approaching.
 - `?hazard=maelstrom`: the funnel grows on the scope and the sea, the hull is

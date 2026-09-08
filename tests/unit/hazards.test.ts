@@ -10,7 +10,17 @@ import {
   PUSH_PEAK,
   SPIRAL_SECONDS,
 } from '../../src/hazards';
-import { MAELSTROM_RADIUS, MAX_HAZARDS } from '../../src/hazardfield';
+import {
+  CREST_BOW_MAX,
+  CREST_HALF_LENGTH_CAP,
+  CREST_HALF_LENGTH_MAX,
+  CREST_HALF_LENGTH_MIN,
+  CREST_HEIGHT_MAX,
+  CREST_HEIGHT_MAX_START,
+  CREST_HEIGHT_MIN,
+  MAELSTROM_RADIUS,
+  MAX_HAZARDS,
+} from '../../src/hazardfield';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { createHeightMap } from '../../src/heightmap';
 import { createWaterBodies } from '../../src/waterbodies';
@@ -100,29 +110,41 @@ function arcDistance(a: Vector3, b: Vector3): number {
   return Math.acos(Math.max(-1, Math.min(1, a.dot(b)))) * GLOBE_RADIUS;
 }
 
+/**
+ * `hazards.ts`'s length-growth curve, duplicated here on purpose.
+ *
+ * The module exports the two constants but not the law they combine into, and
+ * a test that imported the law would only be asserting that a function equals
+ * itself. Written out, a change to the growth rule has to be made twice --
+ * which is the point: the second time is where somebody asks whether the coast
+ * clip still holds under it.
+ */
+function growth(age: number): number {
+  return Math.min(Math.pow(1.1, age), 3);
+}
+
 function makeHazards(onSunk: () => void = () => {}) {
   return createHazards({ terrain, heightMap, waterBodies, towns, onSunk });
 }
 
 describe('hazards — the roll', () => {
-  it('raises every kind over an hour of rolls, and never two of a kind at once', () => {
+  it('raises both kinds over an hour of rolls, and keeps each inside its live budget', () => {
     const hazards = makeHazards();
     const ship = stationaryShip();
     const energy = energyState('drain');
     const dt = 0.1;
     const seen = new Set<HazardKind>();
+    let sawTwoWaves = false;
 
     for (let i = 0; i < 3000 / dt; i++) {
       hazards.update(dt, ship, energy, wind);
       const live = hazards.state.live;
       expect(live.length).toBeLessThanOrEqual(MAX_HAZARDS);
       let wave = 0;
-      let great = 0;
       let maelstrom = 0;
       for (const h of live) {
         seen.add(h.kind);
         if (h.kind === 'wave') wave++;
-        else if (h.kind === 'greatwave') great++;
         else maelstrom++;
         // The one number every consumer reads. Out of [0, 1] it would either
         // flatten the sea or blow the displacement past the patch's skirt.
@@ -130,10 +152,18 @@ describe('hazards — the roll', () => {
         expect(h.envelope).toBeLessThanOrEqual(1);
         expect(h.centre.length()).toBeCloseTo(1, 6);
       }
-      expect(Math.max(wave, great, maelstrom)).toBeLessThanOrEqual(1);
+      // Two crests and one funnel, which is the budget in `hazards.ts` --
+      // and it has to be the MAX_HAZARDS the shader's uniform arrays hold.
+      expect(wave).toBeLessThanOrEqual(MAX_HAZARDS - 1);
+      expect(maelstrom).toBeLessThanOrEqual(1);
+      if (wave === MAX_HAZARDS - 1) sawTwoWaves = true;
     }
 
-    expect([...seen].sort()).toEqual(['greatwave', 'maelstrom', 'wave']);
+    expect([...seen].sort()).toEqual(['maelstrom', 'wave']);
+    // The second wave slot is not decoration: collapsing the two crest kinds
+    // into one was only allowed to happen because the freed slot went back
+    // into the same pool, so a sea that never fills it is the regression.
+    expect(sawTwoWaves).toBe(true);
   });
 });
 
@@ -147,21 +177,55 @@ describe('hazards — a crest rolls its own width and its own life', () => {
    * expose it -- and measuring is the better test anyway, since what matters
    * is when the sea actually takes the wave away.
    */
-  function survey(seconds: number): { widths: number[]; lives: number[] } {
+  interface Survey {
+    widths: number[];
+    lives: number[];
+    /** Half-length, height and bow as each wave ROSE, before any growth. */
+    halfLengths: number[];
+    heights: number[];
+    bows: number[];
+    /** Speed, which never changes over a wave's life. */
+    speeds: number[];
+    /** The largest half-length and height each wave reached before it went. */
+    peakHalfLengths: number[];
+    peakHeights: number[];
+  }
+
+  function survey(seconds: number): Survey {
     const hazards = makeHazards();
     const ship = stationaryShip();
     const energy = energyState('drain');
     const dt = 0.1;
     const widths: number[] = [];
     const lives: number[] = [];
+    const halfLengths: number[] = [];
+    const heights: number[] = [];
+    const bows: number[] = [];
+    const speeds: number[] = [];
+    const peakHalfLengths: number[] = [];
+    const peakHeights: number[] = [];
     const lastAge = new Map<Hazard, number>();
+    const peakLength = new Map<Hazard, number>();
+    const peakHeight = new Map<Hazard, number>();
 
     for (let i = 0; i < seconds / dt; i++) {
       const before = new Set(hazards.state.live);
       hazards.update(dt, ship, energy, wind);
       for (const h of hazards.state.live) {
         if (h.kind === 'maelstrom') continue;
-        if (!lastAge.has(h)) widths.push(h.halfWidth * 2);
+        if (!lastAge.has(h)) {
+          widths.push(h.halfWidth * 2);
+          bows.push(h.bow);
+          speeds.push(h.speed);
+          // The first frame a wave is seen it is one tick old, so what is
+          // recorded here is the rolled value plus a tenth of a second of
+          // growth -- which the assertions below allow for rather than
+          // pretending the sim can be sampled at age exactly zero.
+          halfLengths.push(h.extent);
+          heights.push(h.amplitude);
+        }
+        peakLength.set(h, Math.max(peakLength.get(h) ?? 0, h.extent));
+        peakHeight.set(h, Math.max(peakHeight.get(h) ?? 0, h.amplitude));
         lastAge.set(h, h.age);
       }
       // A crest that was on the water and is not any more has lived out
@@ -172,9 +236,13 @@ describe('hazards — a crest rolls its own width and its own life', () => {
         if (h.kind === 'maelstrom' || hazards.state.live.includes(h)) continue;
         const age = lastAge.get(h);
         if (age !== undefined) lives.push(age);
+        const pl = peakLength.get(h);
+        if (pl !== undefined) peakHalfLengths.push(pl);
+        const ph = peakHeight.get(h);
+        if (ph !== undefined) peakHeights.push(ph);
       }
     }
-    return { widths, lives };
+    return { widths, lives, halfLengths, heights, bows, speeds, peakHalfLengths, peakHeights };
   }
 
   it('rolls every width inside 1 to 12 units, and spreads across the range', () => {
@@ -191,7 +259,7 @@ describe('hazards — a crest rolls its own width and its own life', () => {
     expect(Math.max(...widths)).toBeGreaterThan(CREST_WIDTH_MAX - span * 0.2);
   });
 
-  it('never lets a crest live ten seconds, and never lets one live too short to arrive', () => {
+  it('keeps every crest inside the rolled life band, and spreads across it', () => {
     const { lives } = survey(1200);
     expect(lives.length).toBeGreaterThan(20);
     for (const life of lives) {
@@ -199,13 +267,76 @@ describe('hazards — a crest rolls its own width and its own life', () => {
       // update that finds it past its own life, so the age it was last seen
       // at can be up to a tick over what it rolled.
       expect(life).toBeLessThan(CREST_LIFE_MAX + 0.1);
-      expect(life).toBeLessThan(10);
     }
     // Every wave has to be able to cross the spawn band: see CREST_LIFE_MIN.
     const untouched = lives.filter((life) => life > CREST_LIFE_MIN - 0.5);
     expect(untouched.length).toBeGreaterThan(lives.length * 0.5);
     // And they differ from one another, which is the whole change.
     expect(Math.max(...lives) - Math.min(...lives)).toBeGreaterThan(1);
+  });
+
+  it('rolls every speed inside 2 to 12 knots, and spreads across the range', () => {
+    const { speeds } = survey(1200);
+    expect(speeds.length).toBeGreaterThan(30);
+    for (const v of speeds) {
+      expect(v).toBeGreaterThanOrEqual(2);
+      expect(v).toBeLessThanOrEqual(12);
+    }
+    // Both ends reached, or the sea is one speed with jitter on it -- which
+    // is the thing the roll replaced.
+    expect(Math.min(...speeds)).toBeLessThan(4);
+    expect(Math.max(...speeds)).toBeGreaterThan(10);
+  });
+
+  it('rolls its own length and height at spawn, and grows both inside their caps', () => {
+    const { halfLengths, heights, peakHalfLengths, peakHeights } = survey(1200);
+    expect(halfLengths.length).toBeGreaterThan(30);
+
+    // The rolled band, with one tick of growth allowed for: the earliest a
+    // wave can be sampled is the frame after it rose. 10%/s over 0.1 s is a
+    // factor of 1.01, so 2% of slack is comfortably more than enough.
+    for (const l of halfLengths) {
+      expect(l).toBeGreaterThanOrEqual(CREST_HALF_LENGTH_MIN);
+      expect(l).toBeLessThanOrEqual(CREST_HALF_LENGTH_MAX * 1.02);
+    }
+    for (const a of heights) {
+      expect(a).toBeGreaterThanOrEqual(CREST_HEIGHT_MIN);
+      expect(a).toBeLessThanOrEqual(CREST_HEIGHT_MAX_START * 1.02);
+    }
+    const lengthSpan = CREST_HALF_LENGTH_MAX - CREST_HALF_LENGTH_MIN;
+    expect(Math.min(...halfLengths)).toBeLessThan(CREST_HALF_LENGTH_MIN + lengthSpan * 0.2);
+    expect(Math.max(...halfLengths)).toBeGreaterThan(CREST_HALF_LENGTH_MAX - lengthSpan * 0.2);
+
+    // Growth: the caps hold, and something actually grew. Waves are dropped
+    // the frame they run out of open water, so `peak` is over what each one
+    // reached, not over what an uninterrupted one would have.
+    for (const l of peakHalfLengths) expect(l).toBeLessThanOrEqual(CREST_HALF_LENGTH_CAP + 1e-9);
+    for (const a of peakHeights) expect(a).toBeLessThanOrEqual(CREST_HEIGHT_MAX + 1e-9);
+    let grew = 0;
+    for (let i = 0; i < peakHeights.length; i++) {
+      if (peakHalfLengths[i] > halfLengths[i] * 1.1 && peakHeights[i] > heights[i] * 1.05) grew++;
+    }
+    expect(grew).toBeGreaterThan(peakHeights.length * 0.5);
+  });
+
+  it('bows a long crest and leaves a short one nearly straight', () => {
+    const { halfLengths, bows } = survey(1200);
+    expect(bows.length).toBeGreaterThan(30);
+    for (const b of bows) {
+      expect(b).toBeGreaterThanOrEqual(0);
+      expect(b).toBeLessThanOrEqual(CREST_BOW_MAX);
+    }
+    // The tendency, measured as a tendency: the longest third of the waves
+    // bow appreciably more on average than the shortest third. Not asserted
+    // wave by wave, because the roll is deliberately allowed to hand a long
+    // wave a nearly straight front and the other way about.
+    const paired = halfLengths.map((l, i) => ({ l, b: bows[i] })).sort((x, y) => x.l - y.l);
+    const third = Math.floor(paired.length / 3);
+    const mean = (xs: { b: number }[]) => xs.reduce((t, x) => t + x.b, 0) / xs.length;
+    const shortest = mean(paired.slice(0, third));
+    const longest = mean(paired.slice(-third));
+    expect(longest).toBeGreaterThan(shortest * 2);
+    expect(shortest).toBeLessThan(CREST_BOW_MAX * 0.25);
   });
 });
 
@@ -218,42 +349,59 @@ describe('hazards — the push', () => {
 
     // Dead astern of the bow: a crest travelling the way the ship points is
     // pure `along`, which is the pair's whole convention.
-    hazards.force('greatwave', ship.position, ship.forward);
-    const forced = hazards.state.live.find((h) => h.kind === 'greatwave');
+    hazards.force('wave', ship.position, ship.forward);
+    const forced = hazards.state.live.find((h) => h.kind === 'wave');
+    expect(forced).toBeDefined();
+    if (forced === undefined) return;
+    // The peak is PUSH_PEAK scaled by the speed this wave happened to roll:
+    // that proportionality IS the rule, so the expectation is derived from
+    // the same speed rather than from a constant that no longer says it.
+    const expected = (PUSH_PEAK * forced.speed) / 6;
     let peakAlong = 0;
     let peakAcross = 0;
-    for (let t = 0; t < DISSIPATE.greatwave - dt; t += dt) {
+    for (let t = 0; t < DISSIPATE - dt; t += dt) {
       hazards.update(dt, ship, energy, wind);
       peakAlong = Math.max(peakAlong, hazards.state.along);
       peakAcross = Math.max(peakAcross, Math.abs(hazards.state.across));
     }
-    expect(peakAlong).toBeGreaterThan(PUSH_PEAK.greatwave * 0.9);
-    expect(peakAlong).toBeLessThan(PUSH_PEAK.greatwave * 1.1);
-    expect(peakAcross).toBeLessThan(PUSH_PEAK.greatwave * 0.02);
+    expect(peakAlong).toBeGreaterThan(expected * 0.9);
+    expect(peakAlong).toBeLessThan(expected * 1.1);
+    expect(peakAcross).toBeLessThan(expected * 0.02);
 
     // One dissipation later the hump is over and the crest is gone with it.
-    // The forced wave specifically, not the whole list: six seconds of rolls
-    // at ROLL_ODDS raise weather of their own, and none of it has reached the
-    // hull -- which is what `along` and `across` being exactly zero says.
+    // The forced wave specifically, not the whole list: the rolls raise
+    // weather of their own, and a stationary ship at the spawn point is not
+    // reached by all of it.
     for (let t = 0; t < 1; t += dt) hazards.update(dt, ship, energy, wind);
-    expect(hazards.state.along).toBe(0);
-    expect(hazards.state.across).toBe(0);
     expect(hazards.state.live).not.toContain(forced);
+    // And with nothing left on the water still dissipating, the pair is
+    // EXACTLY zero rather than a residue easing out. Guarded, because the sea
+    // now runs two crest slots and four seconds of rolls can put a second
+    // wave over a stationary hull -- in which case what `along` carries is
+    // that wave's hump and not this one's leftovers.
+    if (!hazards.state.live.some((h) => h.kind !== 'maelstrom' && h.consumed)) {
+      expect(hazards.state.along).toBe(0);
+      expect(hazards.state.across).toBe(0);
+    }
 
     // And a crest crossing the bow is pure `across`, on the starboard sign.
     hazards.reset();
     const starboard = new Vector3().crossVectors(ship.forward, ship.up).normalize();
     hazards.force('wave', ship.position, starboard);
+    const abeam = hazards.state.live.find((h) => h.kind === 'wave');
+    expect(abeam).toBeDefined();
+    if (abeam === undefined) return;
+    const expectedAbeam = (PUSH_PEAK * abeam.speed) / 6;
     peakAlong = 0;
     peakAcross = 0;
-    for (let t = 0; t < DISSIPATE.wave - dt; t += dt) {
+    for (let t = 0; t < DISSIPATE - dt; t += dt) {
       hazards.update(dt, ship, energy, wind);
       peakAcross = Math.max(peakAcross, hazards.state.across);
       peakAlong = Math.max(peakAlong, Math.abs(hazards.state.along));
     }
-    expect(peakAcross).toBeGreaterThan(PUSH_PEAK.wave * 0.9);
-    expect(peakAcross).toBeLessThan(PUSH_PEAK.wave * 1.1);
-    expect(peakAlong).toBeLessThan(PUSH_PEAK.wave * 0.02);
+    expect(peakAcross).toBeGreaterThan(expectedAbeam * 0.9);
+    expect(peakAcross).toBeLessThan(expectedAbeam * 1.1);
+    expect(peakAlong).toBeLessThan(expectedAbeam * 0.02);
   });
 });
 
@@ -318,7 +466,7 @@ describe('hazards — a berth is shelter', () => {
 
     let sunk = 0;
     const hazards = makeHazards(() => sunk++);
-    hazards.force('greatwave', ship.position, ship.forward);
+    hazards.force('wave', ship.position, ship.forward);
     hazards.force('maelstrom', ship.position, ship.forward);
 
     for (let i = 0; i < 12 / dt; i++) {
@@ -448,15 +596,28 @@ describe('hazards — a crest breaks on the shore', () => {
     expect(crest.north.dot(crest.centre)).toBeCloseTo(0, 6);
     expect(crest.east.dot(crest.north)).toBeCloseTo(0, 6);
 
-    // And it only ever shrinks: the wave runs north up a shore that never
-    // moves, so the clip has to hold rather than breathe frame to frame.
-    let last = crest.extent;
+    /*
+     * And what the coast has taken only ever grows: the wave runs north up a
+     * shore that never moves, so the clip has to hold rather than breathe
+     * frame to frame.
+     *
+     * `extent` itself is no longer the thing to watch, because a crest grows
+     * 10% of its length a second and can therefore be longer this frame than
+     * last while still having lost more of itself to the rock. What has to be
+     * monotonic is the SHARE of its ideal length the wave still has -- which
+     * is `hazards.ts`'s `clipRatio`, reconstructed here from the two numbers
+     * a consumer can actually see, so the test measures the guarantee rather
+     * than the bookkeeping.
+     */
+    const base = crest.extent / growth(crest.age);
+    let lastShare = 1;
     for (let i = 0; i < 40; i++) {
       hazards.update(dt, ship, energy, wind);
       if (!hazards.state.live.includes(crest)) break;
-      expect(crest.extent).toBeLessThanOrEqual(last + 1e-9);
+      const share = crest.extent / (base * growth(crest.age));
+      expect(share).toBeLessThanOrEqual(lastShare + 1e-9);
       expect(crest.extent).toBeGreaterThan(0);
-      last = crest.extent;
+      lastShare = share;
     }
   });
 

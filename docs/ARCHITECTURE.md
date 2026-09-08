@@ -1479,47 +1479,100 @@ the sim, `hazardfield.ts` the height field, `waterhazard.ts` the plugin that
 draws it. The brief is `docs/HAZARDS_PLAN.md`; this section records the two
 decisions a later reader is most likely to undo by accident.
 
-Three hazards at most, one of each kind, rolled every **1 s at 20% / 10% / 2%**.
-There is ONE roll timer and both waves and maelstroms are drawn on it, so
-`hazards.ROLL_PERIOD` moves all three frequencies together — retune a single
+**Two kinds, not three.** `greatwave` is gone: it and `wave` were the same
+geometry at two fixed strengths, and every property that separated them —
+height, push, dissipation — is now rolled per wave off a continuous range, so
+the second kind carried nothing but a second pair of constants. What was the
+great wave is the top of the range: `CREST_HEIGHT_MAX` is the 2.4 that constant
+always was, and the fastest wave's push peak is the 10 the great wave was worth.
+
+Three hazards at most, rolled every **1 s at 45% / 2%**, with a live budget of
+**two crests and one maelstrom** — the same `MAX_HAZARDS` = 3, so the shader's
+uniform block and its fragment loop are untouched. `P_WAVE` is the sum of the
+two crest odds it replaced (0.3 + 0.15), and the freed slot went back into the
+same pool: between them, collapsing the kinds left the sea neither busier nor
+quieter than it was. Two crests may now overlap, and where they cross the water
+genuinely stands higher — `hazardHeight` has summed its slots since the day it
+was written. There is ONE roll timer and both kinds are drawn on it, so
+`hazards.ROLL_PERIOD` moves both frequencies together — retune a single
 probability instead. Note `aiboats.ts` exports a `ROLL_PERIOD` of its own on
 the same name and a different value (10 s); nothing imports both, and neither
-is the other's to retune. At a roll a second the nominal waits are
-3.3 s / 6.7 s / 50 s, but those are ceilings rather than rates: only one hazard
-of each kind is ever on the water, so what the fast tick actually buys is that
-the next one rises soon after the last one dies, not a sea three deep.
+is the other's to retune.
 
-**The two crest odds are half again what they were, and their lives are
-shorter and rolled.** Read the two together: a crest now clears the water
-sooner than a flat `CREST_LIFE = 10` left it, so raising 0.2/0.1 to 0.3/0.15 is
-what stops the gap between one wave and the next GROWING when their lives were
-cut. The maelstrom is deliberately untouched — it is the rare thing, and the
-one hazard that can end a run.
+**Every crest rolls its own length, width, height, speed and bow** in `build()`,
+so a wave forced by a test or by `?hazard=` is as varied as one the weather
+raised — there is no such thing in that file as a crest of the default
+anything. No range is weighted toward the middle: the whole point of a size
+moving off a constant is that the sea can produce a wave the player has not seen
+before, and a distribution avoiding its own ends would be the old single value
+with jitter on it.
 
-**Every crest also rolls its own width and its own life** (`CREST_WIDTH_MIN` /
-`_MAX`, 1 to 12 units of full width; `CREST_LIFE_MIN` / `_MAX`, 5 to 9.5 s),
-both drawn uniformly in `build()` so a wave forced by a test or by `?hazard=`
-is as varied as one the weather raised — there is no such thing in that file as
-a crest of the default width. Neither end is weighted toward the middle: the
-whole point of the width moving off a constant is that the sea can produce a
-wave the player has not seen before, and a distribution avoiding its own ends
-would be the old single width with jitter on it. Two bounds are load-bearing
-rather than aesthetic. `CREST_LIFE_MIN` is 5 because a crest rises 18 to 30
-units off the bow and closes at 6 units/s: five seconds is thirty units of
-travel, so the shortest wave that can be rolled still crosses the whole spawn
-band and no draw puts a wave on the water that could never have arrived.
-`CREST_LIFE_MAX` is 9.5 rather than 10 so that "under ten seconds" is true of
-every wave and not merely of almost all of them.
+- **Length** `CREST_HALF_LENGTH_MIN`/`_MAX`, 6 to 24 units of front.
+- **Width** `CREST_WIDTH_MIN`/`_MAX`, 1 to 12 units, unchanged.
+- **Height** `CREST_HEIGHT_MIN` to `CREST_HEIGHT_MAX_START`, 1.2 to 2.0.
+- **Speed** `CREST_SPEED_MIN`/`_MAX`, 2 to 12 units/s — which is 2 to 12 knots,
+  since the hull's `MAX_FORWARD` of 10 units/s is what the HUD reads out as
+  10 kn. The top of that range is deliberately faster than the ship: a 12-knot
+  wave has to be steered out of the way of rather than fled from.
+- **Bow** 0 to `CREST_BOW_MAX`, the arc — see below.
 
-What the width does NOT change is how hard a wave hits: the push is
-`PUSH_PEAK` by kind and the height is `CREST_HEIGHT` by kind, so a wide wave is
-a longer shove of the same strength rather than a bigger one, and the two kinds
-stay the two kinds. It does change the contact test, which measures against
-`halfWidth` — a 12-unit wave is genuinely harder to be missed by, which is the
-honest consequence of it being wider water.
+**And a crest grows while it lives**: +10% of its length and +5% of its height
+a second, both compounding, both recomputed from the wave's age rather than
+accumulated, so a long frame or a clamped `dt` cannot leave one wave
+permanently smaller than another that rolled the same numbers. Length is capped
+at 3x what it rose at and at `CREST_HALF_LENGTH_CAP` (20) absolutely, because
+the displacement patch skirts its own displacement from 34 units out and a
+front wider than about 40 has ends hanging in undisplaced water. Height is
+capped at `CREST_HEIGHT_MAX`, so nothing on screen is taller than the great
+wave the game already shipped.
 
-A crest is a 20-unit
-travelling line that
+Growth meets the coast clip, whose standing rule is that a broken end never
+comes back. Both hold at once because the loss is carried as a **share** of the
+wave's ideal length (`MutableHazard.clipRatio`) rather than as a length: the
+part of the front that broke on the shore is gone for good, and what is left of
+the wave goes on building. Reverse that and a wave whose ends had been pushed
+back out over the rock would simply re-break there, flickering once a frame.
+
+**A crest is a bowed front, not a straight wall.** `hazardfield.ts`'s `hazBowV`
+displaces the along-travel coordinate by `bow · L · (u/L)²`, so the crest line
+runs from the centre back to `bow · L` behind it at each end and the middle of
+the wave arrives first. A parabola rather than a circular arc, because
+polynomial is the one rule the height field has and the two ports have to stay
+bit-identical; over the longest front the difference is under the patch's own
+vertex spacing. The bow is a genuine draw scaled by the wave's length, so a long
+front tends to be an arc and a short one tends to be a straight stub without
+either being guaranteed. `bow = 0` multiplies the term by exactly zero on both
+ports, so a straight crest is bit-for-bit the crest the field drew before the
+bow existed — the parity probe carries one bowed crest and one straight one for
+exactly that reason. Everything that reads the wave reads the same displaced
+coordinate: the height field, the art's foam and streaks, the contact test, and
+the scope, which draws the mark as a six-segment polyline along the arc rather
+than as a chord across it.
+
+**A crest spawns on a lead TIME, not a distance.** `SPAWN_LEAD_MIN`/`_MAX`,
+3 to 5 seconds of closing, clamped to `SPAWN_DIST_MIN`/`_MAX` (12 to 32 units):
+near enough that a 2-knot wave is not born crawling in the far distance, far
+enough that a 12-knot one is still born at full strength inside `FADE_NEAR`. Its
+life is likewise rolled as a travel DISTANCE (`CREST_TRAVEL_MIN`/`_MAX`, 34 to
+57 units) and divided by its speed, so every wave still crosses its own spawn
+band whatever it rolled and no draw puts a wave on the water that could never
+have arrived. At the 6 units/s every crest used to travel at, both reproduce
+the bands this file always had.
+
+**The push is proportional to the wave's speed**: `PUSH_PEAK · speed / 6`, so
+a wave shoves the hull in proportion to how fast the water was moving when it
+arrived. The anchor is chosen so nothing gets stronger than the game already
+shipped — at 6 units/s the peak is exactly the 5 it always was, and at 12 it is
+the 10 the great wave was worth. `DISSIPATE` stays a flat 3 s: a fast wave hits
+harder, not longer, or the two would compound into a fast wave carrying the hull
+four times as far as a slow one rather than six-fifths as hard.
+
+What the WIDTH does not change is how hard a wave hits: a wide wave is a longer
+shove of the same strength rather than a bigger one. It does change the contact
+test, which measures against `halfWidth` — a 12-unit wave is genuinely harder to
+be missed by, which is the honest consequence of it being wider water.
+
+A crest is a travelling line that
 shoves the hull the way the water went — the push is a velocity, added exactly
 as the wind's is, so the bow holds its heading and the ship is carried off its
 course with the helm still answering. A maelstrom is a 20-unit funnel that
@@ -1641,7 +1694,7 @@ tab may never fire the event and a screen stuck black is the one failure with
 no way out. Its three durations are written twice — there and as the two
 `transition` rules in `style.css`'s `BLACKOUT` block — so change them together.
 
-`?hazard=wave|greatwave|maelstrom` forces one 25 units dead ahead, three
+`?hazard=wave|maelstrom` forces one 25 units dead ahead, three
 seconds after the first frame. It is guarded through `URLSearchParams` and
 never through `import.meta.env.MODE`, on the same terms as `?quality=`: the
 owner uses it against a `vite preview` production build, and a 1%-per-10-s
@@ -1890,7 +1943,7 @@ a second description of the same idea:
 | the ridged three-octave field | `waterglsl.ts`'s `waveField`, rewritten for the xz plane | the `ridge()` fold is the whole difference between crest lines and blobs |
 | the wavelengths and stretch axes | `waveconstants.ts` | already the one source the GPU and CPU ports read; the arena is now a third |
 | the crest's profile | `hazardfield.ts`'s `HAZARD_PROFILE_GLSL` | the identical characters both shaders compile — see below |
-| the crest's art | `hazardcrest.ts`'s constants | retuning a great wave at sea has to retune the one in the arena |
+| the crest's art | `hazardcrest.ts`'s constants | retuning a wave at sea has to retune the one in the arena |
 
 `HAZARD_PROFILE_GLSL` and `HAZ_CREST_RATIO_GLSL` are a **pure split** out of
 `HAZARD_GLSL`: the two chunks are spliced back into it in place, so the string

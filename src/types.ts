@@ -203,10 +203,19 @@ export interface WindState {
 /* ------------------------------------------------------------------ */
 
 /**
- * What kind of rough water this is. Three kinds, one live instance of each at
- * most, drawn on their own odds — see `hazards.ts`.
+ * What kind of rough water this is.
+ *
+ * Two kinds now, not three. `wave` and `greatwave` used to be the same
+ * geometry drawn at two fixed strengths, and every property that separated
+ * them -- height, push, dissipation -- is now rolled per wave off a
+ * continuous range, so a second kind carrying nothing but a second pair of
+ * constants had stopped being a distinction. What was the great wave is the
+ * top of the `wave` range: see CREST_HEIGHT_MAX and CREST_SPEED_MAX.
+ *
+ * The live budget is per kind and no longer one each: `hazards.ts` runs up to
+ * MAX_WAVES crests and at most one maelstrom.
  */
-export type HazardKind = 'wave' | 'greatwave' | 'maelstrom';
+export type HazardKind = 'wave' | 'maelstrom';
 
 /**
  * One piece of rough water on the sea, owned by `hazards.ts` and mutated in
@@ -232,14 +241,43 @@ export interface Hazard {
    * therefore the direction it shoves the hull.
    */
   readonly north: Vector3;
-  /** Half-length (crest) or radius (maelstrom) at full size, world units. */
+  /**
+   * Half-length (crest) or radius (maelstrom) at full size, world units.
+   *
+   * LIVE on a crest in two ways now: it grows with the wave's age (see
+   * `Hazard.speed`'s neighbours in `hazards.ts` -- LENGTH_GROWTH) and land
+   * eats it back down again. Never cache it across a frame.
+   */
   readonly extent: number;
   /** Half-width of a crest, world units. 0 for a maelstrom. */
   readonly halfWidth: number;
   /**
+   * How far the crest's ends trail behind its centre, as a fraction of
+   * `extent`. 0 is a straight wall of water; 0.35 is a pronounced arc with
+   * the middle of the front arriving first. 0 for a maelstrom.
+   *
+   * Read by `hazardfield.ts` (both ports), by the art in `waterhazard.ts`,
+   * by the contact test and by the scope, all through the same one
+   * displacement of the along-travel coordinate -- see `hazBowV`.
+   */
+  readonly bow: number;
+  /**
+   * How fast a crest travels, world units/s -- which is knots, since the
+   * hull's 10 world units/s is what the HUD reads out as 10 kn. 0 for a
+   * maelstrom, which does not travel.
+   *
+   * Rolled per wave between CREST_SPEED_MIN and CREST_SPEED_MAX, and it is
+   * the one number the wave's push strength is derived from: see PUSH_PEAK.
+   */
+  readonly speed: number;
+  /**
    * Signed peak height, world units: positive for a crest, the funnel depth
    * for a maelstrom. NOT scaled by the wind — the weather raises the ordinary
    * sea, a hazard is its own weather.
+   *
+   * LIVE on a crest: rolled at spawn between CREST_HEIGHT_MIN and
+   * CREST_HEIGHT_MAX_START, then grown with age and capped at
+   * CREST_HEIGHT_MAX. Fixed for the life of a maelstrom.
    */
   readonly amplitude: number;
   /**

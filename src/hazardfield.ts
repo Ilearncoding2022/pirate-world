@@ -66,16 +66,48 @@ export const CREST_HALF_LENGTH = 10;
 export const CREST_HALF_WIDTH = 2.5;
 
 /**
- * Peak crest height, world units, for the two strengths.
+ * The half-length a crest may ROLL for itself at spawn, world units, and the
+ * ceiling it may grow to afterwards.
  *
- * The ordinary sea peaks at DISPLACE_AMPLITUDE (0.3) in a full gale, so a
- * strong wave is over five times the worst weather and a great one eight
- * times it. The hull's freeboard is about a unit: the great wave is meant to
- * tower over the deck, which is the whole reason it is worth 10 knots of
- * shove and the strong one only 5.
+ * `CREST_HALF_LENGTH` above is no longer the length of every wave; it is the
+ * middle of this range and the reference every other size here is still
+ * argued against. A wave now draws its own half-length uniformly between
+ * these two -- 6 to 24 world units of front, against a 3.1-unit hull -- for
+ * the same reason it already drew its own width: a sea in which every wave is
+ * the same twenty units long is a sea a player reads once.
+ *
+ * The CAP is what stops item 3's growth running away. A crest gains 10% of
+ * its length a second and the longest-lived one on the slowest roll is on the
+ * water for CREST_LIFE_MAX seconds, which compounds well past anything the
+ * displacement patch can draw: the patch is 80 world units square and skirts
+ * its own displacement from 34 units out, so a front wider than about 40
+ * units has ends hanging in undisplaced water. 20 of half-length is that 40,
+ * and it is twice the wave this file shipped with.
+ */
+export const CREST_HALF_LENGTH_MIN = 3;
+export const CREST_HALF_LENGTH_MAX = 12;
+export const CREST_HALF_LENGTH_CAP = 20;
+
+/**
+ * Peak crest height, world units: the middle of the rolled range, the two
+ * ends a wave may RISE at, and the ceiling growth may carry it to.
+ *
+ * The ordinary sea peaks at DISPLACE_AMPLITUDE (0.3) in a full gale, so even
+ * the smallest wave here is four times the worst weather. The hull's
+ * freeboard is about a unit: a wave at the top of this range is meant to
+ * tower over the deck.
+ *
+ * `CREST_HEIGHT_MAX` is the number that used to be called GREAT_CREST_HEIGHT,
+ * unchanged at 2.4, and that is deliberate. The great wave is gone as a KIND,
+ * but the silhouette it drew is exactly what a tall wave that has lived a
+ * while now grows into, so nothing on screen is bigger than the game already
+ * shipped -- the difference is that the player meets the whole range between
+ * the two rather than one of two fixed sizes.
  */
 export const CREST_HEIGHT = 1.6;
-export const GREAT_CREST_HEIGHT = 2.4;
+export const CREST_HEIGHT_MIN = 1.2;
+export const CREST_HEIGHT_MAX_START = 2.0;
+export const CREST_HEIGHT_MAX = 2.4;
 
 /**
  * A maelstrom's radius at full size, world units, so the funnel is 20 across.
@@ -203,6 +235,31 @@ function bake(n: number): Baked {
  * a vertex every 0.5, so the whole face is four quads and redistributing slope
  * inside four quads is arithmetic nobody can see.
  */
+/**
+ * The most a crest's ends may trail behind its centre, as a fraction of its
+ * own half-length. `hazards.ts` rolls each wave a `bow` in [0, this].
+ *
+ * A wave was a straight wall of water: `hazardHeight` measured the along-
+ * travel coordinate `v` as a plain dot product, so the crest line was the
+ * intersection of a plane with the sphere and every wave in the game was the
+ * same geodesic segment. That is what a wave looks like in a tank and not
+ * what one looks like at sea, where a front radiating out from wherever it
+ * was raised reaches the observer bowed, middle first.
+ *
+ * `hazBowV` below is the whole of the change and it is one term: `v` is
+ * displaced by `bow * a * (u/a)^2`, so the crest line runs from the centre
+ * back to `bow * a` behind it at each end. A parabola and not a true circular
+ * arc, on purpose -- it is polynomial, which is the one rule this file has
+ * (see the module comment), so the GPU and the CPU port can still be held
+ * bit-identical, and over a half-length of 20 units the two curves differ by
+ * less than the patch's own vertex spacing anyway.
+ *
+ * 0.35 against the longest wave this can roll is 7 world units of trail at
+ * each end: a little over two hull lengths, which is an arc the player can
+ * plainly see from the chase camera and still a front rather than a ring.
+ */
+export const CREST_BOW_MAX = 0.35;
+
 export const CREST_FRONT_RATIO = 0.8;
 export const CREST_BACK_RATIO = 2.4;
 const CREST_FRONT = bake(CREST_FRONT_RATIO);
@@ -286,6 +343,20 @@ export function hazardExtentDir(h: Hazard): number {
 /** `uHazShape.z` — a crest's half-width, direction units. 0 for a maelstrom. */
 export function hazardHalfWidthDir(h: Hazard): number {
   return Math.fround(h.halfWidth / GLOBE_RADIUS);
+}
+
+/**
+ * `uHazBow[i]` — how far this crest's ends trail behind its centre, as a
+ * fraction of its own half-length.
+ *
+ * DIMENSIONLESS, so unlike its neighbours here there is no division by the
+ * radius: it is a ratio of two lengths and it means the same thing in world
+ * units and in direction units. Forced to 0 for a maelstrom, whose profile
+ * never reads it, so a slot recycled from a crest cannot leave a funnel
+ * carrying a bow.
+ */
+export function hazardBow(h: Hazard): number {
+  return h.kind === 'maelstrom' ? 0 : Math.fround(h.bow);
 }
 
 /**
@@ -391,6 +462,24 @@ export const HAZARD_PROFILE_GLSL: string = [
   'float hazRidge(float x) {',
   '  return hazBump(x * x);',
   '}',
+  // The bow: the along-travel coordinate a curved crest is actually measured
+  // in. `bow` is a fraction of the half-length `a` (CREST_BOW_MAX above), so
+  // the crest line -- the locus where this returns zero -- runs
+  // `v = -bow * a * (u/a)^2`: through the centre at u = 0 and `bow * a`
+  // BEHIND it at each end, which is a front whose middle arrives first.
+  //
+  // Everything downstream reads this one value and nothing else changes:
+  // `hazCrest`'s asymmetric front/back branch keys off it, so the steep face
+  // stays on the forward side all the way along the arc, and the finite
+  // difference that builds the normal picks the curvature up for free.
+  //
+  // `bow = 0` returns `v` exactly -- `0.0 * a * anything` is exactly zero in
+  // both ports -- so a straight wave is bit-for-bit the wave this file drew
+  // before the bow existed.
+  'float hazBowV(float u, float v, float a, float bow) {',
+  '  float xr = u / a;',
+  '  return v + bow * a * (xr * xr);',
+  '}',
 ].join('\n');
 
 export const HAZARD_GLSL: string = [
@@ -403,6 +492,9 @@ export const HAZARD_GLSL: string = [
   '// z: half-width, direction units (0 for a maelstrom).',
   '// w: amplitude * envelope * distance fade, WORLD units.',
   'uniform vec4 uHazShape[MAX_HAZARDS];',
+  '// How far this crest\'s ends trail behind its centre, as a fraction of its',
+  '// half-length. 0 for a straight crest and for every maelstrom.',
+  'uniform float uHazBow[MAX_HAZARDS];',
   HAZ_CREST_RATIO_GLSL,
   `const float HAZ_RIM_C = ${RIM_CENTRE.glsl};`,
   `const float HAZ_RIM_INV = ${RIM_INV.glsl};`,
@@ -419,8 +511,9 @@ export const HAZARD_GLSL: string = [
   '    float a = max(sh.y, HAZ_MIN_SIZE);',
   '    if (sh.x < 0.5) {',
   '      float b = max(sh.z, HAZ_MIN_SIZE);',
-  '      float bw = b * (v > 0.0 ? HAZ_CREST_FRONT : HAZ_CREST_BACK);',
-  '      h += sh.w * (hazRidge(u / a) * hazCrest(v / bw));',
+  '      float vq = hazBowV(u, v, a, uHazBow[i]);',
+  '      float bw = b * (vq > 0.0 ? HAZ_CREST_FRONT : HAZ_CREST_BACK);',
+  '      h += sh.w * (hazRidge(u / a) * hazCrest(vq / bw));',
   '    } else {',
   // The bowl is `hazBump(r)` -- (1 - r*r)^2 -- and not the (1 - r)^3 this
   // shipped with. A cube of (1 - r) has a CONE APEX at the centre: it is not
@@ -491,6 +584,18 @@ function ridgeCPU(x: number): number {
   return bumpCPU(F(x * x));
 }
 
+/**
+ * The GLSL's `hazBowV`, operation for operation. `v + bow * a * (xr * xr)`
+ * parses left to right in GLSL, so the two multiplications are `(bow * a)`
+ * and `(xr * xr)` and the product of those -- written here the same way,
+ * because a float32 sum is not associative and reordering it is exactly the
+ * class of desync `tests/smoke/wave-parity.spec.ts` exists to catch.
+ */
+function bowVCPU(u: number, v: number, a: number, bow: number): number {
+  const xr = F(u / a);
+  return F(v + F(F(bow * a) * F(xr * xr)));
+}
+
 /** GLSL `dot(p, q)`, left to right, float32 at every step. */
 function dotCPU(px: number, py: number, pz: number, q: { x: number; y: number; z: number }): number {
   return F(F(F(px * F(q.x)) + F(py * F(q.y))) + F(pz * F(q.z)));
@@ -534,8 +639,9 @@ export function hazardHeight(dir: { x: number; y: number; z: number }, hazards: 
       const b = Math.max(hazardHalfWidthDir(hz), MIN_SIZE.value);
       // Multiply first, then divide -- the same two operations in the same
       // order the GLSL does them, which is what keeps the two bit-identical.
-      const bw = F(b * (v > 0 ? CREST_FRONT.value : CREST_BACK.value));
-      h = F(h + F(w * F(ridgeCPU(F(u / a)) * crestCPU(F(v / bw)))));
+      const vq = bowVCPU(u, v, a, F(hazardBow(hz)));
+      const bw = F(b * (vq > 0 ? CREST_FRONT.value : CREST_BACK.value));
+      h = F(h + F(w * F(ridgeCPU(F(u / a)) * crestCPU(F(vq / bw)))));
     } else {
       // Same three terms in the same order as the GLSL: the radius, the bowl
       // that radius sits in, the lip that replaces the bowl near the rim.

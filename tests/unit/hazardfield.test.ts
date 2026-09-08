@@ -3,10 +3,11 @@ import { Vector3 } from 'three';
 import type { Hazard, HazardKind } from '../../src/types';
 import {
   hazardHeight,
+  CREST_BOW_MAX,
   CREST_HALF_LENGTH,
   CREST_HALF_WIDTH,
   CREST_HEIGHT,
-  GREAT_CREST_HEIGHT,
+  CREST_HEIGHT_MAX,
   MAELSTROM_RADIUS,
   FUNNEL_DEPTH,
   RIM_HEIGHT,
@@ -46,6 +47,10 @@ function makeHazard(kind: HazardKind, overrides: Partial<Hazard> = {}): Hazard {
     north: new Vector3(0, 0, 1),
     extent: crest ? CREST_HALF_LENGTH : MAELSTROM_RADIUS,
     halfWidth: crest ? CREST_HALF_WIDTH : 0,
+    // Straight by default, so every shape assertion below still measures the
+    // profile rather than the profile plus an arc. The bow has its own cases.
+    bow: 0,
+    speed: 0,
     amplitude: crest ? CREST_HEIGHT : FUNNEL_DEPTH,
     envelope: 1,
     size: 1,
@@ -82,12 +87,108 @@ describe('hazardfield: an empty sea', () => {
   });
 });
 
+describe('hazardfield: the crest\'s bow', () => {
+  /*
+   * The bow is the one thing about a crest that is not a profile: it moves
+   * WHERE the profile is evaluated rather than what shape it has. So these
+   * cases are all about the crest LINE -- the locus of the ridge -- and
+   * deliberately say nothing about the height on it, which the profile cases
+   * above already own.
+   */
+
+  /** Where the ridge actually sits at `u`, found by scanning across the wave. */
+  function ridgeV(h: Hazard, u: number): number {
+    let best = 0;
+    let bestV = 0;
+    for (let v = -12; v <= 6; v += 0.001) {
+      const y = hazardHeight(at(u, v), [h]);
+      if (y > best) {
+        best = y;
+        bestV = v;
+      }
+    }
+    return bestV;
+  }
+
+  it('leaves a straight crest exactly where it always was', () => {
+    // Not "close to": a zero bow multiplies the displacement term by exactly
+    // zero on both ports, so a wave that rolled no arc has to be bit-for-bit
+    // the wave this file drew before the bow existed. This is the case that
+    // keeps the change free for every straight crest in the game.
+    const straight = makeHazard('wave', { bow: 0 });
+    for (const [u, v] of [
+      [0, 0],
+      [4, 1],
+      [-7, -3],
+      [9.5, 0.5],
+    ] as const) {
+      const p = at(u, v);
+      expect(hazardHeight(p, [straight])).toBe(hazardHeight(p, [makeHazard('wave')]));
+    }
+  });
+
+  it('trails the ends behind the centre, on a parabola through the centre', () => {
+    const bow = 0.3;
+    const h = makeHazard('wave', { bow });
+    // The centre of the front is where it always was: the bow is measured
+    // FROM the centre, so `centre` still lies on the crest and everything
+    // that reads it -- the scope, the contact test, the coast clip -- is
+    // still reading a point on the wave.
+    expect(ridgeV(h, 0)).toBeCloseTo(0, 2);
+
+    // And the ends trail by `bow * extent`, on the square law in `hazBowV`:
+    // a quarter of the way out the wave has given up a sixteenth of it.
+    const full = bow * CREST_HALF_LENGTH;
+    expect(ridgeV(h, CREST_HALF_LENGTH * 0.5)).toBeCloseTo(-full * 0.25, 1);
+    expect(ridgeV(h, -CREST_HALF_LENGTH * 0.5)).toBeCloseTo(-full * 0.25, 1);
+    expect(ridgeV(h, CREST_HALF_LENGTH * 0.9)).toBeCloseTo(-full * 0.81, 1);
+
+    // Trailing and not leading: every point of the front behind the centre,
+    // which is the middle of the wave arriving first.
+    for (const u of [2, 5, 8, -3, -6, -9]) {
+      expect(ridgeV(h, u)).toBeLessThan(0);
+    }
+  });
+
+  it('carries the steep face round the arc rather than leaving it on a plane', () => {
+    // The front/back asymmetry is keyed off the BOWED coordinate, so the wall
+    // the hull meets stays on the forward side all the way along the front.
+    // Measured out at 80% of the half-length, where the arc has moved the
+    // crest line by more than the front face is deep.
+    const h = makeHazard('wave', { bow: CREST_BOW_MAX });
+    const u = CREST_HALF_LENGTH * 0.8;
+    const ridge = ridgeV(h, u);
+    const face = CREST_HALF_WIDTH * CREST_FRONT_RATIO;
+    const back = CREST_HALF_WIDTH * CREST_BACK_RATIO;
+    // Zero just past the front face and just past the back of the arc...
+    expect(hazardHeight(at(u, ridge + face + 0.01), [h])).toBe(0);
+    expect(hazardHeight(at(u, ridge - back - 0.01), [h])).toBe(0);
+    // ...and water in between, on the long side and the short one both.
+    expect(hazardHeight(at(u, ridge + face * 0.5), [h])).toBeGreaterThan(0);
+    expect(hazardHeight(at(u, ridge - back * 0.9), [h])).toBeGreaterThan(0);
+  });
+
+  it('does not change the footprint along the front', () => {
+    // The bow displaces the wave across its travel line and not along it, so
+    // the half-length `hazards.ts` runs its contact test and its coast clip
+    // against is the same 10 units it is for a straight crest.
+    const h = makeHazard('wave', { bow: CREST_BOW_MAX });
+    const beyond = CREST_HALF_LENGTH + 0.01;
+    for (let v = -12; v <= 6; v += 0.05) {
+      expect(hazardHeight(at(beyond, v), [h])).toBe(0);
+      expect(hazardHeight(at(-beyond, v), [h])).toBe(0);
+    }
+    expect(hazardHeight(at(CREST_HALF_LENGTH * 0.99, ridgeV(h, CREST_HALF_LENGTH * 0.99)), [h]))
+      .toBeGreaterThan(0);
+  });
+});
+
 describe('hazardfield: the crest profile', () => {
   it('peaks at amplitude times envelope at the centre', () => {
     for (const [amplitude, envelope] of [
       [CREST_HEIGHT, 1],
-      [GREAT_CREST_HEIGHT, 1],
-      [GREAT_CREST_HEIGHT, 0.4],
+      [CREST_HEIGHT_MAX, 1],
+      [CREST_HEIGHT_MAX, 0.4],
     ] as const) {
       const h = makeHazard('wave', { amplitude, envelope });
       expect(hazardHeight(at(0, 0), [h])).toBeCloseTo(amplitude * envelope, 5);
@@ -95,7 +196,7 @@ describe('hazardfield: the crest profile', () => {
   });
 
   it('peaks on a line rather than over a plateau, and reaches zero at the same footprint', () => {
-    const h = makeHazard('greatwave', { amplitude: GREAT_CREST_HEIGHT });
+    const h = makeHazard('wave', { amplitude: CREST_HEIGHT_MAX });
 
     /*
      * The profile along the crest's own length was `1 - smoothstep(0.4, 1, |x|)`
@@ -110,7 +211,7 @@ describe('hazardfield: the crest profile', () => {
      * moved (see the maelstrom's first-step case), and a crest's amplitude is
      * exactly the sort of constant that gets retuned by eye.
      */
-    const at0 = (u: number) => hazardHeight(at(u, 0), [h]) / GREAT_CREST_HEIGHT;
+    const at0 = (u: number) => hazardHeight(at(u, 0), [h]) / CREST_HEIGHT_MAX;
 
     // Falling already at a quarter of the way out, which is the whole point:
     // a plateau is any profile that is still at exactly 1 here. Falling by
@@ -157,7 +258,7 @@ describe('hazardfield: the crest profile', () => {
   });
 
   it('has no step in its curvature along the length: the shoulders roll, they do not corner', () => {
-    const h = makeHazard('greatwave', { amplitude: GREAT_CREST_HEIGHT });
+    const h = makeHazard('wave', { amplitude: CREST_HEIGHT_MAX });
 
     /*
      * The reason the old profile read as a mesa was not only the flat top. It
@@ -392,7 +493,7 @@ describe('hazardfield: several at once', () => {
     // The shader has three slots and no fourth to read, so neither side may
     // count a fourth hazard -- that is a desync the parity test cannot see,
     // because it would only ever hand the GPU three.
-    const many = [crest, crest, crest, makeHazard('greatwave')];
+    const many = [crest, crest, crest, makeHazard('wave')];
     expect(many.length).toBeGreaterThan(MAX_HAZARDS);
     expect(hazardHeight(at(0, 0), many)).toBeCloseTo(CREST_HEIGHT * MAX_HAZARDS, 5);
   });

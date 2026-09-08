@@ -171,7 +171,7 @@ declare global {
        * Written by `main.ts` when this hook exists at all, so it appears and
        * disappears with the hook rather than on a guard of its own.
        *
-       * It is here for `tests/shots.mjs`, which has to photograph a great wave
+       * It is here for `tests/shots.mjs`, which has to photograph a wave
        * and a maelstrom and cannot do it on a timer. `?hazard=` releases one
        * three SIMULATED seconds in, and `dt` is capped at 0.1 s a frame
        * (`main.ts`), so on the software rasteriser the browser tier runs --

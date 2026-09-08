@@ -151,6 +151,19 @@ const MAELSTROM_WIDTH_PX = 2.2;
  * enough that it is not a strobe on a 40-pixel circle.
  */
 const MAELSTROM_ARC = 0.6;
+
+/**
+ * How many straight segments a crest's bar is drawn in.
+ *
+ * A crest is a bowed front now (`Hazard.bow`), so the two-point bar this used
+ * to draw would be a chord across an arc: on the longest, most curved wave
+ * the sea can raise that is seven world units of daylight between the mark
+ * and the water it is meant to be marking, which on a 50-unit scope is an
+ * eighth of the radius. Six segments hold the arc to under a tenth of a unit,
+ * well inside the 2.6-pixel stroke, and a straight wave costs exactly the
+ * same six `lineTo` calls on a mark that is still a straight line.
+ */
+const CREST_SEGMENTS = 6;
 const MAELSTROM_SPIN = 1.6;
 
 /* ------------------------------------------------------------------ */
@@ -914,27 +927,45 @@ export function createRadar(
             continue;
           }
 
-          // A crest is its own long axis: the line between its two ends,
-          // `centre +/- extent * east`, each stepped in DIRECTION units and
-          // projected separately. Drawing it from the centre and a heading
-          // instead would be a second projection, and a bar a few degrees off
-          // its own wave reads as a rendering nicety rather than as an error.
+          // A crest is its own long axis, and that axis is the ARC the water
+          // actually stands on: `centre + t * extent * east`, pulled back
+          // along `north` by `bow * extent * t^2`, which is the crest line
+          // `hazardfield.ts`'s `hazBowV` puts the height on. Every point is
+          // stepped in DIRECTION units and projected separately, because
+          // drawing from a centre and a heading instead would be a second
+          // projection, and a bar a few degrees off its own wave reads as a
+          // rendering nicety rather than as an error.
+          //
+          // The polyline breaks rather than skipping the whole crest when a
+          // point falls off the projection: a long front crossing the rim has
+          // one end behind the observer, and the near half of it is still a
+          // wave the player needs marked.
           const half = haz.extent / GLOBE_RADIUS;
-          hazDir.copy(haz.centre).addScaledVector(haz.east, half).normalize();
-          if (!projectLive(hazDir)) continue;
-          const x0 = hazPoint.x;
-          const y0 = hazPoint.y;
-          hazDir.copy(haz.centre).addScaledVector(haz.east, -half).normalize();
-          if (!projectLive(hazDir)) continue;
+          const trail = (haz.bow * haz.extent) / GLOBE_RADIUS;
 
-          // The great wave is drawn heavier than the strong one, off the
-          // amplitude rather than off the kind: the scope then says how big it
-          // is with the one mark it has, and a third strength added later
-          // needs no change here.
+          // Drawn heavier the taller it is, off the amplitude rather than off
+          // the kind -- which is the only thing it could be off now that the
+          // two crest kinds are one and the height is a continuous roll. The
+          // threshold is where the old great wave sat, so the scope says the
+          // same thing about the same water it always did.
           ctx.lineWidth = (CREST_WIDTH_PX * (haz.amplitude > 2 ? 1.5 : 1)) / R;
           ctx.beginPath();
-          ctx.moveTo(x0, y0);
-          ctx.lineTo(hazPoint.x, hazPoint.y);
+          let pen = false;
+          for (let k = 0; k <= CREST_SEGMENTS; k++) {
+            const t = (2 * k) / CREST_SEGMENTS - 1;
+            hazDir
+              .copy(haz.centre)
+              .addScaledVector(haz.east, half * t)
+              .addScaledVector(haz.north, -trail * t * t)
+              .normalize();
+            if (!projectLive(hazDir)) {
+              pen = false;
+              continue;
+            }
+            if (pen) ctx.lineTo(hazPoint.x, hazPoint.y);
+            else ctx.moveTo(hazPoint.x, hazPoint.y);
+            pen = true;
+          }
           ctx.stroke();
         }
 
