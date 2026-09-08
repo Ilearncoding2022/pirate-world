@@ -20,10 +20,11 @@ export type QualityTier = 'low' | 'medium' | 'high';
 /**
  * One row of the quality table.
  *
- * None of these are world-scale or ship-scale in the sense
+ * Almost none of these are world-scale or ship-scale in the sense
  * docs/ARCHITECTURE.md's "World scale" section means: they are pipeline and
  * wiring numbers (texel counts, a pixel-ratio ceiling, a vertex count), not
- * distances or frequencies over the globe.
+ * distances or frequencies over the globe. `landDetail` is the one exception,
+ * and it says why on itself.
  */
 export interface QualitySettings {
   /** Ceiling passed to `renderer.setPixelRatio` (both call sites, main.ts). */
@@ -40,6 +41,23 @@ export interface QualitySettings {
   reflectionSize: number;
   /** Reflection cube faces refreshed per frame; 0 disables the cube outright. Read by Stream D, later -- Q does not consume this. */
   reflectionFacesPerFrame: number;
+  /**
+   * Icosphere subdivisions the land mesh is built at, per 100 units of
+   * GLOBE_RADIUS. Read by `land.ts`, which does the multiplication.
+   *
+   * The one row here that is not an absolute count, and it cannot be one:
+   * the land mesh has to keep its triangle a fixed size in WORLD units as
+   * the globe grows, so the count itself is world-scale and only the tier's
+   * share of it belongs in a table that knows nothing about the radius. High
+   * is 96, the value the low-poly look was tuned at and the number this line
+   * was extracted from; low and medium are fractions of it.
+   *
+   * Unlike `landFacetBlend` below, this one is paid at startup and never
+   * again: the mesh is built once, culled against the height map once, and
+   * then drawn every frame. So what the lower tiers buy is a smaller vertex
+   * buffer and a shorter build, not a cheaper shader.
+   */
+  landDetail: number;
   /**
    * How far land's per-pixel height-map normal replaces the flat facet
    * normal: 0 = pure low-poly facets, 1 = fully smooth. Read by `land.ts` and
@@ -73,6 +91,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     patchSegments: 96,
     reflectionSize: 0,
     reflectionFacesPerFrame: 0,
+    landDetail: 64,
     landFacetBlend: 0.6,
   },
   medium: {
@@ -83,6 +102,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     patchSegments: 128,
     reflectionSize: 128,
     reflectionFacesPerFrame: 1,
+    landDetail: 80,
     landFacetBlend: 0.8,
   },
   high: {
@@ -93,6 +113,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     patchSegments: 160,
     reflectionSize: 256,
     reflectionFacesPerFrame: 2,
+    landDetail: 96,
     landFacetBlend: 0.85,
   },
 };
