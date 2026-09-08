@@ -915,6 +915,11 @@
                claims beside a sim that might end a fight on two, and the count
                of them is the only thing the player is really watching. -->
           <span class="bside__pips" id="battle-you-pips"></span>
+          <!-- The one word that explains a sluggish helm and a dead FIRE key.
+               Hidden while `state.player.fouled` is 0, shown over this side
+               the whole time it is not. `battleui.ts` toggles `[hidden]`
+               only; the word itself never changes. -->
+          <span class="bside__fouled" id="battle-fouled" hidden aria-hidden="true">FOULED</span>
         </div>
 
         <div class="bside bside--foe">
@@ -923,6 +928,15 @@
           <span class="bside__rounds" id="battle-foe-rounds">0</span>
           <span class="bside__key">HITS</span>
           <span class="bside__pips" id="battle-foe-pips"></span>
+          <!-- The telegraph. Hidden while `state.fuse` is null; while it is
+               live, `battle-fuse-fill` drains from full to empty over the
+               fuse's own span, learned rather than typed here (see
+               `battleui.ts`). Coloured off `--foe`, the same custom property
+               the rest of this side already reads, so it is never a hue of
+               its own to keep in step with `battle--red` / `battle--orange`. -->
+          <div class="bside__fuse" id="battle-fuse" hidden aria-hidden="true">
+            <div class="bside__fuse-fill" id="battle-fuse-fill"></div>
+          </div>
         </div>
       </header>
 
@@ -936,7 +950,9 @@
       <div class="battle__hit" id="battle-hit" aria-hidden="true"></div>
 
       <!-- Hidden by battleui.ts the moment the first round is spent. -->
-      <p class="battle__prompt" id="battle-prompt">SPACE to fire &middot; W/S to change speed</p>
+      <p class="battle__prompt" id="battle-prompt">
+        SPACE to fire &middot; W/S to change speed &middot; mind the sea
+      </p>
 
       <!-- The touch key, and the only pointer-interactive thing on this
            overlay while a fight is running. Sized off the D-pad's own key so

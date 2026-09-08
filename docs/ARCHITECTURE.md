@@ -1595,6 +1595,85 @@ was 33, and its whole pursuit leg covers 75 to 120 units rather than 100 to 160.
 Any future item that lets the player simply outrun a raider deletes this
 arrangement rather than extending it — see `docs/SHOP_PLAN.md`.
 
+### The track and the sway are two different things
+A hull's `angle` is where it is ON THE CIRCLE, exactly as it was before the sea
+rework: the throttle still moves it, the ring still shrinks under it, and the
+heading is still its tangent. What is new is `swayX`/`swayZ`, a displacement
+FROM that point written every tick by `battlesea.ts`, and a hull's actual
+position — `x`/`z`, and the only place anything should ever look for a hull —
+is the sum of the two: track plus sway.
+
+The gun does not fire at the sum. It fires from wherever the hull actually is,
+but along the TRACK's own inboard beam, `(-cos angle, -sin angle)`, never
+toward the arena centre and never corrected for the sway that moved the
+muzzle. With no sway the two lines coincide, which is what the arena has
+always thrown: a diameter, muzzle to the point opposite. With sway they do
+not: a hull shoved four units west throws a line parallel to that diameter
+and four units off it, and the shot lands only if the enemy has drifted onto
+the same line. Nothing in `battle.ts` special-cases this — there is no `if`
+for a wave spoiling an aim anywhere in the fight. It is what the geometry
+above already says once sway exists at all, which is the only reason it was
+free to add.
+
+**Anything that assumes a combatant's position is its point on the circle
+will be wrong now.** That used to be true — `angle` alone was enough to place
+a hull and aim a gun — and it no longer is. A future reader who reaches for
+`Math.cos(angle) * radius` where they mean "where is this hull" has reached
+for the track and dropped the sway on the floor; the two are only equal while
+`swayX` and `swayZ` both happen to be zero, which on a rough sea is most of
+the time but never all of it.
+
+### What the AI sees, and the horizon that follows
+The AI's read of the player, its telegraph and the ball's own flight are
+three separate delays and they stack rather than overlap. `battleai.ts` keeps
+a **two-second-old** snapshot of the player (`AI_LAG`) and solves every shot
+against it; once it commits, the shot is a further `AI_FUSE` — **1.5 s** —
+from going, regardless of whether the solution the AI committed to still
+holds by then; and once it goes, the ball is in the air for `2 * radius /
+BALL_SPEED`, which is **0.9 s at the opening radius** and shrinks with the
+ring. Add the three and a shot the AI commits to lands at
+
+```
+2 s (stale)  +  1.5 s (telegraph)  +  ~0.9 s (flight at R0)
+```
+
+— **about 4.4 seconds** after the reading it was solved on, at the opening
+radius, and less as the ring closes and the flight shortens. A player only
+has to touch the throttle once inside that window to no longer be where the
+shot was aimed.
+
+The accepted consequence is that **more fights now reach `BATTLE_TIMEOUT`
+(120 s) and end STAND-OFF** than did before this rework, because a gunner
+solving a problem that stale against a player working the helm is a gunner
+that frequently does not solve it at all. This is deliberate for this pass
+and is not tuned away blind: `AI_LAG` and `AI_FUSE` are authored to be moved,
+but only after the owner has played the result. A change that shortens either
+number to make the AI hit more often is retuning a decision the plan
+recorded, not fixing a bug, and belongs in a change of its own with the
+owner's sign-off — not folded into unrelated work because the fight felt too
+easy while it was being tested.
+
+### The sea is switched, and the gunner is measured without it
+Three systems — rolling crests that shove a hull off its track, seeded shoals
+and wreckage that block a diameter, and drifting flotsam that fouls whatever
+it touches — all live in `battlesea.ts`, all draw from the sim's own seeded
+`rng` and nothing else, and all three are switched together by one
+`BattleOptions` value handed to `createBattleSim`. There is no way to turn on
+one and not the others; the plan treats them as one "the sea is rough" toggle
+rather than three independent ones, because the question the toggle answers
+is always the same one — is the arena moving today, or not.
+
+All three are **off** under the dev query `?calm=1`, which `main.ts` reads
+once and hands to both `createBattleSim` call sites as `CALM` in place of the
+default `ROUGH`, and all three are off in **every unit case that measures the
+gunner**, for the same reason: a hit rate measured while the target is also
+being shoved, foiled by an obstacle, or slowed by a raft is not a measurement
+of the gunner, it is a measurement of the gunner plus whatever the sea did to
+that one seeded run. `docs/BATTLE_REWORK_PLAN.md`'s own pinned gunner case
+runs on `CALM` for exactly this reason, and any future test that wants to say
+something specific about `battleai.ts` should reach for `CALM` rather than
+accept `ROUGH`'s default and hope the noise averages out.
+
 ### The beat before a fight
 A ram does not open the arena. It halts the ship, raises `battlecover.ts` and
 freezes the world; three seconds later the card's own count calls `onReady`,

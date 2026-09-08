@@ -1,4 +1,29 @@
-import type { BattleEvent, BattleInput, BattleState, Cannonball, Combatant } from './types';
+import type {
+  BattleEvent,
+  BattleInput,
+  BattleOptions,
+  BattleState,
+  Cannonball,
+  Combatant,
+} from './types';
+import {
+  ARENA_OMEGA,
+  ARENA_R0,
+  ARENA_SHRINK,
+  ARENA_R_MIN,
+  BALL_LIFE,
+  BALL_SPEED,
+  BATTLE_TIMEOUT,
+  FIRE_COOLDOWN,
+  HITS_TO_LOSE,
+  HIT_RADIUS,
+  ROUNDS,
+  SPLASH_MARGIN,
+  THROTTLE_GAIN,
+} from './battleconstants';
+import { createBattleAi } from './battleai';
+import { ROUGH, createBattleSea } from './battlesea';
+import { mulberry32 } from './towns';
 
 /**
  * battle.ts — the cannon fight, in flat arena units.
@@ -7,175 +32,53 @@ import type { BattleEvent, BattleInput, BattleState, Cannonball, Combatant } fro
  * boats on a shrinking circle, ten rounds each, three hits to lose. One sim is
  * built per battle and thrown away after, so nothing here has to reset.
  *
- * The brief is docs/BATTLE_PLAN.md. Read it before retuning anything here.
+ * The brief is docs/BATTLE_PLAN.md for the fight and
+ * docs/BATTLE_REWORK_PLAN.md for the rework. Read both before retuning
+ * anything here. The tuning constants live in `battleconstants.ts` and are
+ * re-exported below, so every importer that had them from this module still
+ * does.
+ *
+ * This file owns the ring, the throttle, the locker, the balls, the hit test
+ * and the outcome. It owns neither of the two things the rework added: the
+ * enemy gunner is `battleai.ts` and the sea is `battlesea.ts`, and both are
+ * called from `update` in a fixed order set out there.
  *
  * The arena is NOT on the globe. `x` and `z` are plain metres about its own
  * centre, `+z` is north and `+x` is east on the same convention `geo.ts` uses
- * for the world, and `heading` is read off the velocity rather than stored:
- * the one habit this file keeps from the sphere, because `battlescene.ts`
+ * for the world, and `heading` is read off the track rather than stored: the
+ * one habit this file keeps from the sphere, because `battlescene.ts`
  * orients a hull from it.
  *
- * Both boats travel the same circle in the same sense, so each one's inboard
- * beam points at the centre and a broadside is a chord through it. A ball
- * therefore flies down a diameter and meets the enemy only if the enemy is at
- * the far end of that diameter when it arrives. That is what makes the shot a
- * timing skill rather than an aim: you fire as the enemy comes ONTO the line,
- * early enough to lead it, and the lead you owe shrinks as the circle closes.
+ * **A hull's track and a hull's position are two different things.** `angle`
+ * is where it is on the circle, `swayX`/`swayZ` is how far the sea has shoved
+ * it off that point, and `x`/`z` is the sum. Both boats travel the same
+ * circle in the same sense, so each one's inboard beam points at the centre,
+ * and a gun fires along THE TRACK's beam from wherever the hull actually is.
+ * With no sway that is a diameter, which is the shot the fight was built on.
+ * With sway it is a line parallel to the diameter and a few units off it, and
+ * it connects only if the enemy has been shoved the same way. That is the
+ * whole of how a wave spoils an aim, and it falls out of the geometry rather
+ * than being a rule anybody wrote.
  */
 
-/* ------------------------------------------------------------------ */
-/* Tuning constants                                                    */
-/* ------------------------------------------------------------------ */
-
-/**
- * The circle: where it starts, where it stops, and how fast it closes, in
- * arena units and units/s.
- *
- * Twenty units across the diameter is a ball flight of nearly two seconds at
- * BALL_SPEED, which is long enough that the lead is a real judgement. Eight is
- * the point where two 3.1-unit hulls are close enough to read each other's
- * damage and the flight is down to two thirds of a second. Half a minute to
- * cross that gap is slow enough not to be noticed as motion and fast enough
- * that a fight which is going nowhere still ends up somewhere.
- */
-export const ARENA_R0 = 20;
-export const ARENA_R_MIN = 8;
-export const ARENA_SHRINK = 0.4;
-
-/**
- * How fast the boats go round, authored as a tangential speed at the opening
- * radius and divided out into the angular rate that is actually integrated.
- *
- * Written this way for the same reason `ship.ts` derives `ACCEL` from
- * `MAX_FORWARD`: six units a second at twenty units of radius is a fact about
- * how fast the hulls look like they are moving, and 0.3 rad/s is only the
- * consequence. The RATE is what is held constant as the circle shrinks, so the
- * boats visibly slow as they close and the fight tightens rather than
- * spinning up.
- */
-export const ARENA_SPEED = 6;
-export const ARENA_OMEGA = ARENA_SPEED / ARENA_R0;
-
-/**
- * How much W and S move a boat's angular speed, as a fraction of ARENA_OMEGA.
- *
- * Half. The separation between the two hulls therefore drifts by up to 0.15
- * rad/s, so a player can pull a third of the way off the diameter in two
- * seconds and put themselves back on it in two more. Much less and the
- * throttle does not feel connected to anything; much more and the fight
- * becomes a race rather than a duel.
- */
-export const THROTTLE_GAIN = 0.5;
-
-/** Rounds in each side's locker. */
-export const ROUNDS = 10;
-/** Hits that end a hull's fight. */
-export const HITS_TO_LOSE = 3;
-
-/**
- * Seconds between shots from one side.
- *
- * A second is about half a flight time at the opening radius, so a player who
- * fires on every window gets two or three balls in the air at once and has to
- * watch them all. It is also what makes ten rounds last: a locker emptied at
- * will would be gone in three seconds.
- */
-export const FIRE_COOLDOWN = 1;
-
-/**
- * The ball: how fast it flies, how long it may live, and how far past the far
- * side it travels before it is written off as a miss.
- *
- * Twenty-two units a second against a tangential six is a lead of about
- * thirty degrees at the opening radius and twelve at the closing one, which is
- * the whole skill of the thing. BALL_LIFE is a backstop and nothing more: at
- * this speed a ball has crossed the circle and cleared the splash margin in
- * well under two seconds, so the only balls it ever collects are ones a
- * shrinking radius has stranded.
- */
-export const BALL_SPEED = 22;
-export const BALL_LIFE = 4;
-export const SPLASH_MARGIN = 3;
-
-/**
- * How close a ball has to pass to a hull's centre to score, arena units.
- *
- * Half a hull length, on a centre-to-centre test, which is the same trade
- * `aiboats.ts`'s CONTACT_RADIUS makes and for the same reason. The test is
- * against the SEGMENT the ball swept this tick rather than the point it ended
- * on: at 22 units a second a tenth-of-a-second frame moves it 2.2 units, which
- * is further than this radius, and a point test would let balls tunnel
- * straight through a hull on a slow machine.
- */
-export const HIT_RADIUS = 1.6;
-
-/**
- * How far off its broadside line the AI will accept a firing solution, arena
- * units, and the two numbers that turn that solution into a shot: a reaction
- * before it commits, and a jitter on when the shot actually goes.
- *
- * The AI does not roll for a hit. It solves the same geometry the player has
- * to solve by eye, then fires late and imprecisely, and the misses fall out of
- * that: a ball committed to a solution half a second ago is a ball aimed at
- * where the enemy was going to be before either boat changed its mind. Which
- * is why a player who works the throttle after the AI has committed can step
- * out from under a shot that was solved perfectly.
- *
- * The effective hit rate is emergent, not authored, and it is pinned by
- * `tests/unit/battle.test.ts` at between 35% and 55% against a player who does
- * nothing at all. It measures 46.5% as written, at any frame rate.
- *
- * The tolerance is the dial that actually moves it, and it is wide on purpose:
- * it is a gunner's judgement by eye, not a computation, so it is more than
- * twice HIT_RADIUS and the AI takes shots it ought to know will miss. The
- * plan's 1.2 was tried first and gives 92%; a tolerance tighter than the hit
- * radius only ever accepts solutions that are already good enough to score, so
- * the reaction and the jitter have nothing left to spoil. Pushing the jitter
- * instead does not recover it: at 1.2 units even a full second of delay only
- * drops the rate to 80%, because the AI's helm is hunting the solution the
- * whole time and a late ball is still aimed near it.
- */
-export const AI_SOLUTION_TOLERANCE = 4;
-export const AI_REACTION_MIN = 0.2;
-export const AI_REACTION_MAX = 0.6;
-export const AI_JITTER = 0.35;
-
-/**
- * Seconds between the AI's own throttle decisions.
- *
- * The AI works its helm the way the player does, and this is the whole of its
- * seamanship: every AI_HELM_PERIOD it looks at where the player will be when a
- * ball would arrive, and speeds up or drops back to bring that point onto its
- * broadside. It cannot do it any oftener, so it always overshoots, and the two
- * hulls sweep past each other's firing windows instead of locking on the
- * diameter and staying there.
- *
- * That lock is not hypothetical: two boats at the same angular speed hold
- * their separation exactly, and with a lead to solve for, a fight between them
- * has no firing window at all, for either side, ever. The helm is what makes
- * the windows open and close; see docs/BATTLE_PLAN.md, "Broadside geometry in
- * the arena", which asks for exactly that and hands the job to W/S alone.
- * A second and a half is roughly the time the AI needs to cross the window it
- * is aiming for, so it hunts across the solution rather than settling on it.
- */
-export const AI_HELM_PERIOD = 1.5;
-
-/**
- * Seconds a fight may run before it is called a draw.
- *
- * The world is frozen behind the arena and the power plant is still burning,
- * so a player who simply never fires may not hold the game there. Two minutes
- * is four times the length of a fight that is actually being fought.
- */
-export const BATTLE_TIMEOUT = 120;
+export {
+  ARENA_OMEGA,
+  ARENA_R0,
+  ARENA_R_MIN,
+  ARENA_SHRINK,
+  ARENA_SPEED,
+  BALL_LIFE,
+  BALL_SPEED,
+  BATTLE_TIMEOUT,
+  FIRE_COOLDOWN,
+  HITS_TO_LOSE,
+  HIT_RADIUS,
+  ROUNDS,
+  SPLASH_MARGIN,
+  THROTTLE_GAIN,
+} from './battleconstants';
 
 const TWO_PI = Math.PI * 2;
-
-/** Wrap to (-PI, PI]. */
-function wrapPi(a: number): number {
-  const x = ((a + Math.PI) % TWO_PI + TWO_PI) % TWO_PI;
-  return x - Math.PI;
-}
 
 /** Wrap to [0, 2PI). */
 function wrapTwoPi(a: number): number {
@@ -186,7 +89,8 @@ function wrapTwoPi(a: number): number {
  * Distance from the point (px, pz) to the segment (ax, az)-(bx, bz).
  *
  * The segment is the ball's sweep over one tick; see HIT_RADIUS for why the
- * end point alone will not do.
+ * end point alone will not do, and why the doubled ball made that matter more
+ * rather than less.
  */
 function segmentDistance(
   ax: number, az: number, bx: number, bz: number, px: number, pz: number,
@@ -220,6 +124,9 @@ interface MutableCombatant extends Combatant {
   rounds: number;
   hits: number;
   cooldown: number;
+  swayX: number;
+  swayZ: number;
+  fouled: number;
 }
 
 /** A ball, plus the one bit of bookkeeping the splash rule needs. */
@@ -242,13 +149,52 @@ interface MutableBattleState extends BattleState {
   elapsed: number;
   outcome: BattleState['outcome'];
   events: BattleEvent[];
+  fuse: number | null;
 }
 
 function combatant(angle: number): MutableCombatant {
-  return { angle, x: 0, z: 0, heading: 0, rounds: ROUNDS, hits: 0, cooldown: 0 };
+  return {
+    angle,
+    x: 0,
+    z: 0,
+    heading: 0,
+    rounds: ROUNDS,
+    hits: 0,
+    cooldown: 0,
+    swayX: 0,
+    swayZ: 0,
+    fouled: 0,
+  };
 }
 
-export function createBattleSim(rng: () => number = Math.random): BattleSim {
+/**
+ * @param rng the one seeded source for the whole fight. The gunner and the
+ *   sea both draw from it, so one seed is one repeatable battle.
+ * @param options which of the sea's three systems run. Defaults to all of
+ *   them; `main.ts` passes CALM under `?calm=1`, and every unit case that
+ *   measures the gunner passes CALM so the sea cannot move the answer.
+ */
+export function createBattleSim(
+  rng: () => number = Math.random,
+  options: BattleOptions = ROUGH,
+): BattleSim {
+  // Two streams off the one source, drawn in a FIXED order before either
+  // module exists and before `options` has been looked at.
+  //
+  // Handing both modules the same `rng` looked equivalent and is not. The sea
+  // draws in its own constructor -- `rollObstacles` alone takes five numbers
+  // per obstacle -- and how many it takes depends on which systems are
+  // switched on, so a shared stream leaves the gunner reading from a
+  // different offset in a rough fight than in a calm one. Its coin flips and
+  // its solutions would then differ between the two for no reason connected
+  // to the sea at all, which is exactly the comparison `?calm=1` and the
+  // gunner's own pinned test exist to make. Two draws here, always the same
+  // two whatever the options say, and the gunner's dice are its own.
+  const aiRng = mulberry32(Math.floor(rng() * 0x100000000));
+  const seaRng = mulberry32(Math.floor(rng() * 0x100000000));
+  const ai = createBattleAi(aiRng);
+  const sea = createBattleSea(seaRng, options);
+
   const state: MutableBattleState = {
     radius: ARENA_R0,
     // The player on the near side, at the bottom of the frame the arena
@@ -259,98 +205,64 @@ export function createBattleSim(rng: () => number = Math.random): BattleSim {
     elapsed: 0,
     outcome: null,
     events: [],
+    fuse: null,
+    // The sea's own three, exposed as getters rather than copied every tick:
+    // they are the SAME objects `battlesea.ts` is mutating, so nothing here
+    // can hand the scene a stale crest or a raft that has already sunk.
+    get crest() {
+      return sea.state.crest;
+    },
+    get obstacles() {
+      return sea.state.obstacles;
+    },
+    get flotsam() {
+      return sea.state.flotsam;
+    },
   };
-
-  /** The AI's throttle this interval: +1 faster, -1 slower. */
-  let aiThrottle = 1;
-  let helmTimer = 0;
-  /** When the AI's committed shot goes, or null while nothing is pending. */
-  let pendingShot: number | null = null;
 
   place(state.player);
   place(state.ai);
 
   /**
-   * Put a combatant on the circle from its angle, and read its heading off the
-   * direction it is travelling.
+   * Put a combatant where it actually is, and read its heading off the track.
    *
-   * The tangent to `angle` increasing is `(-sin, cos)` in `(x, z)`, and
-   * heading is that vector as a compass bearing on `geo.ts`'s convention: 0 is
-   * +z, clockwise positive. Derived every tick, never stored, so it cannot
-   * drift away from the motion it describes.
+   * Position is the point on the circle at `angle` plus whatever the sea has
+   * shoved it by. The tangent to `angle` increasing is `(-sin, cos)` in
+   * `(x, z)`, and heading is that vector as a compass bearing on `geo.ts`'s
+   * convention: 0 is +z, clockwise positive. Both are derived every tick and
+   * neither is stored, so they cannot drift away from the motion they
+   * describe. Heading is off the TRACK and not off the sway: a hull shoved
+   * sideways by a wave is still pointed the way it is going.
    */
   function place(c: MutableCombatant): void {
-    c.x = state.radius * Math.cos(c.angle);
-    c.z = state.radius * Math.sin(c.angle);
+    c.x = state.radius * Math.cos(c.angle) + c.swayX;
+    c.z = state.radius * Math.sin(c.angle) + c.swayZ;
     c.heading = wrapTwoPi(Math.atan2(-Math.sin(c.angle), Math.cos(c.angle)));
   }
 
   /**
-   * Spend a round out of `c`'s locker, straight out of its inboard beam.
+   * Spend a round out of `c`'s locker, along its track's inboard beam.
    *
-   * The ball leaves toward the arena centre, which is where the beam points
-   * for a boat on this circle, and flies straight from there. Returns whether
-   * the shot went.
+   * The direction is `(-cos angle, -sin angle)`: the way the centre lies from
+   * this hull's point ON THE CIRCLE, regardless of where the sea has put the
+   * hull itself. The ball leaves from the hull's real position and flies
+   * parallel to the diameter. Returns whether the shot went.
    */
   function fire(c: MutableCombatant, owner: 'player' | 'ai'): boolean {
     if (c.cooldown > 0 || c.rounds <= 0) return false;
-    const r = Math.hypot(c.x, c.z);
-    if (r < 1e-6) return false;
     c.rounds -= 1;
     c.cooldown = FIRE_COOLDOWN;
     state.balls.push({
       owner,
       x: c.x,
       z: c.z,
-      vx: (-c.x / r) * BALL_SPEED,
-      vz: (-c.z / r) * BALL_SPEED,
+      vx: -Math.cos(c.angle) * BALL_SPEED,
+      vz: -Math.sin(c.angle) * BALL_SPEED,
       age: 0,
       crossed: false,
     });
     state.events.push({ kind: 'fire', owner, x: c.x, z: c.z });
     return true;
-  }
-
-  /**
-   * The AI's firing solution, as an angle error.
-   *
-   * A ball leaving the AI now arrives at the far end of its own diameter after
-   * `2 * radius / BALL_SPEED`, so the question is where the player will be
-   * then. The error is the angle between that predicted position and the far
-   * end of the diameter: positive means the player is running ahead of the
-   * point the ball is going to, and the AI has to speed up to catch them.
-   *
-   * `omegaPlayer` is the player's angular speed THIS tick, so a player who
-   * changes speed after the AI has committed is no longer where the solution
-   * said they would be. That is the dodge.
-   */
-  function solutionError(omegaPlayer: number): number {
-    const flight = (2 * state.radius) / BALL_SPEED;
-    const predicted = state.player.angle + omegaPlayer * flight;
-    return wrapPi(predicted - state.ai.angle - Math.PI);
-  }
-
-  /**
-   * The AI's gunnery: commit to a solution after a reaction, fire after a
-   * jitter. See AI_SOLUTION_TOLERANCE for why it is built this way round.
-   */
-  function aiGun(error: number): void {
-    const ai = state.ai;
-    if (pendingShot === null && ai.rounds > 0 && ai.cooldown <= 0) {
-      // `cos` positive is the player down-range rather than behind the gun:
-      // the broadside line runs both ways out of the hull and only one half of
-      // it is where the ball is going.
-      const offset = state.radius * Math.sin(error);
-      if (Math.cos(error) > 0 && Math.abs(offset) < AI_SOLUTION_TOLERANCE) {
-        const reaction = AI_REACTION_MIN + rng() * (AI_REACTION_MAX - AI_REACTION_MIN);
-        const jitter = (rng() * 2 - 1) * AI_JITTER;
-        pendingShot = state.elapsed + reaction + jitter;
-      }
-    }
-    if (pendingShot !== null && state.elapsed >= pendingShot) {
-      fire(ai, 'ai');
-      pendingShot = null;
-    }
   }
 
   /** One tick of every ball in the air. */
@@ -378,6 +290,16 @@ export function createBattleSim(rng: () => number = Math.random): BattleSim {
         }
       }
 
+      // The sea eats what the hulls did not. Tested on the same sweep and
+      // AFTER the hull, so a ball that would have scored is never stopped by
+      // a rock a hair in front of the hull it was going to hit.
+      const struck = sea.strike(fromX, fromZ, b.x, b.z);
+      if (struck !== null) {
+        state.events.push({ kind: 'strike', owner: b.owner, x: struck.x, z: struck.z });
+        state.balls.splice(i, 1);
+        continue;
+      }
+
       // A ball is written off once it is past the far side of the circle, not
       // merely far from the centre: it starts a full radius out, travelling
       // inward, and would otherwise splash on the frame it was fired.
@@ -402,6 +324,15 @@ export function createBattleSim(rng: () => number = Math.random): BattleSim {
     } else if (state.elapsed >= BATTLE_TIMEOUT) state.outcome = 'draw';
   }
 
+  /**
+   * One tick, in the order docs/BATTLE_REWORK_PLAN.md sets out.
+   *
+   * The order is load bearing in two places. The AI observes BEFORE it steers
+   * or shoots, so the reading it acts on is one it took `AI_LAG` ago rather
+   * than one from this instant. And the sea runs AFTER both hulls have moved
+   * along their tracks and BEFORE they are placed, so a wave shoves a hull to
+   * where it now is rather than to where it was.
+   */
   function update(dt: number, input: BattleInput): void {
     // THIS TICK's events and no others. Cleared before the guard below, so a
     // zero-length frame leaves an empty list rather than last tick's, which a
@@ -417,17 +348,24 @@ export function createBattleSim(rng: () => number = Math.random): BattleSim {
     let omegaPlayer = ARENA_OMEGA;
     if (input.faster && !input.slower) omegaPlayer *= 1 + THROTTLE_GAIN;
     else if (input.slower && !input.faster) omegaPlayer *= 1 - THROTTLE_GAIN;
+    // A fouled hull is dragging a raft of somebody's rigging. Applied to the
+    // rate the keys asked for, so the throttle still does something.
+    if (state.player.fouled > 0) omegaPlayer *= 0.5;
 
-    const error = solutionError(omegaPlayer);
-    helmTimer -= dt;
-    if (helmTimer <= 0) {
-      helmTimer += AI_HELM_PERIOD;
-      aiThrottle = error >= 0 ? 1 : -1;
-    }
-    const omegaAi = ARENA_OMEGA * (1 + THROTTLE_GAIN * aiThrottle);
+    // The truth, handed over before anything reads the AI's stale copy of it.
+    ai.observe(state.elapsed, state.player, omegaPlayer);
+
+    let omegaAi = ARENA_OMEGA * (1 + THROTTLE_GAIN * ai.throttle(dt, state));
+    if (state.ai.fouled > 0) omegaAi *= 0.5;
 
     state.player.angle = wrapTwoPi(state.player.angle + omegaPlayer * dt);
     state.ai.angle = wrapTwoPi(state.ai.angle + omegaAi * dt);
+
+    // ---- The sea ----------------------------------------------------
+    // Writes both hulls' sway, counts their fouling down, moves and launches
+    // the crest and the raft, and pushes any `foul` events onto this tick's
+    // list. Both hulls are placed from the result.
+    sea.update(dt, state.elapsed, state.radius, state.player, state.ai, state.events);
     place(state.player);
     place(state.ai);
 
@@ -438,9 +376,20 @@ export function createBattleSim(rng: () => number = Math.random): BattleSim {
     // Nothing fires once the outcome is set; the boats and the balls keep
     // moving because the result card sits over a live arena.
     if (state.outcome === null) {
-      if (input.fire) fire(state.player, 'player');
-      aiGun(error);
+      if (input.fire && state.player.fouled <= 0) fire(state.player, 'player');
+      // The fouling rule for the AI lives inside `gun`, which is also what
+      // snuffs a fuse that was already lit when the raft hit: one owner for
+      // the whole of the gunner's behaviour, and none of it duplicated here.
+      const shot = ai.gun(dt, state);
+      if (shot === 'aim') {
+        state.events.push({ kind: 'aim', owner: 'ai', x: state.ai.x, z: state.ai.z });
+      } else if (shot === 'fire') {
+        fire(state.ai, 'ai');
+      }
     }
+    // Read after `gun` has moved it, so the strip and the scene see the fuse
+    // this tick set rather than the one it had last tick.
+    state.fuse = ai.fuse;
 
     advanceBalls(dt);
     settle();

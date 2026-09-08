@@ -1,5 +1,7 @@
 import {
+  BoxGeometry,
   Color,
+  CylinderGeometry,
   DirectionalLight,
   DoubleSide,
   Group,
@@ -19,7 +21,7 @@ import {
 import type { Object3D } from 'three';
 import type { Quality } from './quality';
 import type { PostFx } from './postfx';
-import type { BattleState, Combatant } from './types';
+import type { ArenaCrest, BattleState, Combatant } from './types';
 import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
@@ -336,6 +338,17 @@ const SPLASH_R1 = 1.8;
 const SPLASH_Y = 0.05;
 
 /**
+ * Pale spray-and-foam colour, shared by everything in the arena that is
+ * water thrown into the air rather than water lying flat: a splash ring, the
+ * crest's own translucent sheet, the foam a shoal wears at its waterline,
+ * and the brief flash a ball's `strike` throws when the sea eats it instead
+ * of the arena's floor. One constant rather than four copies of the same
+ * hex, so the family reads as one thing even though it is drawn four
+ * different ways.
+ */
+const SPRAY_COLOR = '#dff3ff';
+
+/**
  * Point lights kept for the muzzle flash and the hit flash, and how long each
  * burns.
  *
@@ -360,6 +373,170 @@ const HIT_COLOR = '#ff5a3c';
 const FLASH_DISTANCE = 14;
 /** Height a flash sits at: the gun deck, the same line the balls leave on. */
 const FLASH_Y = 0.9;
+
+/**
+ * A brief, dim, spray-coloured pop from the flash pool, thrown at the point
+ * a ball meets a `strike` rather than a splash -- an obstacle or the raft.
+ * Dimmer than the muzzle and shorter than the hit flash, on purpose: it
+ * marks a ROUND LOST, not a shot fired or a hull struck, and must not be
+ * mistaken for either at a glance. `MAX_FLASHES` is not raised for it; a
+ * strike shares the same three-light pool the muzzle and the hit already
+ * round-robin through.
+ */
+const STRIKE_LIFE = 0.12;
+const STRIKE_INTENSITY = 26;
+
+/**
+ * The fuse -- decision 4's telegraph, lit by `state.fuse` and nothing else.
+ *
+ * A fourth `PointLight`, allocated once here alongside the flash pool rather
+ * than pulled from it: the flashes are a pop that decays on its own clock,
+ * the fuse is a level that tracks `state.fuse` every frame for as long as it
+ * is live, and folding the two into one pool would mean fighting the decay
+ * loop above for the light every tick a shot is building. `FUSE_SPAN` is a
+ * second reading of `battleai.ts`'s `AI_FUSE` (1.5 s), copied rather than
+ * imported for the same reason `KEY_LOW`/`KEY_HIGH` above copy
+ * `daynight.ts`'s grading instead of reaching for it: nothing here may take
+ * a dependency on the gunner, and if the two ever drift apart the ramp is
+ * simply timed a little off rather than pulling the whole sim in.
+ *
+ * `FUSE_LOW` has to be bright enough to be unmistakable the instant the fuse
+ * lights -- a second and a half is the player's whole window to notice it --
+ * so it sits well above a level that could be missed against the sea, and
+ * `FUSE_HIGH` climbs past it non-linearly (the ramp is squared, not linear)
+ * so the last quarter-second before the shot reads as visibly hotter than
+ * the second and a half of build-up before it, which is what decision 4
+ * asks the light to do. It shares `MUZZLE_COLOR`: the telegraph and the shot
+ * it leads into are one warm light warming up, not two different colours.
+ */
+const FUSE_SPAN = 1.5;
+const FUSE_LOW = 4;
+const FUSE_HIGH = 48;
+
+/**
+ * The crest quad: how long and wide it is drawn, how translucent, and how
+ * hard it shoves a hull's bob when it passes one.
+ *
+ * `CREST_LENGTH` has to read as a wave crossing the whole arena, and the
+ * ring is 40 units across at its widest, so 60 clears that with margin at
+ * either end and never shows a hard tip at the frame's edge. `CREST_WIDTH`
+ * is about a hull length: wide enough to be seen coming, thin enough that it
+ * reads as a line sweeping past rather than a wall sitting on the water, and
+ * it is also the distance `update` uses to decide when a hull is "under" the
+ * crest for the heave and roll below -- one number doing both jobs, since a
+ * hull only needs the extra motion for exactly as long as the crest is
+ * actually near it. `CREST_OPACITY` is low for the same reason as the
+ * width: a solid sheet reads as geometry, a faint one reads as a disturbance
+ * of the water it is lying on, which is what a crest actually is.
+ *
+ * `CREST_HEAVE` and `CREST_ROLL` are on top of the ordinary bob and are
+ * shaped, not flat: both are driven by the hull's signed distance from the
+ * crest's line divided by `CREST_WIDTH` (`-1` to `+1` while the crest is
+ * within reach, zero outside it). The heave is a hump, `1 - prox²`, so the
+ * hull lifts as the crest arrives and settles as it leaves. The roll is an
+ * odd function of the same term, `prox * (1 - |prox|)`, so the hull banks
+ * one way as the crest approaches and the other as it recedes, zero exactly
+ * under it and zero once it is gone -- a wave passing under a hull rocks it
+ * both ways, not just once. `CREST_ROLL` is applied as `rotation.z` in
+ * `placeHull`, which -- because `rotation.y` (the yaw) is composed after it
+ * there -- rolls the hull about its own bow-to-stern axis regardless of
+ * which way that axis currently points on the ring, exactly as decision 5
+ * asks: the shove reads as the wave that caused it, not as the hull
+ * glitching sideways.
+ */
+const CREST_LENGTH = 60;
+const CREST_WIDTH = 3;
+const CREST_OPACITY = 0.4;
+const CREST_HEAVE = 0.35;
+const CREST_ROLL = 0.2;
+
+/**
+ * How far to the side a fouled hull lists, radians.
+ *
+ * A flat tilt for as long as `Combatant.fouled` is positive -- "a few
+ * degrees", not a wobble of its own, so a fouled hull reads as sitting
+ * awkwardly in the raft it just ran into rather than animating. Applied the
+ * same way `CREST_ROLL` is, as `rotation.z` ahead of the yaw in `placeHull`,
+ * so it is always a list to the hull's own side and not to a fixed compass
+ * point.
+ */
+const FOULED_LIST = 0.1;
+
+/**
+ * The pool of shoals and wrecks: how many slots, and the shapes both kinds
+ * are built from.
+ *
+ * Three slots because decision 6 rolls one to three obstacles a fight and
+ * nothing here may allocate on demand; a slot past `state.obstacles.length`
+ * is simply hidden. Both a shoal and a wreck live in every slot from
+ * construction on and only one is ever shown, so choosing which an
+ * obstacle is costs a visibility flag, not a mesh.
+ *
+ * Every size below is authored at `radius = 1` and the whole slot is
+ * uniformly scaled by the obstacle's own `radius` (1.0 to 1.5) at
+ * placement, so a bigger obstacle is a bigger version of the same shape
+ * rather than a different one.
+ *
+ * The shoal is a flattened sphere sunk mostly below the water --
+ * `OBSTACLE_SHOAL_FLATTEN` squashes it to under a third of its own radius
+ * tall, and `OBSTACLE_SHOAL_SINK` drops its centre far enough that only
+ * about a sixth of that flattened height (0.05 of 0.32) still pokes above
+ * the surface -- with a ring of foam sitting right at the waterline,
+ * `OBSTACLE_FOAM_SCALE` sized a little past the mound's own footprint so the
+ * foam reads as surf breaking on it rather than a halo floating over it.
+ *
+ * The wreck is a broken box hull, sized against the 3.1-unit hull like
+ * everything else in this file -- `WRECK_LENGTH` at radius 1 is a little
+ * over half a hull length, so the biggest rolled wreck (radius 1.5) is
+ * close to a full hull's worth of broken timber -- heeled onto its side by
+ * `ArenaObstacle.yaw`, with a short stub of mast, `WRECK_MAST_HEIGHT` tall,
+ * planted toward one end and fixed at `WRECK_MAST_TILT` off true, since a
+ * mast still standing straight on a hull lying on its side would read as
+ * wrong rather than as wrecked.
+ */
+const OBSTACLE_SLOTS = 3;
+const OBSTACLE_SHOAL_FLATTEN = 0.32;
+const OBSTACLE_SHOAL_SINK = 0.27;
+const OBSTACLE_FOAM_SCALE = 1.15;
+const OBSTACLE_FOAM_OPACITY = 0.55;
+const WRECK_LENGTH = 1.9;
+const WRECK_HEIGHT = 0.42;
+const WRECK_WIDTH = 0.5;
+const WRECK_MAST_RADIUS = 0.05;
+const WRECK_MAST_HEIGHT = 0.9;
+const WRECK_MAST_OFFSET_X = 0.5;
+const WRECK_MAST_OFFSET_Y = 0.55;
+const WRECK_MAST_TILT = 0.35;
+/** Murky rock-and-mud colour for the shoal's mound. Dark, and never the wreck's wood. */
+const SHOAL_COLOR = '#2c2620';
+/** Dark weathered-wood colour shared by the wreck's hull, its mast stub, and the raft's own debris -- all three are lost timber, not three different materials. */
+const HAZARD_COLOR = '#181410';
+
+/**
+ * The raft's own small cluster of debris, one box per entry: its offset
+ * from the raft's centre and height above the water, its half-extents, and
+ * a fixed tilt and heading baked in at construction so no two pieces read
+ * as the same crate. Four pieces, kept within a unit or so of the centre --
+ * well inside `battlesea.ts`'s own `FLOTSAM_RADIUS` (1.2), copied here only
+ * as a comment -- so the pile never reads bigger than the hazard it actually
+ * is. Placement itself is one line: the whole group moves to
+ * `state.flotsam.x`/`z` and every box keeps the offset it was built with.
+ */
+const RAFT_PIECES: ReadonlyArray<{
+  readonly x: number;
+  readonly z: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly d: number;
+  readonly tilt: number;
+  readonly yaw: number;
+}> = [
+  { x: 0, z: 0.05, y: 0.08, w: 0.7, h: 0.22, d: 0.5, tilt: 0.08, yaw: 0.3 },
+  { x: 0.55, z: 0.3, y: 0.05, w: 0.4, h: 0.16, d: 0.9, tilt: -0.15, yaw: 1.1 },
+  { x: -0.5, z: 0.35, y: 0.1, w: 0.5, h: 0.18, d: 0.35, tilt: 0.22, yaw: -0.6 },
+  { x: -0.15, z: -0.55, y: 0.04, w: 0.35, h: 0.14, d: 0.6, tilt: -0.1, yaw: 2.0 },
+];
 
 export interface BattleScene {
   readonly scene: Scene;
@@ -486,7 +663,7 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
   const splashes: Splash[] = [];
   for (let i = 0; i < MAX_SPLASHES; i++) {
     const material = new MeshBasicMaterial({
-      color: '#dff3ff',
+      color: SPRAY_COLOR,
       transparent: true,
       opacity: 0,
       // Flat on the water and fading: writing depth would let a ring occlude
@@ -523,6 +700,115 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
   }
   let nextFlash = 0;
 
+  /* ---- the fuse ---- */
+
+  // Its own light, not drawn from `flashes`: a flash decays on a clock that
+  // starts when it pops, the fuse instead tracks a *level* -- `state.fuse`
+  // -- for as long as it is live, and the two update passes below must not
+  // fight each other over one light.
+  const fuseLight = new PointLight(MUZZLE_COLOR, 0, FLASH_DISTANCE, 2);
+  fuseLight.name = 'arena-fuse';
+  root.add(fuseLight);
+
+  /* ---- the crest ---- */
+
+  // A unit quad. `sea` above is rotated the same -Math.PI/2 about X, and
+  // that one rotation is what lets `scale.set(alongX, alongZ, 1)` size this
+  // in world units below without a second rotation to swap the axes for an
+  // east/west crest -- see CREST_LENGTH's own comment.
+  const crestGeometry = new PlaneGeometry(1, 1, 1, 1);
+  const crestMaterial = new MeshBasicMaterial({
+    color: SPRAY_COLOR,
+    transparent: true,
+    opacity: CREST_OPACITY,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  const crest = new Mesh(crestGeometry, crestMaterial);
+  crest.name = 'arena-crest';
+  crest.rotation.x = -Math.PI / 2;
+  crest.position.y = SPLASH_Y;
+  crest.visible = false;
+  root.add(crest);
+
+  /* ---- the obstacles: a pool of three, each a shoal and a wreck in one ---- */
+
+  interface ObstacleSlot {
+    readonly group: Group;
+    readonly shoal: Group;
+    readonly wreck: Group;
+  }
+
+  const shoalMoundGeometry = new SphereGeometry(1, 16, 10);
+  const shoalMoundMaterial = new MeshStandardMaterial({ color: SHOAL_COLOR, roughness: 0.95, metalness: 0 });
+  const shoalFoamMaterial = new MeshBasicMaterial({
+    color: SPRAY_COLOR,
+    transparent: true,
+    opacity: OBSTACLE_FOAM_OPACITY,
+    depthWrite: false,
+    side: DoubleSide,
+  });
+  const wreckHullGeometry = new BoxGeometry(WRECK_LENGTH, WRECK_HEIGHT, WRECK_WIDTH);
+  const wreckMastGeometry = new CylinderGeometry(WRECK_MAST_RADIUS * 0.6, WRECK_MAST_RADIUS, WRECK_MAST_HEIGHT, 6);
+  const wreckMaterial = new MeshStandardMaterial({ color: HAZARD_COLOR, roughness: 0.9, metalness: 0.05 });
+
+  const obstacleSlots: ObstacleSlot[] = [];
+  for (let i = 0; i < OBSTACLE_SLOTS; i++) {
+    const group = new Group();
+    group.name = `arena-obstacle-${i}`;
+    group.visible = false;
+
+    const shoal = new Group();
+    shoal.name = `arena-obstacle-${i}-shoal`;
+    const mound = new Mesh(shoalMoundGeometry, shoalMoundMaterial);
+    mound.scale.y = OBSTACLE_SHOAL_FLATTEN;
+    mound.position.y = -OBSTACLE_SHOAL_SINK;
+    shoal.add(mound);
+    // The same ring geometry the splashes use, at a fixed size rather than
+    // an animated one: this foam does not grow or fade, it just sits at
+    // the shoal's own waterline for as long as the shoal exists.
+    const foam = new Mesh(ringGeometry, shoalFoamMaterial);
+    foam.rotation.x = -Math.PI / 2;
+    foam.position.y = SPLASH_Y;
+    foam.scale.setScalar(OBSTACLE_FOAM_SCALE);
+    shoal.add(foam);
+    group.add(shoal);
+
+    const wreck = new Group();
+    wreck.name = `arena-obstacle-${i}-wreck`;
+    // A fixed heading per slot, purely so three wrecks rolled into one
+    // fight do not all point the same way. There is no compass data for a
+    // wreck, only the heel `ArenaObstacle.yaw` supplies, which `update`
+    // writes to `wreck.rotation.x` every frame instead of here.
+    wreck.rotation.y = (i * Math.PI * 2) / OBSTACLE_SLOTS;
+    const hull = new Mesh(wreckHullGeometry, wreckMaterial);
+    wreck.add(hull);
+    const mast = new Mesh(wreckMastGeometry, wreckMaterial);
+    mast.position.set(WRECK_MAST_OFFSET_X, WRECK_MAST_OFFSET_Y, 0);
+    mast.rotation.z = WRECK_MAST_TILT;
+    wreck.add(mast);
+    group.add(wreck);
+
+    root.add(group);
+    obstacleSlots.push({ group, shoal, wreck });
+  }
+
+  /* ---- the raft ---- */
+
+  const raftGeometry = new BoxGeometry(1, 1, 1);
+  const raftMaterial = new MeshStandardMaterial({ color: HAZARD_COLOR, roughness: 0.85, metalness: 0 });
+  const raft = new Group();
+  raft.name = 'arena-raft';
+  raft.visible = false;
+  for (const piece of RAFT_PIECES) {
+    const box = new Mesh(raftGeometry, raftMaterial);
+    box.scale.set(piece.w, piece.h, piece.d);
+    box.position.set(piece.x, piece.y, piece.z);
+    box.rotation.set(piece.tilt, piece.yaw, 0);
+    raft.add(box);
+  }
+  root.add(raft);
+
   /** Every transient in the arena, back to nothing. Both ends of a fight. */
   function resetTransient(): void {
     for (const ball of balls) ball.visible = false;
@@ -535,6 +821,9 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
       flash.life = 0;
       flash.light.intensity = 0;
     }
+    fuseLight.intensity = 0;
+    crest.visible = false;
+    raft.visible = false;
   }
 
   function pop(x: number, z: number, colour: string, peak: number, span: number): void {
@@ -573,14 +862,38 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
    *
    * The model's own bow is local -Z (see `ship.ts`'s `applyTransform`), and
    * the yaw that carries -Z onto that tangent is `PI - angle`.
+   *
+   * `roll` is `FOULED_LIST` and/or `CREST_ROLL`'s pull, already summed by
+   * the caller, and `heave` is `CREST_HEAVE`'s: both land on top of the
+   * ordinary bob rather than replacing it. `roll` is set as `rotation.z`
+   * BEFORE `rotation.y` is composed on the line below -- Three's default
+   * Euler order applies `z` first -- so it is always a list to the hull's
+   * own bow-to-stern side, not to a fixed compass point that would swing
+   * with the hull as it goes round the ring.
    */
-  function placeHull(hull: Object3D, boat: Combatant, phase: number): void {
+  function placeHull(hull: Object3D, boat: Combatant, phase: number, roll: number, heave: number): void {
     hull.position.set(
       boat.x,
-      HULL_Y + BOB_AMPLITUDE * Math.sin(elapsed * BOB_RATE + phase),
+      HULL_Y + BOB_AMPLITUDE * Math.sin(elapsed * BOB_RATE + phase) + heave,
       boat.z,
     );
-    hull.rotation.set(0, Math.PI - boat.angle, 0);
+    hull.rotation.set(0, Math.PI - boat.angle, roll);
+  }
+
+  /**
+   * A hull's signed distance from the crest's line, divided by
+   * `CREST_WIDTH`: `-1` as the crest arrives, `0` exactly under it, `+1` as
+   * it recedes, clamped to that range outside it so the heave and roll it
+   * drives are exactly zero once the crest is out of reach. Reads the
+   * `ArenaCrest` convention pinned in `types.ts`: `axis` is both the
+   * direction of travel and the coordinate it is measured along, and `at`
+   * is signed onto the world by that axis (`north`/`east` positive,
+   * `south`/`west` negative).
+   */
+  function crestProximity(crest: ArenaCrest, x: number, z: number): number {
+    const sign = crest.axis === 'north' || crest.axis === 'east' ? 1 : -1;
+    const along = crest.axis === 'north' || crest.axis === 'south' ? z : x;
+    return Math.min(1, Math.max(-1, (along - sign * crest.at) / CREST_WIDTH));
   }
 
   return {
@@ -660,8 +973,78 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
         }
       }
 
-      if (playerHull !== null) placeHull(playerHull, state.player, 0);
-      if (aiHull !== null) placeHull(aiHull, state.ai, BOB_PHASE_STEP);
+      // Fouled listing and the crest's heave-and-roll, summed per hull
+      // before `placeHull` ever runs: both are "on top of the existing
+      // bob", not a replacement for it.
+      let playerRoll = state.player.fouled > 0 ? FOULED_LIST : 0;
+      let playerHeave = 0;
+      let aiRoll = state.ai.fouled > 0 ? FOULED_LIST : 0;
+      let aiHeave = 0;
+      if (state.crest !== null) {
+        const pProx = crestProximity(state.crest, state.player.x, state.player.z);
+        playerHeave += CREST_HEAVE * (1 - pProx * pProx);
+        playerRoll += CREST_ROLL * pProx * (1 - Math.abs(pProx));
+        const aProx = crestProximity(state.crest, state.ai.x, state.ai.z);
+        aiHeave += CREST_HEAVE * (1 - aProx * aProx);
+        aiRoll += CREST_ROLL * aProx * (1 - Math.abs(aProx));
+      }
+      if (playerHull !== null) placeHull(playerHull, state.player, 0, playerRoll, playerHeave);
+      if (aiHull !== null) placeHull(aiHull, state.ai, BOB_PHASE_STEP, aiRoll, aiHeave);
+
+      // The fuse: read `state.fuse` and nothing else. No clock of its own --
+      // if the AI never commits, this light never lifts off zero.
+      if (state.fuse === null) {
+        fuseLight.intensity = 0;
+      } else {
+        fuseLight.position.set(state.ai.x, FLASH_Y, state.ai.z);
+        // Eased quadratically rather than linearly: see FUSE_HIGH's own
+        // comment for why the last instant has to outrun the build-up.
+        const t = 1 - Math.min(1, Math.max(0, state.fuse / FUSE_SPAN));
+        fuseLight.intensity = FUSE_LOW + (FUSE_HIGH - FUSE_LOW) * t * t;
+      }
+
+      // The crest: one long thin quad, hidden while nothing is rolling.
+      if (state.crest === null) {
+        crest.visible = false;
+      } else {
+        const sign = state.crest.axis === 'north' || state.crest.axis === 'east' ? 1 : -1;
+        const ns = state.crest.axis === 'north' || state.crest.axis === 'south';
+        const coord = sign * state.crest.at;
+        crest.visible = true;
+        crest.position.x = ns ? 0 : coord;
+        crest.position.z = ns ? coord : 0;
+        // Perpendicular to the crest's own travel: long across it, thin
+        // along it. See CREST_LENGTH's comment for the axis convention this
+        // relies on.
+        crest.scale.set(ns ? CREST_LENGTH : CREST_WIDTH, ns ? CREST_WIDTH : CREST_LENGTH, 1);
+      }
+
+      // The obstacles: rolled once at the sim's construction and never
+      // moved again, so this is three cheap writes a frame rather than
+      // three meshes built the moment the fight learns where they are.
+      for (let i = 0; i < obstacleSlots.length; i++) {
+        const obstacle = state.obstacles[i];
+        const slot = obstacleSlots[i];
+        if (obstacle === undefined) {
+          slot.group.visible = false;
+          continue;
+        }
+        slot.group.visible = true;
+        slot.group.position.set(obstacle.x, 0, obstacle.z);
+        slot.group.scale.setScalar(obstacle.radius);
+        const isWreck = obstacle.kind === 'wreck';
+        slot.wreck.visible = isWreck;
+        slot.shoal.visible = !isWreck;
+        if (isWreck) slot.wreck.rotation.x = obstacle.yaw;
+      }
+
+      // The raft: one cluster, hidden while there is none.
+      if (state.flotsam === null) {
+        raft.visible = false;
+      } else {
+        raft.visible = true;
+        raft.position.set(state.flotsam.x, 0, state.flotsam.z);
+      }
 
       for (let i = 0; i < balls.length; i++) {
         const ball = state.balls[i];
@@ -704,7 +1087,7 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
           // hits also get a screen-edge vignette from `battleui.ts`, which is
           // the half of this that cannot be done in world space.
           pop(event.x, event.z, HIT_COLOR, HIT_INTENSITY, HIT_LIFE);
-        } else {
+        } else if (event.kind === 'splash' || event.kind === 'strike') {
           const splash = splashes[nextSplash];
           nextSplash = (nextSplash + 1) % splashes.length;
           splash.age = 0;
@@ -712,7 +1095,15 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
           splash.mesh.scale.set(SPLASH_R0, SPLASH_R0, 1);
           splash.material.opacity = 1;
           splash.mesh.visible = true;
+          // A strike is a ball the sea ate -- an obstacle or the raft --
+          // rather than one that simply fell short. Same ring, plus a
+          // brief spray-coloured pop so the two are told apart at a glance
+          // instead of only by counting rounds left in the locker.
+          if (event.kind === 'strike') pop(event.x, event.z, SPRAY_COLOR, STRIKE_INTENSITY, STRIKE_LIFE);
         }
+        // 'aim' needs nothing here: the fuse light above already reads
+        // `state.fuse` directly. 'foul' needs nothing beyond the raft
+        // vanishing, which `state.flotsam` becoming null already shows.
       }
     },
 

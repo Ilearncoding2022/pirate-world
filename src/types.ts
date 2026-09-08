@@ -622,6 +622,24 @@ export interface Combatant {
   readonly hits: number;
   /** Seconds until this side may fire again. */
   readonly cooldown: number;
+  /**
+   * Displacement from the track, arena units, written by `battlesea.ts`.
+   *
+   * `angle` is where the hull is on the circle and this is how far the sea has
+   * shoved it off that point; `x` and `z` are the sum of the two. The gun
+   * still fires along the TRACK's inboard beam rather than at the arena
+   * centre, so a shoved hull throws a line parallel to the diameter and a few
+   * units off it. That is the whole of how a wave spoils an aim.
+   */
+  readonly swayX: number;
+  readonly swayZ: number;
+  /**
+   * Seconds of fouling left, 0 when clear.
+   *
+   * Set by a raft of flotsam this hull ran into. While it is positive the
+   * hull travels at half its angular speed and its guns do not answer.
+   */
+  readonly fouled: number;
 }
 
 /** One cannonball in flight. Straight line, no drop, no drag. */
@@ -634,9 +652,75 @@ export interface Cannonball {
   readonly age: number;
 }
 
+/**
+ * A wave crest rolling across the arena, or null while the sea is quiet.
+ *
+ * `axis` is the direction the crest TRAVELS, and it is also the direction it
+ * shoves the hulls it passes: `north` is +z, `south` is -z, `east` is +x,
+ * `west` is -x. `at` is the crest's coordinate along that direction of
+ * travel and always runs from negative to positive, so a crest's world
+ * position is `travel * at` whichever way it is going and every crest is born
+ * at the same `at` and dies at the same one.
+ *
+ * A worked pair, since the sign is the one thing two modules could disagree
+ * about. An `east` crest at `at = -6` is the line `x = -6` sweeping toward
+ * +x. A `west` crest at `at = -6` is the line `x = +6` sweeping toward -x.
+ * The crest itself is drawn perpendicular to its travel.
+ */
+export interface ArenaCrest {
+  readonly axis: 'north' | 'south' | 'east' | 'west';
+  /** Coordinate along the direction of travel, arena units. Runs negative to positive. */
+  readonly at: number;
+}
+
+/**
+ * A shoal or a wreck standing inside the ring, rolled once per fight.
+ *
+ * It is a circle for every purpose the sim has: a ball whose sweep passes
+ * within `radius` of the centre is lost on it. Every obstacle sits well
+ * inside the track at every radius the ring ever has, so no hull meets one.
+ */
+export interface ArenaObstacle {
+  readonly kind: 'shoal' | 'wreck';
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+  /** Radians, the heel a wreck is drawn at. Meaningless for a shoal. */
+  readonly yaw: number;
+}
+
+/** A raft of debris drifting across the arena, or null while there is none. */
+export interface ArenaFlotsam {
+  readonly x: number;
+  readonly z: number;
+  readonly vx: number;
+  readonly vz: number;
+  readonly radius: number;
+}
+
+/**
+ * Which of the sea's three systems are running.
+ *
+ * All three on in the game; all three off under `?calm=1` and in the unit
+ * cases that measure the gunner, which has to be pinned on a sea that is not
+ * moving the answer underneath it.
+ */
+export interface BattleOptions {
+  readonly waves: boolean;
+  readonly shoals: boolean;
+  readonly flotsam: boolean;
+}
+
 /** Something that happened this tick, for the scene and the UI to react to. */
 export interface BattleEvent {
-  readonly kind: 'fire' | 'hit' | 'splash';
+  /**
+   * `fire`, `hit` and `splash` are as they always were. The three added by
+   * the rework: `aim` is the AI committing to a shot, at its own hull, one
+   * fuse before the gun goes; `strike` is a ball lost on an obstacle or a
+   * raft, at the point it met it; `foul` is a hull running into a raft, and
+   * its `owner` is the hull that was fouled rather than anyone who fired.
+   */
+  readonly kind: 'fire' | 'hit' | 'splash' | 'aim' | 'strike' | 'foul';
   readonly owner: 'player' | 'ai';
   /** Where it happened, arena units. For a hit, the hull that took it. */
   readonly x: number;
@@ -658,6 +742,20 @@ export interface BattleState {
   readonly outcome: BattleOutcome | null;
   /** THIS TICK's events only. Rebuilt every update; never accumulate it. */
   readonly events: readonly BattleEvent[];
+  /**
+   * Seconds until the AI's committed shot goes, or null while nothing is lit.
+   *
+   * The telegraph, and the only clock either the scene or the strip may read
+   * for it: both draw the warning from this number rather than timing an
+   * `aim` event themselves.
+   */
+  readonly fuse: number | null;
+  /** The crest rolling across the arena, if there is one. */
+  readonly crest: ArenaCrest | null;
+  /** The shoals and wrecks inside the ring. Rolled once; never changes. */
+  readonly obstacles: readonly ArenaObstacle[];
+  /** The raft drifting across the arena, if there is one. */
+  readonly flotsam: ArenaFlotsam | null;
 }
 
 /** What the player is asking for this tick. Written by `battleui.ts`. */
