@@ -592,25 +592,25 @@ a bright bank of it standing past the horizon -- in frames whose box numbers
 are correct in every particular. Both had been latent for as long as the
 module existed, and neither is reachable while the box is small.
 
-**The basis was a reflection.**  is a rotation only when
-x cross y is z, and the starboard vector was built as  cross ,
-which is minus that: determinant -1.  is defined for
+**The basis was a reflection.** `makeBasis(x, y, z)` is a rotation only when
+x cross y is z, and the starboard vector was built as `_fwd` cross `_up`,
+which is minus that: determinant -1. `setFromRotationMatrix` is defined for
 rotations only, and handed a reflection it returns an unnormalised quaternion
--- for an axis-aligned case literally , a box at half scale
+-- for an axis-aligned case literally `(0, 0, 0, 0.707)`, a box at half scale
 and no rotation at all. A box centred on the hull and symmetric across its own
 x looks identical reflected, so nothing could see it; offsetting the box
 astern and stretching it differently across than along made the orientation
-observable for the first time.  records the same trap at its own
-, and got it right there.
+observable for the first time. `lightning.ts` records the same trap at its own
+`tangentAt`, and got it right there.
 
-**The box is flat and the sea is not.** A point  units from the box centre
-sits  above the water. At 14 units across that is 0.12 and invisible;
-at the 50 the camera asks for it is **6.2**, against a box only 10 tall, so
-the far half lifts clean off the sea and the drops that were hidden under the
-water stop being hidden all at once.  bends the box back onto the
-globe with one paraboloid term in the vertex shader -- the second-order
-expansion of the sphere, right to a few centimetres over a box this size, for
-the cost of a dot product.
+**The box is flat and the sea is not.** A point `d` units from the box centre
+sits `d^2 / 2R` above the water. At 14 units across that is 0.12 and
+invisible; at the 50 the camera asks for it is **6.2**, against a box only 10
+tall, so the far half lifts clean off the sea and the drops that were hidden
+under the water stop being hidden all at once. `RAIN_CURVE` bends the box back
+onto the globe with one paraboloid term in the vertex shader -- the
+second-order expansion of the sphere, right to a few centimetres over a box
+this size, for the cost of a dot product.
 
 The pattern worth keeping: **making a thing bigger is a way of testing it.**
 Neither bug was introduced by the camera scaling. The scaling only raised the
