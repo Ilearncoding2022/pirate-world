@@ -563,10 +563,13 @@ different questions:
   off the frame instead and the wall lands short of the lens at every zoom —
   15 units against a camera 21 back — and the whole foreground of every frame
   is dry water while it rains on the middle distance.
-- **Height** answers to NEITHER. The cloud base is 4.8 units over the water
-  and no camera moves it. The fall speed, the wind drift and the streak length
-  are physical for the same reason and stay in world units at the values they
-  were judged at.
+- **Height** answers to NEITHER. `RAIN_HEIGHT` puts the ceiling nine units
+  over the water and `RAIN_BELOW` hangs three under it, so a drop is seen to
+  travel before it arrives and then falls through the sea rather than winking
+  out on it. Only three units are spent below the waterline, not half the box:
+  raising the ceiling by 80% cost about a sixth of the density rather than
+  nearly half. The fall speed, the wind drift and the streak length are
+  physical for the same reason and stay in world units.
 
 That split is load-bearing and was learned the hard way: written first as a
 uniform `object.scale`, it stretched the height too — ten units became fifty,
@@ -602,6 +605,14 @@ x looks identical reflected, so nothing could see it; offsetting the box
 astern and stretching it differently across than along made the orientation
 observable for the first time. `lightning.ts` records the same trap at its own
 `tangentAt`, and got it right there.
+
+**The rain fell upward.** `fract(aLane.y + uTime)` climbs with time, and
+`pos.y` is that number times the box height, so every drop walked steadily out
+of the sea -- while the streak was hung off the velocity vector and therefore
+pointed the way a *falling* drop's would. Rain rising with the tails of falling
+rain is exactly what it looks like, and it shipped that way. The fix is the
+sign; the wind drift moved to `1.0 - fall` with it, so the curtain bends
+downwind on the way down instead of unbending.
 
 **The box is flat and the sea is not.** A point `d` units from the box centre
 sits `d^2 / 2R` above the water. At 14 units across that is 0.12 and

@@ -55,8 +55,16 @@ export interface Rain {
  *
  * They are still worth reading as world numbers for the one framing where the
  * scale lands near 1, because that is the shape the rest of the file was
- * judged at: 14 is four and a half hull lengths and 10 clears the masthead
- * with room for a drop to have been falling before it reaches the deck.
+ * judged at: 14 is four and a half hull lengths, and 12 puts the ceiling nine
+ * units over the water once `RAIN_BELOW` has taken its three.
+ *
+ * Nine, and not the five it was, because rain that starts just above the
+ * masthead reads as a sprinkler rather than as weather -- the eye wants to see
+ * a drop travel before it arrives. It does put the ceiling above the 4.8-unit
+ * cloud base `clouds.ts` draws, which is worth knowing and is not worth
+ * fixing: the deck is a shell painted across the whole sky, not a lid over
+ * this box, and at the angles the chase camera takes nothing about the order
+ * of the two is visible.
  *
  * What has NOT changed is the trap underneath: the box holds a FIXED number of
  * drops, so every unit of world size is paid for in density. Ten times across
@@ -64,7 +72,22 @@ export interface Rain {
  * That is the whole reason `RAIN_COVER` is a fraction and not 1.
  */
 const RAIN_BOX = 14;
-const RAIN_HEIGHT = 10;
+const RAIN_HEIGHT = 12;
+
+/**
+ * How far the box hangs below the waterline, world units.
+ *
+ * The box has to reach under the sea or drops would wink out ON the surface
+ * instead of falling through it, which is the one moment the eye is certain
+ * to be looking at a drop. It used to be half the box's height, which was
+ * spending half of every drop the tier paid for on water nobody can see into.
+ *
+ * Three units is enough for the wink to happen out of sight and cheap enough
+ * that raising the ceiling costs almost nothing: the visible slab went from 5
+ * units holding half the drops to 9 units holding three quarters of them, so
+ * a curtain 80% taller came out only a sixth thinner rather than nearly half.
+ */
+const RAIN_BELOW = 3;
 
 /**
  * How fast a drop falls, world units per second, and how far the wind carries
@@ -283,10 +306,16 @@ const VERTEX_SHADER = [
   '  // instead of flickering as it goes.',
   '  float wall = max(abs(aLane.x), max(aLane.z, 0.0)) / uHalf;',
   '  vEdge = 1.0 - smoothstep(uFade, 1.0, wall);',
-  '  // How far this drop has fallen, wrapped into the box. `fract` is what',
-  '  // recycles a drop from the ground back to the top with no CPU work and',
-  '  // no per-drop state at all.',
-  '  float fall = fract(aLane.y + uTime);',
+  '  // Where the drop is between the floor of the box and its ceiling, 1 at',
+  '  // the top and 0 at the bottom. `fract` is what recycles a drop from the',
+  '  // ground back to the ceiling with no CPU work and no per-drop state.',
+  '  //',
+  '  // MINUS uTime, so the number falls as time runs. Plus, which is how this',
+  '  // was written, walks every drop steadily UPWARD out of the sea -- while',
+  '  // the streak below is hung off the velocity and so points the way a',
+  '  // falling drop would. Rain rising with the tails of falling rain is',
+  '  // exactly what it looks like.',
+  '  float fall = fract(aLane.y - uTime);',
   '  // The lane is where the drop lives in the box; uSpread is how wide the',
   '  // box is this frame -- x across the frame, y astern-to-ahead, and they',
   '  // are different numbers. HORIZONTAL only, and that is the whole point:',
@@ -297,8 +326,11 @@ const VERTEX_SHADER = [
   '  // world units at the values they were judged at.',
   '  vec3 pos = vec3(aLane.x * uSpread.x, fall * uHeight, aLane.z * uSpread.y);',
   '  // The wind carries the drop sideways as it falls, so the streak leans',
-  '  // and the whole curtain slants with the weather.',
-  '  pos += uWindDrift * fall;',
+  '  // and the whole curtain slants with the weather. Against `1.0 - fall`,',
+  '  // which is how much of the drop is BEHIND it: the wind has had longer to',
+  '  // work the nearer the water a drop gets, so the curtain bends downwind on',
+  '  // the way down instead of unbending.',
+  '  pos += uWindDrift * (1.0 - fall);',
   '  // And the box is bent back onto the globe, because the box is flat and',
   '  // the sea is not. Applied AFTER the drift, so a drop the wind has carried',
   '  // out to the edge is put on the water it has actually reached. See',
@@ -504,9 +536,9 @@ export function createRain(drops: number): Rain {
     const deep = Math.max(half, (ahead - astern) * 0.5);
     uniforms.uSpread.value.set(wide / half, deep / half);
 
-    // Dropped by half its height, so the drops fall THROUGH the deck rather
-    // than beginning at it. Unscaled, like the height it is half of.
-    object.position.addScaledVector(_up, -RAIN_HEIGHT * 0.5);
+    // Dropped under the waterline, so the drops fall THROUGH the sea rather
+    // than winking out on it. Unscaled, like the height it belongs to.
+    object.position.addScaledVector(_up, -RAIN_BELOW);
     // And shifted astern onto the box's own centre, which is behind the hull
     // now that the curtain reaches further back than forward.
     object.position.addScaledVector(_fwd, (astern + ahead) * 0.5);
