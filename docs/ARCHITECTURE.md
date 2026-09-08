@@ -255,7 +255,7 @@ shader.
 | `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts and the land/water ratio; `useLandMask` re-points collision at the culled raster |
 | `islets.ts` | `cullIslets(heightMap, seaLevel)`, `MIN_ISLAND_AREA` | sinks landmasses too small to see; runs once, before anything reads the map |
 | `waterbodies.ts` | `WaterBodies`, `createWaterBodies(heightMap, seaLevel, spawnDir)` | built once; ocean vs. inland mask, texture + CPU `sample` |
-| `land.ts` | `createLand(terrain, heightMap)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water; `MeshStandardMaterial` extended with a chained `onBeforeCompile` (see **Post-processing**) that modulates the vertex-coloured base with per-pixel slope, curvature, wetness, noise, baked AO and a sun-tracking horizon shadow from `terrainbake.ts` |
+| `land.ts` | `createLand(terrain, heightMap, quality)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water; `MeshStandardMaterial` extended with a chained `onBeforeCompile` (see **Post-processing**) that modulates the vertex-coloured base with per-pixel slope, curvature, wetness, a detail-normal octave, noise, per-mask roughness, baked AO and a sun-tracking horizon shadow from `terrainbake.ts`. Every noise term is distance-faded (`landLod`), and the detail normal's two taps are branched away entirely past its fade, so the orbit framing costs what it did before any of it existed |
 | `terrainbake.ts` | `bakeTerrain(heightMap, seaLevel)`, `bakeAmbientOcclusion`, `bakeHorizon`, `TerrainBake`, `BAKE_WIDTH`, `BAKE_HEIGHT` | startup-only ambient-occlusion and 8-azimuth horizon bake over a half-resolution copy of the shared height map; called from inside `createLand`, after `globe.ts`'s islet cull, so it never occludes for an island that is about to be sunk |
 | `noiseglsl.ts` | `NOISE_GLSL` | inlined Ashima/Gustavson simplex noise; `water.ts` and `land.ts` share this one copy |
 | `waveconstants.ts` | `SWELL_WAVELENGTH`, `WAVE_WAVELENGTH`, `CHOP_WAVELENGTH`, `AXIS_WAVE`, `AXIS_CHOP`, `DISPLACE_AMPLITUDE`, `freq`, `freqNumber`, `vec3Literal` | the one source both `waterglsl.ts` (GPU) and `wavefield.ts` (CPU) read, so the two wave fields can never numerically drift apart — see **The wave field** |
@@ -714,7 +714,10 @@ from.
 
 Every field is a pipeline/wiring number, not a world- or ship-scale one: a
 pixel-ratio ceiling, a bloom working-width cap, three render-target/vertex
-counts (`wakeMapSize`, `patchSegments`, `reflectionSize`), a face count
+counts (`wakeMapSize`, `patchSegments`, `reflectionSize`), a blend weight
+(`landFacetBlend`, how far land's per-pixel normal replaces its flat facet
+normal -- the one row that costs nothing to move at runtime, since it reaches
+the shader as a uniform rather than a baked constant), a face count
 (`reflectionFacesPerFrame`), and whether the water shader's fragment-side
 chop octave runs at all (`waveChop`). **`reflectionSize: 0`** (the `low`
 tier) means the reflection cube is **absent, not idle**: `reflection.ts`
@@ -1467,8 +1470,9 @@ see **The wave field**. Hazards go *beside* `waveField`, never inside it, as a
 second function with the same three consumers (the patch's vertex shader, the
 fragment shader through the plugin's `declarations`, and the CPU port
 `ship.ts` samples) and the same parity guard. `bump(x) = (1 - x²)²`,
-`crest(x) = (1 - x²)³`, `plateau`, and `(1 - r)³` written as three
-multiplications: no `sin`, `cos`,
+`crest(x) = (1 - x²)³`, `plateau`, and a maelstrom bowl that reuses `bump`
+itself (it was `(1 - r)³` until that cube's apex was found to be a shading
+singularity), all written as multiplications: no `sin`, `cos`,
 `exp`, `pow` or noise anywhere in the *height*. Those are the transcendentals
 whose last bits differ between a GPU and `Math`, which is what `dev/probe.ts`
 already had to design around. The spin of a maelstrom and the froth on a crest

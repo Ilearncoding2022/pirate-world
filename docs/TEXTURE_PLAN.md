@@ -1,7 +1,74 @@
 # Land, wave face and maelstrom surface detail: implementation plan
 
-Status: **Wave 0 landed. Wave 1 ready to start.** Branch:
-`claude/terrain-wave-maelstrom-texture-kvbh49`.
+Status: **Waves 0, 1 and 2 landed. Wave 3 awaits the owner's sign-off.**
+Branch: `claude/terrain-wave-maelstrom-texture-kvbh49`.
+
+## Wave 2: what integration actually changed
+
+The four streams merged with one conflict, in the generated
+`hazard-shader.json`, resolved by `npm run golden:update` as planned. Beyond
+the merge, integration did seven things, and the first three are the
+interesting ones because no single stream could have seen them.
+
+1. **The maelstrom is a siphon now, and that took geometry, not shading.**
+   The owner asked for water that gets lower and lower toward the centre.
+   Stream M's darkening was driven by RADIUS -- `(1 - r)^2`, a fact about the
+   plan view -- and capped at 0.6, which `applyAerial` then washed a third of
+   straight back out. It now runs off `hazHeight0`, the field's own height at
+   the pixel, with the throat's sky occluded as well, so the shading follows
+   the profile the hull rides. That got the gradient onto the screen and it
+   still read as a saucer, because at `FUNNEL_DEPTH` 3.0 against a radius of
+   10 it WAS a saucer: 15% depth to width, seen from a camera looking along
+   the surface. `FUNNEL_DEPTH` is now 6.0. One constant, both ports read it,
+   parity unmoved at 0/255.
+2. **The doughnut was a compound of two independent widenings.** P widened the
+   height's lip 1.5x for the polygonal-ring problem; M widened its art copy a
+   further 1.18x for the same problem; neither could see the other, and 1.8x
+   of lip is a doughnut. `RIM_ART_INV_SCALE` is now 1.25, i.e. the art band
+   sits INSIDE the geometry lip. P predicted this interaction in its report.
+3. **Foam had to be exempted from the depth darkening.** `WATER_FOAM_TAIL`
+   mixes froth into `col` before the `colour` hook runs, so darkening by depth
+   darkened the spiral with the water and the first cut of the siphon
+   photographed as a dark disc with its arms wiped off. Froth floats on the
+   descending water; it is the thing that draws the descent. `WALL_STRENGTH`
+   also came down 0.85 to 0.5 so the darkened water shows between the arms at
+   all.
+4. `sessionQuality()` removed. `createLand` takes a `quality` parameter and
+   `globe.ts` passes the one it already holds -- the shape L flagged as right
+   but could not reach without owning that file.
+5. `DETAIL_FADE_NEAR`/`FAR` 18/40 to 28/70. Forty units is practically beached
+   on the real chase camera; the plan's number was a guess made before anyone
+   had sailed at it.
+6. `shots.mjs` timeouts are overridable (`--shot-timeout`, `--hazard-timeout`).
+   All three hazard streams independently ran private copies of that file with
+   these raised, which is the definition of a number that should be an
+   argument.
+7. `hazardfield.test.ts`'s vertex-step assertion is now a fraction of
+   `FUNNEL_DEPTH` rather than an absolute. It was a shape assertion that would
+   silently become a depth assertion, and it did: doubling the depth failed it
+   while the apex it exists to check had not moved. `hazard-shader.test.ts`
+   gained a case pinning that both art modules raise `steep` with `max`, never
+   assignment, which is what stops two live hazards clobbering each other.
+
+Docs updated for the new profile (`HAZARDS_PLAN.md`, `ARCHITECTURE.md` both
+still described `(1 - r)^3`), the five hook slots, the crest/funnel split and
+land's new quality row.
+
+**Verified**: build and tsc clean, 139/139 unit tests, wave parity 1/255 on
+the wave field and 0/255 on the hazard field through a profile change, a depth
+change and two art rewrites. `terrain-golden`, `world-golden` and
+`water-shader` fixtures byte-identical. The two `game.spec.ts` screenshot
+timeouts are the same pre-existing SwiftShader ones that fail on the base
+commit.
+
+**Known not-right, for Wave 3 or a later pass**: the funnel's interior still
+reads brighter than it should from the deck and the lip is still its most
+conspicuous feature; the great wave, now lighter than the sea, shows its
+flat-topped plateau silhouette more plainly than before (that silhouette is
+Wave 3's `CREST_FRONT_RATIO` and `patchSegments` row); and nobody has yet
+photographed land's detail normal at its shipping distance, because the
+simulation runs at a tenth of wall clock in a container and the ship cannot
+reach a beach.
 
 This is the brief for making three surfaces read as vividly as the open sea
 already does: the land (low-poly, rough), the front face of a great wave

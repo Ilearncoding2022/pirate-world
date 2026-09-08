@@ -8,7 +8,7 @@ import { NOISE_GLSL } from './noiseglsl';
 import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
 import { bakeTerrain, HORIZON_MAX_DEGREES } from './terrainbake';
-import { sessionQuality } from './quality';
+import type { Quality } from './quality';
 
 /**
  * Outward displacement of the highest land.
@@ -186,8 +186,17 @@ const DETAIL_STEP_WORLD = 0.25;
  * variation rather than surface detail, and a continent with none at all
  * reads as painted plastic.
  */
-const DETAIL_FADE_NEAR = 18;
-const DETAIL_FADE_FAR = 40;
+/*
+ * The near pair opened at 18/40, which was a guess made before anyone had
+ * sailed toward a coast with it on. On the actual chase camera 40 units is
+ * practically beached: the detail normal fired only in the last moments of an
+ * approach and was invisible on any land the player merely sails past, which
+ * is most of the land they ever see. 28/70 puts it on a coastline being
+ * approached without reaching orbit, and the branch below still switches the
+ * two taps off entirely beyond it, so the cost argument is unchanged.
+ */
+const DETAIL_FADE_NEAR = 28;
+const DETAIL_FADE_FAR = 70;
 const GRAIN_FADE_NEAR = 45;
 const GRAIN_FADE_FAR = 120;
 const GRAIN_FADE_FLOOR = 0.5;
@@ -624,7 +633,7 @@ const LAND_DETAIL = Math.round((96 * GLOBE_RADIUS) / 100);
  * this legal: this hook runs first, then the composer's sRGB self-encode
  * chains on top untouched.
  */
-export function createLand(terrain: Terrain, heightMap: HeightMap): Land {
+export function createLand(terrain: Terrain, heightMap: HeightMap, quality: Quality): Land {
   const source = new THREE.IcosahedronGeometry(GLOBE_RADIUS, LAND_DETAIL);
   const srcPos = source.attributes.position as THREE.BufferAttribute;
   const faceCount = srcPos.count / 3;
@@ -702,8 +711,8 @@ export function createLand(terrain: Terrain, heightMap: HeightMap): Land {
     uDayFactor: { value: 1 },
     // The quality table's `landFacetBlend`. `globe.ts` builds the land
     // without handing it a Quality, so this reads the one `main.ts` already
-    // resolved rather than resolving a second copy -- see `sessionQuality`.
-    uFacetBlend: { value: sessionQuality().landFacetBlend },
+    // Handed in by `globe.ts`, which already holds the session's settings.
+    uFacetBlend: { value: quality.landFacetBlend },
     // Aerial perspective (`fogglsl.ts`'s contract): the one shared object, so
     // land and water always agree on the fog within a frame.
     ...fogUniforms,

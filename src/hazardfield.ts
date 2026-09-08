@@ -93,8 +93,24 @@ export const MAELSTROM_RADIUS = 10;
  * Ten times the gale's own amplitude down. It has to read as a hole rather
  * than as a dark patch from the chase camera, which looks along the surface
  * rather than down onto it.
+ *
+ * That last sentence was the goal at 3.0 and 3.0 did not meet it. Against
+ * `MAELSTROM_RADIUS` = 10 it is a hole twenty units across and three deep: a
+ * saucer, at 15% depth to width, and from a camera looking ALONG the surface
+ * a saucer presents almost no profile at all. Every attempt to buy the
+ * descent back in shading -- darkening by depth, occluding the throat's sky,
+ * spiralling the normal -- made it a better-looking saucer, because the
+ * gradient the eye follows down a funnel has to exist in the geometry before
+ * a shader can find it. Doubled to 6.0, i.e. 30% depth to width, which is
+ * about a ship's length of drop and reads as water going somewhere.
+ *
+ * Three things this deliberately does NOT change. The lip stays 0.35: a
+ * higher rim on a deeper bowl reads as a crater. `MAELSTROM_RADIUS` stays 10,
+ * so the thing is no harder to steer around than it was. And the profile is
+ * the same polynomial, so parity is untouched -- this is one constant, and
+ * both ports read it.
  */
-export const FUNNEL_DEPTH = 3.0;
+export const FUNNEL_DEPTH = 6.0;
 export const RIM_HEIGHT = 0.35;
 
 /**

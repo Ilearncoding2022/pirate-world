@@ -24,6 +24,7 @@ import { createTowns } from '../../src/towns';
 import { latLonToDir } from '../../src/geo';
 import { createLand, landRadius } from '../../src/land';
 import { createWater } from '../../src/water';
+import { createQuality } from '../../src/quality';
 import { createWaterHazardPlugin } from '../../src/waterhazard';
 import type { HeightMap } from '../../src/heightmap';
 import type { WaterBodies } from '../../src/waterbodies';
@@ -166,7 +167,12 @@ export function buildWorldGolden(): WorldGolden {
   // startup bake this also runs sees the same culled map it would in the
   // real game. The bake reads the height field and never writes it, so
   // nothing here should move the fractions computed above.
-  const land = createLand(terrain, heightMap);
+  // `createQuality('')` rather than a hand-built row: an explicit search
+  // string keeps it off `window.location`, and its `localStorage` read is
+  // already wrapped against throwing, so in plain Node it falls through to
+  // the 'high' row without touching a DOM. The golden therefore pins the
+  // mesh the real high-tier game builds, not a second definition of it.
+  const land = createLand(terrain, heightMap, createQuality(''));
   const landMeshVertexCount = (land.mesh.geometry.attributes.position as { count: number }).count;
   const landRadiusAtHeights = LAND_RADIUS_TEST_HEIGHTS.map((h) => landRadius(h, terrain.seaLevel));
 

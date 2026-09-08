@@ -33,9 +33,23 @@
  *           water shader has by then (`col`, `N`, `fres`, `skyCol`, ...).
  */
 
+import { FUNNEL_DEPTH } from './hazardfield';
+
 /* ------------------------------------------------------------------ */
 /* Art tuning                                                           */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Turns `hazHeight0` (world units, negative inside a funnel) into 0 at the rim
+ * and 1 at the throat.
+ *
+ * Read off `hazardfield.ts` rather than written as a number, for the reason
+ * that module's own comment gives about its two ports: the depth is a fact
+ * about the height field, and a second copy of it here would be free to drift
+ * the day the field is retuned. Stream P moved that profile once already
+ * during this very piece of work.
+ */
+const FUNNEL_DEPTH_NORM = 1 / FUNNEL_DEPTH;
 
 /**
  * The spiral phase, shared by the normal's ridges and the foam's arm mask so
@@ -185,19 +199,91 @@ const SPRAY_DRIFT = 1.1;
  * white doughnut with a puddle in it and no wall anywhere. Most of what 0.6
  * was reaching for is delivered by RIM_RAGGED below instead, which breaks the
  * ring up without spreading it.
+ *
+ * Above 1 now, because the widening this was doing has already been done
+ * underneath it. This file and `hazardfield.ts` were rewritten in parallel,
+ * and that file widened the HEIGHT's lip by 1.5 (half-width 0.12 to 0.18 of a
+ * radius) in the same piece of work. Two independent widenings compounded to
+ * about 1.8, and the doughnut this constant's own comment warns about arrived
+ * anyway, by a route neither stream could see alone. 1.25 takes the art band
+ * back inside the geometry lip: the froth now sits ON the ridge of thrown
+ * water rather than spilling a third of the funnel's radius past it.
  */
-const RIM_ART_INV_SCALE = 0.85;
+const RIM_ART_INV_SCALE = 1.25;
 
 /** How far the noise is allowed to push the lip's radius in or out, in funnel radii. Thrown water, not a compass arc. */
 const RIM_RAGGED = 0.055;
 
-/** Brightness of the wall's streaks, of the lip band, and of the spray specks outside it. */
-const WALL_STRENGTH = 0.85;
+/**
+ * Brightness of the wall's streaks, of the lip band, and of the spray specks
+ * outside it.
+ *
+ * `WALL_STRENGTH` came down from 0.85 once the funnel had a depth gradient to
+ * show. At 0.85 the wall's froth is bright enough to be the brightest thing
+ * inside the rim everywhere it appears, and it appears over most of the wall:
+ * the interior photographed as grey mush, and the descent the geometry and the
+ * `colour` hook had just been given was underneath it, invisible. Foam is how
+ * the eye reads the SPIN; the water it lies on is how the eye reads the DROP.
+ * Both have to be visible, so the froth has to leave the water it rides on
+ * showing between the arms.
+ */
+const WALL_STRENGTH = 0.5;
 const LIP_STRENGTH = 0.6;
 const SPRAY_STRENGTH = 0.55;
 
-/** How far the funnel's centre is dragged toward the throat colour. Under a full mix, so the hole still reads as water rather than as a hole cut in the frame. */
-const FUNNEL_DARKEN = 0.6;
+/**
+ * How far the throat is dragged toward the throat colour, and how sharply that
+ * darkening gathers toward the centre.
+ *
+ * These two are what make a maelstrom read as a SIPHON -- water going down --
+ * rather than as a disc painted on a flat sea, and the reason the first cut of
+ * this file did not is that its darkening was driven by RADIUS (`(1 - r)^2`)
+ * and capped at 0.6. Radius is the wrong variable. It says "how far in am I",
+ * which is a fact about the plan view; the eye is asking "how far DOWN is
+ * that", which is a fact about the profile. The two only coincide on a cone,
+ * and `hazardfield.ts` no longer draws one -- it draws a bowl whose descent
+ * accelerates through the mid radius and flattens at the throat.
+ *
+ * So the mix is driven by `hazHeight0`, the field's own height at this pixel:
+ * zero out at the rim, `-FUNNEL_DEPTH` at the bottom. Every pixel is then
+ * shaded by how deep the water under it actually is, and the gradient the eye
+ * follows down the wall is the gradient the hull will ride.
+ *
+ * `DARKEN` is raised well past the old 0.6 because `applyAerial` runs AFTER
+ * this hook (see `water.ts`'s assembly order) and lifts the whole funnel back
+ * toward the haze: at the 25 units a forced maelstrom rises at, roughly a
+ * third of the darkening is washed straight back out. 0.6 survived that as
+ * "slightly moodier water". It has to be spent before the haze, not after.
+ *
+ * `DEPTH_GAMMA` above 1 holds the rim near the sea's own colour and gathers
+ * the fall into the inner half, which is the shape of a drain rather than a
+ * dish.
+ */
+const FUNNEL_DARKEN = 0.94;
+const FUNNEL_DEPTH_GAMMA = 1.5;
+
+/**
+ * How much of the sky the throat is allowed to keep.
+ *
+ * The other half of reading as a hole, and the half that is genuinely
+ * physical rather than a tint: water at the bottom of a funnel is looking at
+ * the funnel's own walls, not at the sky, so its ambient and its Fresnel sky
+ * term both have to fall away with depth. Without this the throat stays lit
+ * from above like open sea and no amount of darkening reads as a descent --
+ * it reads as a stain. With it, the wall keeps its gloss and the bottom goes
+ * quiet, which is the value structure of every real whirlpool photograph.
+ */
+const THROAT_SKY_OCCLUSION = 0.85;
+
+/**
+ * How much of the depth darkening foam is spared. See the `colour` hook.
+ *
+ * Not 1: froth deep in the throat is genuinely in shadow, and sparing it
+ * entirely makes the spiral glow like neon out of a black hole. 0.8 keeps the
+ * arms clearly legible against the descending water while still letting the
+ * innermost turns sit down into it.
+ */
+const FOAM_DEPTH_EXEMPT = 0.8;
 
 /**
  * The colour the throat is dragged toward, LINEAR (every `u...` colour reaches
@@ -370,6 +456,35 @@ export const FUNNEL_FOAM_GLSL: string = [
  * `steep` raised in the slope hook they are the whole of "dark and glossy".
  */
 export const FUNNEL_COLOUR_GLSL: string = [
-  `  col = mix(col, ${FUNNEL_THROAT}, clamp(hazFunnelMask * ${FUNNEL_DARKEN.toFixed(4)}, 0.0, 1.0));`,
-  `  col += skyCol * fres * hazFunnelMask * ${FUNNEL_GLOSS.toFixed(4)};`,
+  '  {',
+  // How far below sea level this pixel's water actually sits, 0 at the rim and
+  // 1 at the throat. `hazHeight0` is the hazard field's own height, which the
+  // skeleton sampled once for the slope and every hook since has reused; the
+  // crest branch can only push it up and the funnel only down, so clamping the
+  // negative side is both the depth and the "is this a funnel" test in one.
+  // Driving the colour from this rather than from a radial mask is the whole
+  // of the siphon read -- see FUNNEL_DARKEN.
+  `    float hazDrop = clamp(-hazHeight0 * ${FUNNEL_DEPTH_NORM.toFixed(6)}, 0.0, 1.0);`,
+  `    hazDrop = pow(hazDrop, ${FUNNEL_DEPTH_GAMMA.toFixed(3)});`,
+  '',
+  // Foam is exempt, and this is not a nicety -- it is the difference between
+  // a funnel and a stain. `WATER_FOAM_TAIL` mixes the froth into `col` BEFORE
+  // this hook runs (see water.ts's assembly order), so darkening `col` flatly
+  // darkens the spiral along with the water under it: the first cut of this
+  // did exactly that and photographed as a dark disc with the arms wiped off
+  // it. Froth floats ON the descending water and is lit from above wherever
+  // it is; it is the one thing in the funnel that should NOT go down with it,
+  // and it is what draws the descent for the eye.
+  `    float hazDark = hazDrop * (1.0 - clamp(foam, 0.0, 1.0) * ${FOAM_DEPTH_EXEMPT.toFixed(3)});`,
+  '',
+  // Sky first, and subtractively: take the ambient and the Fresnel sky away
+  // with depth BEFORE the tint goes on, so the throat is dark because it can
+  // see no sky rather than because it has been painted over.
+  `    col *= 1.0 - hazDark * ${THROAT_SKY_OCCLUSION.toFixed(4)};`,
+  `    col = mix(col, ${FUNNEL_THROAT}, clamp(hazDark * ${FUNNEL_DARKEN.toFixed(4)}, 0.0, 1.0));`,
+  '',
+  // The wall keeps its gloss; the throat does not. Same argument as the
+  // occlusion above -- a highlight needs something above it to reflect.
+  `    col += skyCol * fres * hazFunnelMask * (1.0 - hazDrop) * ${FUNNEL_GLOSS.toFixed(4)};`,
+  '  }',
 ].join('\n');

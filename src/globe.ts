@@ -101,7 +101,7 @@ export function createGlobe(
   // are woven in, or it would clone a shader that is missing them. See
   // waterpatch.ts.
   const waterPatch = createWaterPatch(water, quality);
-  const land = createLand(terrain, heightMap);
+  const land = createLand(terrain, heightMap, quality);
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
   const sky = createSky();

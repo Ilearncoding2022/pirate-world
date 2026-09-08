@@ -255,13 +255,21 @@ describe('hazardfield: the maelstrom profile', () => {
      * And it is not merely flat in an interval too small to render. The
      * displacement patch lays a vertex every half world unit, so the first
      * vertex out from the centre is the one that used to sit on the side of
-     * the spike: the cone climbed 0.856 units of height per unit of ground
-     * across that first step, the bowl climbs 0.030.
+     * the spike: across that first step the cone climbed 0.285 of the funnel's
+     * own depth per world unit of ground, the bowl climbs 0.010.
+     *
+     * Expressed as a FRACTION OF `FUNNEL_DEPTH`, deliberately. What this case
+     * pins is the profile's shape near the origin, and the slope of any
+     * profile scales with the depth it is scaled to -- so an absolute ceiling
+     * here would be a shape assertion that silently becomes a depth assertion
+     * the first time the funnel is made deeper. It was: the ceiling opened at
+     * 0.05, which was 1.7% of a 3-unit funnel, and doubling the depth to 6
+     * failed this line while the apex it exists to check had not moved at all.
      */
     const vertex = 0.5;
     const firstStep = (hazardHeight(at(vertex, 0), [m]) - centre) / vertex;
     expect(firstStep).toBeGreaterThan(0);
-    expect(firstStep).toBeLessThan(0.05);
+    expect(firstStep / FUNNEL_DEPTH).toBeLessThan(0.017);
   });
 });
 

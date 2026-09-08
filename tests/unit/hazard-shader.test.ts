@@ -35,12 +35,17 @@ describe('hazard shader', () => {
   });
 
   /*
-   * The seam contract, asserted rather than assumed: Wave 0 cut `slope` into
-   * the core shader and moved the hazard normal into it, but shipped every
-   * one of the four seam locals at its default. Streams C and M raise them.
-   * Until they do, this is what "the seam changes nothing" means in a test.
+   * The seam contract, asserted rather than assumed.
+   *
+   * What is pinned here is that all four locals are still DECLARED at their
+   * inert defaults, which is what makes the open sea -- every pixel where
+   * `uHazCount` is 0 and the slot loop never runs -- bit-identical to the sea
+   * before the seam existed. The crest and funnel art both raise them further
+   * down, inside that loop, and this test deliberately says nothing about the
+   * values they raise them to: those are art and belong in the fixture diff,
+   * not in an assertion.
    */
-  it('declares the four steep-seam locals and leaves them at their defaults', () => {
+  it('declares the four steep-seam locals at their inert defaults', () => {
     const glsl = normalize(buildHazardShaderGolden().fragmentShader);
     expect(glsl).toContain('float steep = 0.0;');
     expect(glsl).toContain('vec3 steepN = n;');
@@ -48,6 +53,35 @@ describe('hazard shader', () => {
     expect(glsl).toContain('float tiltBoost = 1.0;');
     // The plugin hands the core a normal to gate on, even at steep = 0.
     expect(glsl).toContain('steepN = normalize(n - hazSlope);');
+  });
+
+  /*
+   * Both art modules raise `steep` with `max`, never plain assignment. A
+   * crest and a funnel can be live in adjacent slots of the same loop, and an
+   * assignment in either branch would silently discard the other's claim on
+   * the pixel where their footprints overlap. Cheap to assert, and the kind
+   * of thing that would otherwise only show up as one hazard going flat
+   * whenever another happened to be near it.
+   */
+  it('raises the seam locals with max, so two live hazards cannot clobber each other', () => {
+    // Comments have to go first, and not for tidiness: the seam is explained
+    // in prose directly above itself ("so that steep = 0 reduces to..."), so
+    // matching assignments against the raw source finds the documentation
+    // rather than the code.
+    const code = buildHazardShaderGolden()
+      .fragmentShader.split('\n')
+      .filter((line) => !line.trim().startsWith('//'))
+      .join('\n');
+
+    const writes = [...code.matchAll(/(\w+\s+)?\bsteep\s*=\s*([^;]+);/g)];
+    // One declaration, and every other write a max().
+    expect(writes.length).toBeGreaterThan(1);
+    for (const [, declaredType, rhs] of writes) {
+      if (declaredType?.trim() === 'float') expect(rhs.trim()).toBe('0.0');
+      else expect(rhs.trim()).toMatch(/^max\(steep,/);
+    }
+    // Both art modules raise it, not just one.
+    expect(writes.filter(([, d]) => d?.trim() !== 'float')).toHaveLength(2);
   });
 
   it('splices both art modules into the one slot loop', () => {

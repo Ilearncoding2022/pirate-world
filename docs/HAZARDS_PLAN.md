@@ -96,12 +96,30 @@ tower over it.
 growth envelope, see below), with `r = sqrt(u² + v²) / R`:
 
 ```
-h(r) = -D · (1 - r)³        for r < 1        // the funnel, D = FUNNEL_DEPTH = 3.0
-     + RIM · bump((r - 0.9) / 0.12)          // a raised lip, RIM = 0.35
+h(r) = RIM · lip - D · bump(r) · (1 - lip)   for r < 1
+       where lip  = bump((r - 0.82) / 0.18)   // the raised rim, RIM = 0.35
+             bump(x) = (1 - x²)², D = FUNNEL_DEPTH = 3.0
 ```
 
-`(1 - r)³` is written as three multiplications, never `pow`. The height is
-radially symmetric on purpose: the swirl is not in the geometry.
+The funnel was `-D · (1 - r)³` when this plan was written, and that cube has a
+SHARP APEX at r = 0: not differentiable there, ~0.9 of slope per world unit at
+the centre, and the whole of it sampled by about one vertex of the
+displacement grid. It read as a spike in the height field and as a shading
+singularity in the water. `bump(r) = (1 - r²)²` is flat at the centre and,
+because it reaches `r` only through `r²`, actually analytic through the origin
+rather than merely flat there -- and it was already written, float32-rounded
+and parity-proved on both sides of this file, so the change introduced no new
+arithmetic to keep in step.
+
+The lip REPLACES rather than adds (`- D · bump · (1 - lip)`), which is what
+keeps the profile's maximum exactly `RIM` and exactly at the rim centre. Added
+on top of a bowl it would crown about 15% high and off to one side, because a
+bowl is still 0.32 units deep under the crown where the old cone had already
+flattened to 0.003.
+
+Everything here is polynomial plus the one `sqrt` in `r`, written as
+multiplications, never `pow`. The height is radially symmetric on purpose: the
+swirl is not in the geometry.
 
 **Distance fade.** The patch is 80 units square and fades its displacement to
 zero over its outer 15% (`SKIRT_START` 0.85, so from 34 units out). A hazard

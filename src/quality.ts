@@ -164,9 +164,6 @@ declare global {
   }
 }
 
-/** Set by `createQuality`, read by `sessionQuality` below. */
-let session: Quality | null = null;
-
 /**
  * Builds the frozen settings for this session and, if the URL asks for it,
  * publishes the debug hook. Called once, at the top of `main.ts`, before the
@@ -176,7 +173,6 @@ let session: Quality | null = null;
 export function createQuality(search: string = window.location.search): Quality {
   const tier = resolveTier(search);
   const quality: Quality = Object.freeze({ tier, ...QUALITY_TABLE[tier] });
-  session = quality;
 
   const params = new URLSearchParams(search);
   if (params.has('quality') || params.has('debug')) {
@@ -184,25 +180,4 @@ export function createQuality(search: string = window.location.search): Quality 
   }
 
   return quality;
-}
-
-/**
- * The settings the last `createQuality()` produced, for a module that is
- * built without being handed them.
- *
- * There is exactly one caller: `land.ts`. `globe.ts` constructs the land as
- * `createLand(terrain, heightMap)` and already holds a `Quality` it could
- * pass, but that call site belongs to another stream; this is the additive
- * way to read one row of the table without it. It is deliberately NOT a
- * second resolution -- it hands back the same frozen object `main.ts` made,
- * so nothing downstream can drift out of step with the table, which is the
- * property the file header exists to protect.
- *
- * The fallback matters: `tests/fixtures/generate.ts` calls `createLand` in
- * plain Node, where there is no `window` for `createQuality` to read and no
- * startup to have called it. Falling back to the 'high' row keeps that path
- * free of any DOM access at all.
- */
-export function sessionQuality(): Quality {
-  return (session ??= Object.freeze({ tier: 'high', ...QUALITY_TABLE.high }));
 }

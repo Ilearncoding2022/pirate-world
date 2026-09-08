@@ -26,6 +26,17 @@ function arg(name, fallback) {
 }
 
 const LABEL = arg('label', 'shots');
+/*
+ * Both overridable, because the numbers that suit a GPU are hopeless on a
+ * software rasteriser and every agent who has had to shoot a hazard from a
+ * container so far has ended up running a private copy of this file with
+ * these two raised. `--shot-timeout` is Playwright's per-screenshot limit
+ * (its 30 s default is not enough for 1600x900 under SwiftShader);
+ * `--hazard-timeout` is how long to wait for a forced hazard to reach full
+ * envelope, which on such a machine runs about ten times wall clock.
+ */
+const SHOT_TIMEOUT = Number(arg('shot-timeout', '30000'));
+const HAZARD_TIMEOUT = Number(arg('hazard-timeout', '240000'));
 const BASE = arg('url', 'http://localhost:4173/');
 const QUERY = arg('query', '');
 const OUT_DIR = join('tests', 'out', LABEL);
@@ -106,7 +117,7 @@ page.on('console', (m) => {
 
 async function shot(name) {
   const path = join(OUT_DIR, `${name}.png`);
-  await page.screenshot({ path });
+  await page.screenshot({ path, timeout: SHOT_TIMEOUT });
   console.log('  ', path);
   return path;
 }
@@ -136,16 +147,16 @@ await shot('idle');
  * entirely when the URL asked for no hazard.
  */
 if (/[?&]hazard=/.test(QUERY)) {
-  console.log('   waiting for the forced hazard to rise (up to 4 min on a software rasteriser)...');
+  console.log(`   waiting for the forced hazard to rise (up to ${Math.round(HAZARD_TIMEOUT / 1000)} s)...`);
   try {
     await page.waitForFunction(
       () => (globalThis.window.__pirateWorld?.hazards ?? []).some((h) => h.envelope > 0.85),
       null,
-      { timeout: 240_000, polling: 250 },
+      { timeout: HAZARD_TIMEOUT, polling: 250 },
     );
     await shot('hazard');
   } catch {
-    console.log('   (no hazard reached full envelope in 4 min; carrying on)');
+    console.log('   (no hazard reached full envelope in time; raise --hazard-timeout. Carrying on)');
   }
 }
 
