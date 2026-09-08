@@ -283,7 +283,7 @@ shader.
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED`, `CELL_WIND_LIFT` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast. Also publishes the phase reading `weather.ts` rolls on — `phase`, `phaseTime`, `phaseDuration`, `phaseIndex`, `envelope` — all of which were already locals. `update`'s optional fourth argument is `CellsState.stormAtShip`, a FLOOR on the speed (never the bearing) so a storm always blows: the one coupling from the weather back into the wind, and the reason `weatherCells.update` runs first in the loop |
 | `weathercells.ts` | `createWeatherCells(terrain, heightMap, seed?)`, `cellProfile`, `CELL_CORE` | the drifting weather: a population of `CELL_TARGET` storm and fog cells in a bubble around the ship, each a centre and a travel tangent carried by parallel transport exactly as a hazard's is. Owns `CellsState`, mutated in place; DOM-free, scene-free and seeded, like `wind.ts` and `hazards.ts`. Publishes the winning cell itself as `stormCellAtShip`, not just its numbers, so `weather.ts` can hang a bolt on a centre this sample already agreed on rather than re-deriving one and breaking the tie the other way. Its own PRNG, never the wind's — see **Weather** |
 | `weather.ts` | `createWeather(seed?, pin?)`, `WeatherPin`, `VIS_MIN`, the share constants | the weather AT THE SHIP: squalls rolled off `WindState`'s phases, combined with the cells by `max` BEFORE smoothing. Owns `WeatherState`, including the three the flash carries — `flashLocal`, `flashSeed` and `flashOrigin`, all fixed at the INSTANT of the strike and cleared when it retires, so a cell that drifts or dies mid-flash cannot displace, reshape or unplace a bolt that is already lit. `?weather=` pins the envelopes and switches the squall roll off; cells keep running under a pin |
-| `rain.ts` | `createRain(drops)` | a ship-scale box of `quality.rainDrops` drops, all motion in the vertex shader, hidden entirely below `rain > 0.02`. The drops dissolve toward three of the box's four walls (`RAIN_FADE`), so the footprint has no edge to see; the fourth is the wall astern, which the chase camera looks THROUGH rather than at, and fading it takes the storm with it — see **Weather**. `LAYER_DEFAULT` only: rain in the reflection cube is rain reflected in rain, directly under the hull |
+| `rain.ts` | `createRain(drops)` | `quality.rainDrops` drops in a box stretched to the CAMERA every frame, all motion in the vertex shader, hidden below `rain > 0.02` or once the far fade has run out. `update`'s optional fifth argument is the camera, and it is not a courtesy: width comes off the frustum (so the curtain reaches the frame at every zoom and on every window shape), depth off the camera's own distance (so it reaches the lens), height stays physical. The drops dissolve toward three of the four walls (`RAIN_FADE`); the fourth is astern, behind the lens. `LAYER_DEFAULT` only: rain in the reflection cube is rain reflected in rain, directly under the hull |
 | `lightning.ts` | `createLightning()`, `buildBolt(positions, seed)` | the BOLT, for the flash `weather.ts` has always had. Owns no timing, no gate and no randomness of its own: `weather.flash` is the envelope, `flashSeed` the shape, `flashOrigin` the place. Geometry is rewritten once per STRIKE rather than per frame, and the object hides itself between them; built on every tier including the one with no rain, because a bolt is under two hundred vertices for a third of a second. `LAYER_DEFAULT` only, for `rain.ts`'s reason |
 | `chart.ts` | `createChart(w?, h?, encoded?)`, `CHART_WIDTH/HEIGHT`, `CHART_SAVE_INTERVAL`, `CHART_VERSION` | the fog-of-war bitmap: 1024×512 bytes in memory (the scope samples it 37 000 times a raster and a byte read beats a shift), bit-packed and base64'd in storage. `reveal` stamps a spherical cap through `geo.ts`'s `capColumns`, the same function `weathermap.ts` stamps a cell with |
 | `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards**. `update`'s optional fifth argument is `stormOdds`, a multiplier on the roll's COMPARISON only (the draw stays unconditional, so the stream still replays) |
@@ -538,27 +538,68 @@ the one with no rain at all: under two hundred vertices for a third of a
 second buys nothing back by being cut, and a low-tier storm that flashes with
 nothing to see in it is the weakest storm the game has.
 
-### The rain box has four walls and only three of them are visible
+### The rain box is not a size, it is a framing
 
-The drops live in a fixed box that follows the hull, and a box has edges. That
-did not matter while the rain was faint enough that nobody could see where it
-stopped; raising `RAIN_ALPHA` to make a storm legible made the FOOTPRINT
-legible with it — a hard-edged rectangle of streaks on the water with dry sea
-on all four sides.
+Rain is drawn as a box of drops around the hull, and for a long time that box
+was a fixed 14 units across. It cannot be. `camera.ts` frames the hull from
+≈23 units at its closest and ≈211 at its furthest — a **nine-fold** range on a
+wheel the player turns freely, opening at ≈38. A box of any fixed size is
+correct at exactly one framing and wrong at the other eight, and what "wrong"
+looks like is a discrete column of rain standing on the boat with dry sea
+around it. Making it bigger only moves which single zoom is right.
 
-The fix is `RAIN_FADE`, and the interesting part is which walls it applies to.
-The box is heading-aligned, so `-z` is the wall astern, and the chase camera
-sits behind and above the ship looking THROUGH it. Perspective then makes
-those astern drops the nearest thing to the lens and by far the largest part
-of the curtain on screen, while the wall itself falls behind the camera where
-nobody can see it end. Fade it and the storm goes with it: a symmetric fade
-was tried at two settings and both took the rain back to roughly what it had
-been before the alpha was ever raised.
+So the box is sized from the camera every frame, and the three axes are three
+different questions:
 
-So three walls dissolve and the fourth is left alone. The general lesson is
-the one **Testing** already states in other words: a change whose whole
-purpose is visible only in a frame has to be judged in a frame. Every version
-of this fix typechecked, and every version passed the suite.
+- **Width** answers to the FRUSTUM, not to a distance. At the same zoom a 21:9
+  monitor sees half again the width a 16:9 one does, so a box tuned against
+  either shows its walls on the other. `fov` and `aspect` are the whole of
+  what that takes and the camera already carries both. `RAIN_COVER` holds it
+  under the full half-width, because coverage is paid for in density.
+- **Depth** answers to the CAMERA'S DISTANCE. The one stretch of rain the
+  player is guaranteed to be looking through is the stretch between the lens
+  and the hull, so `RAIN_BEHIND` pushes the astern wall just past the camera
+  and the box carries its own centre, which is no longer the hull. Size depth
+  off the frame instead and the wall lands short of the lens at every zoom —
+  15 units against a camera 21 back — and the whole foreground of every frame
+  is dry water while it rains on the middle distance.
+- **Height** answers to NEITHER. The cloud base is 4.8 units over the water
+  and no camera moves it. The fall speed, the wind drift and the streak length
+  are physical for the same reason and stay in world units at the values they
+  were judged at.
+
+That split is load-bearing and was learned the hard way: written first as a
+uniform `object.scale`, it stretched the height too — ten units became fifty,
+the drops spanned twenty-five above the masthead to twenty-five under the
+keel, and all that showed above the water was a thin band with dry sea
+beneath it. The scaling belongs on the lane spread in the shader, where it
+touches the footprint and nothing else.
+
+Two things follow. Coverage costs density — the box holds a FIXED drop count,
+so roughly three and a half times the width is roughly twelve times the
+footprint, and `quality.rainDrops` had to move with `RAIN_COVER` and must
+keep moving with it. And rain has to STOP: past `RAIN_FAR_IN` the camera is
+beyond the ship's own visibility and looking down at the weather rather than
+standing in it, where a storm is the darkened deck and thickened haze
+`clouds.ts` and `fog.ts` already draw. Left running to 130 units, the widened
+box threw streaks out past the planet's own limb, and rain falling through
+empty space is worse than no rain at all.
+
+### The box has four walls and only three of them are visible
+
+`RAIN_FADE` dissolves the drops toward a wall so the footprint has no edge to
+see — toward three walls. The box is heading-aligned, so `-z` is the wall
+astern, which `RAIN_BEHIND` now puts behind the lens: the camera looks
+THROUGH it rather than at it, and perspective makes those drops the nearest
+thing to the lens and the largest part of the curtain on screen. Fade it and
+the storm goes with it — a symmetric fade was tried at two settings and both
+took the rain back to roughly what it had been before `RAIN_ALPHA` was ever
+raised.
+
+The general lesson under all of this is the one **Testing** states in other
+words: a change whose whole purpose is visible only in a frame has to be
+judged in a frame. Every wrong version above typechecked, and every one of
+them passed the suite.
 ### The panel has a word for it: `overcast`
 
 `EnergyMode`'s eleventh rung, added with the weather. Without it the panel
@@ -703,7 +744,7 @@ ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)
 camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
 globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
-rain.update(dt, shipState, wind.state, weather.state)  // after globe: the box hangs on the hull the camera has just been framed against
+rain.update(dt, shipState, wind.state, weather.state, view.camera)  // after globe: the box hangs on the hull the camera has just been framed against, and is SIZED off that camera
 lightning.update(dt, shipState, weather.state)  // alongside the rain, for the same reason; rebuilds its geometry only when flashSeed changes
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
