@@ -196,7 +196,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   rather than a solved course, so watch it long enough and it visibly picks
   the wrong way. And the sea is not still under either of you: a crest rolls
   through every so often and shoves a hull a few units off its line before it
-  settles back, one to three shoals or wrecks sit inside the ring and
+  settles back — a real wall of water now, the same wave the open ocean
+  raises, with a steep front, a lip that breaks into froth and streaks running
+  down the face, standing on a sea built from the same three ridged layers you
+  sail on outside the fight. One to three shoals or wrecks sit inside the ring and
   swallow a ball that crosses one, and a raft of flotsam drifts through and
   fouls whatever hull runs into it — half speed and a dead gun for a couple of
   seconds. The other captain does not see any of that and does nothing about

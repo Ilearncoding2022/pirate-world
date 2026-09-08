@@ -264,7 +264,7 @@ shader.
 | `fog.ts` | `fogUniforms`, `updateFog(env)` | owns the three uniforms `applyAerial` reads; called from `globe.update` before water and land |
 | `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; exposes `offsets`, the three wave layers' integrated drift (direction-space, read-only), for `wavefield.ts`'s CPU port; see **Shader notes** for the plugin contract |
 | `wavefield.ts` | `snoise`, `sampleWave`, `waveHeight`, `waveNormalBasis`, `WaveOffsets`, `WaveSample` | float32-rounded CPU port of `waterglsl.ts`'s swell+wave `waveField`; `ship.ts` rides this, the player sees the GPU copy — see **The wave field** |
-| `hazardfield.ts` | `HAZARD_GLSL`, `hazardHeight(dir, hazards)`, `MAX_HAZARDS`, the crest/funnel sizes | the SECOND height field, beside `waveField` and never inside it: GLSL for three consumers and a float32 CPU port for the hull. Polynomial plus one `sqrt`, which is what makes its parity free — see **Hazards** |
+| `hazardfield.ts` | `HAZARD_GLSL`, `HAZARD_PROFILE_GLSL`, `HAZ_CREST_RATIO_GLSL`, `hazardHeight(dir, hazards)`, `MAX_HAZARDS`, the crest/funnel sizes | the SECOND height field, beside `waveField` and never inside it: GLSL for three consumers and a float32 CPU port for the hull. Polynomial plus one `sqrt`, which is what makes its parity free — see **Hazards** |
 | `waterpatch.ts` | `createWaterPatch(water, quality)`, `WaterPatch` | ship-following grid that actually displaces in the vertex shader, reusing the sphere's already-assembled fragment shader byte for byte; built after the water plugins are woven in |
 | `grid.ts` | `createGrid()` | lat/long lines |
 | `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
@@ -285,7 +285,8 @@ shader.
 | `battleai.ts` | `createBattleAi(rng)`, `BattleAi`, `AiView`, `AI_LAG`, `AI_HELM_PERIOD`, `AI_HELM_COIN`, `AI_FUSE`, `AI_SOLUTION_TOLERANCE` | the enemy gunner and the enemy helm, and nothing else: it knows nothing of the sea, the ring's shrink or the locker's bookkeeping. A two-second delay line (`observe` records every tick, `throttle`/`gun` read it `AI_LAG` later, so every decision is aimed at the player of two seconds ago), a coin flip in one helm decision in four, and a fuse that commits a shot `AI_FUSE` before it fires — which is what makes it dodgeable. Decisions 1, 2 and 4 of `docs/BATTLE_REWORK_PLAN.md` |
 | `battlesea.ts` | `createBattleSea(rng, options)`, `BattleSea`, `BattleSeaState`, `SwayTarget`, `CALM`, `ROUGH`, the crest/sway/flotsam constants, `FOUL_SECONDS` | the three seeded systems that put something in the arena, each switched independently by `BattleOptions`: crests rolling in from one of the four cardinal directions that shove a hull along their own travel as a closed-form pulse (nothing to integrate, so nothing that can go unstable at a capped `dt`), one to three static shoals rolled in the constructor that swallow a ball crossing them, and a flotsam raft whose touch fouls a hull for `FOUL_SECONDS`. `CALM` turns all three off and is what every unit case measuring the gunner is pinned against; `ROUGH` is the shipping default. Decisions 5, 6 and 7 |
 | `bounty.ts` | `WIN_TIERS`, `rollWinGold(rng)`, `lossGold(purse)`, `rollDrawGold(rng, purse)`, `LOSS_SHARE`/`LOSS_MIN`/`LOSS_MAX`, `DRAW_SWING` | data and pure functions for the three gold outcomes; every roll takes the caller's `rng` |
-| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the arena: a SECOND `Scene` with its own flat sea, lights, fixed camera, cannonballs and splashes. It is not the globe water and must never import `water.ts`; see **AI boats and the battle** |
+| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the arena: a SECOND `Scene` with its own sea, lights, fixed camera, cannonballs, splashes and the wall of water crossing the ring. It is not the globe water and must never import `water.ts`; see **AI boats and the battle** |
+| `battlewave.ts` | `SEA_VERTEX`, `seaFragment(fine)`, `CREST_VERTEX`, `crestFragment(fine)`, `ARENA_CREST_HEIGHT`, `CREST_GRID` | the arena's water as GLSL, split out of `battlescene.ts` the way `hazardcrest.ts` was split out of `waterhazard.ts`. Compiles `waterglsl.ts`'s ridged field on a plane, `hazardfield.ts`'s crest profile as shared characters and `hazardcrest.ts`'s art constants, so the fight is fought on the same wave the world raises — see **The arena sea is not the globe water, but it is the same wave** |
 | `battlecover.ts` | `createBattleCover(deps)`, `BattleCover`, `COUNTDOWN` | the card a fight is DECLARED on: the plate, the rules in one sentence off `ROUNDS`/`HITS_TO_LOSE`, and the three-second count into the arena. A card over a FROZEN world, unlike `battleui.ts` — see **The beat before a fight**. Counts on the wall clock, not on `dt` |
 | `battleui.ts` | `createBattleUi(deps)`, `BattleUi`, `BattleResult` | the fight's overlay: the rounds-and-hits strip, the FIRE key, the Space capture and the result card; `isOpen` is a LIVE GETTER, on the pause contract's terms |
 | `wakeconstants.ts` | `SURFACE_LIFT`, `WAKE_RADIUS`, `HALF_WIDTH_0`, `SPREAD_RATE`, `WAKE_LIFE`, `STERN_BACK`, `BOW_FORWARD` | the wake's shared geometry, split out because `wake.ts` and `wakemap.ts` would otherwise import each other |
@@ -293,7 +294,7 @@ shader.
 | `wakemap.ts` | `createWakeMap(size, ribbonGeometry)`, `WakeMap`, `computeWakeFrame`, `createWakeFrame`, `projectToMapUV`, `WAKE_MAP_EXTENT`, `WAKE_HEIGHT_SCALE`, `WAKE_BREAKUP_GLSL` | renders the wake's foam/height/age into a small top-down render target every frame; see **Shader notes** for the channel layout |
 | `waterwake.ts` | `createWaterWakePlugin(wake)` | the `WaterPlugin` that samples `wakemap.ts`'s texture back into the water shader's `normal`/`foam`/`colour` hooks |
 | `waterhazard.ts` | `createWaterHazardPlugin()` | the `WaterPlugin` that displaces, foams and darkens the sea for a hazard; a `WaterPlugin` plus one `bind(state)`, because it must be CONSTRUCTED before `createGlobe` and can only be HANDED its state after — see **Hazards**. Owns the uniforms, the slot loop and the shared per-slot locals; the art itself lives in the two files below |
-| `hazardcrest.ts` | `CREST_SLOPE_GLSL`, `CREST_FOAM_GLSL`, `CREST_COLOUR_GLSL` | fragment-side art for a wave's crest, spliced into `waterhazard.ts`'s branch for `kind < 0.5`. Free to use `sin`/`snoise`: no CPU code compares against it |
+| `hazardcrest.ts` | `CREST_SLOPE_GLSL`, `CREST_FOAM_GLSL`, `CREST_COLOUR_GLSL`, and its tuning constants | fragment-side art for a wave's crest, spliced into `waterhazard.ts`'s branch for `kind < 0.5`. Free to use `sin`/`snoise`: no CPU code compares against it. The constants are exported because `battlewave.ts` shades the arena's crest off the same numbers |
 | `hazardfunnel.ts` | `FUNNEL_SLOPE_GLSL`, `FUNNEL_FOAM_GLSL`, `FUNNEL_COLOUR_GLSL` | the same for a maelstrom. The height is radially symmetric so the hull can ride it; the spiral is entirely this file's, and must stay that way |
 | `reflection.ts` | `createReflection(quality)`, `Reflection`, `scheduleFaces` | low-res cube camera parked at the ship's waterline, round-robins `quality.reflectionFacesPerFrame` faces per frame; `texture` is `null` and the whole system absent, not idle, when `reflectionSize` is 0 |
 | `waterreflect.ts` | `createWaterReflectPlugin(cubeTexture)` | the `WaterPlugin` that mixes the decoded cube into `skyCol` and paints a fake hull-neon streak, since the hull itself cannot appear in its own reflection camera |
@@ -1782,19 +1783,75 @@ under an opaque screen.
 therefore hang still in the arena; animating them would need `shipfx.ts` to
 learn to tick without a hull update, and that is out of scope.
 
-### The arena sea is not the globe water
-`battlescene.ts` builds its own plane and its own small shader out of
-`NOISE_GLSL` and `fogglsl.ts`, and it **must never import `water.ts`**. The
-globe's water is a full sphere at `GLOBE_RADIUS` carrying a wave field, a
-depth ramp, a foam pass and every registered `WaterPlugin`; the arena is 300
-units of flat open ocean with nothing under it and nothing to sample. Reaching
-for the real water here would drag the wake map, the reflection cube and the
-displacement patch into a scene that has no ship state to feed any of them.
+### The arena sea is not the globe water, but it is the same wave
+`battlewave.ts` builds the arena's plane and its crest, and it **must never
+import `water.ts` or `waterpatch.ts`**. The globe's water is a full sphere at
+`GLOBE_RADIUS` carrying a depth ramp, an inland mask, a foam pass, a wake map,
+a reflection cube and every registered `WaterPlugin`; the arena is 300 units of
+flat open ocean with nothing under it and nothing to sample. Reaching for the
+real water here would drag all of that into a scene that has no ship state to
+feed any of it.
 
 The arena is a **flat plane in world units**: plain `x`/`z` metres about its
 own centre with `+y` up, and nothing in it is on the globe. The hull is drawn
 at `MODEL_SCALE` and mounted at `MODEL_MOUNT_Y`, exactly as in the world, so
-the two scenes agree about how big a ship is and about nothing else.
+the two scenes agree about how big a ship is.
+
+**What they now also agree about is the water itself, and that is a change.**
+The arena used to run two octaves of plain `snoise` for its sea and a flat
+translucent quad for the wave crossing it, with its own copies of the two
+wavelengths and a note saying nothing may come to depend on them staying equal
+to the globe's. That note has been overruled deliberately: smooth noise gives
+rounded blobs where the ocean's ridged octaves give the creased crest lines the
+sun glitter runs along, and a quad has no front face to meet, no lip to break
+and no silhouette at all. Side by side with the sea outside the fight it read
+as an older draft of the same game. Four things are now SHARED CODE rather than
+a second description of the same idea:
+
+| what | from | why it cannot be copied instead |
+| --- | --- | --- |
+| the ridged three-octave field | `waterglsl.ts`'s `waveField`, rewritten for the xz plane | the `ridge()` fold is the whole difference between crest lines and blobs |
+| the wavelengths and stretch axes | `waveconstants.ts` | already the one source the GPU and CPU ports read; the arena is now a third |
+| the crest's profile | `hazardfield.ts`'s `HAZARD_PROFILE_GLSL` | the identical characters both shaders compile — see below |
+| the crest's art | `hazardcrest.ts`'s constants | retuning a great wave at sea has to retune the one in the arena |
+
+`HAZARD_PROFILE_GLSL` and `HAZ_CREST_RATIO_GLSL` are a **pure split** out of
+`HAZARD_GLSL`: the two chunks are spliced back into it in place, so the string
+the globe compiles is byte-identical and `tests/fixtures/hazard-shader.json`
+did not move. That is the proof the split cost the sphere nothing. The chunks
+declare no uniform, which is what lets the arena take the shapes without the
+sphere's slot block coming with them.
+
+**The frequency bug this uncovered.** The globe's `freq()` is
+`GLOBE_RADIUS / wavelength` against a UNIT DIRECTION vector, and an arc of `s`
+world units subtends `s / GLOBE_RADIUS` radians — so it advances the noise by
+one unit per wavelength of surface, i.e. `1 / wavelength` against a world
+position. The old arena shader multiplied by `2 * PI / wavelength`. Its
+"22-unit swell" was really a 3.5-unit one, six times too small, which is most
+of why that sea read as noise rather than as water.
+
+Two departures from the globe are deliberate and marked at the line they
+happen. The arena is entirely near field for the LOD's DISTANCE term (the
+camera sits 43 units back), but the grazing term and the distance fades are
+computed rather than compiled in at 1 — a 300-unit plane under that camera
+reaches four times as far at the corners of the frame, and full chop out to the
+last of them was the one thing about this sea that still read as a texture.
+And the night sea sits at `NIGHT_FLOOR` (0.22 of base) against the globe's
+0.075: out at sea a night ocean may go almost black because the player has a
+lantern, a wake and a coastline to read the world by, and in the arena there is
+a fight on the water and nothing else in the frame.
+
+The crest itself is a 120x40 grid in its OWN frame — x along the front, z
+across it and positive the way the wave travels — yawed onto whichever of the
+four cardinal axes `battlesea.ts` rolled. That is what lets the vertex shader
+raise the profile straight out of `position.xz` with nothing to un-rotate, and
+it replaces the old quad's trick of swapping its own scale for an east/west
+crest. `CREST_WIDTH` (3) now does three jobs rather than two: the heave-and-roll
+proximity the hull is rocked by, and the half-width the wall is actually built
+on, so the wave a player sees is the wave the hull is riding. The mesh's own
+skirt lies flat on the sea and is faded out by the profile mask in the alpha
+channel — the sea's waves are a per-pixel normal on an undisplaced plane, so a
+skirt that rose with the field would part company with the water beside it.
 
 ### The rim patch goes on before `postFx.adopt`
 `rimglow.ts` installs an `onBeforeCompile` hook on every

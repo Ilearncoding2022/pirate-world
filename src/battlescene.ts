@@ -22,9 +22,16 @@ import type { Object3D } from 'three';
 import type { Quality } from './quality';
 import type { PostFx } from './postfx';
 import type { ArenaCrest, BattleState, Combatant } from './types';
-import { NOISE_GLSL } from './noiseglsl';
-import { FOG_GLSL } from './fogglsl';
 import { fogUniforms } from './fog';
+import { CREST_BACK_RATIO, CREST_FRONT_RATIO } from './hazardfield';
+import {
+  ARENA_CREST_HEIGHT,
+  CREST_GRID,
+  CREST_VERTEX,
+  SEA_VERTEX,
+  crestFragment,
+  seaFragment,
+} from './battlewave';
 import { GLOBE_RADIUS } from './geo';
 import { HULL_OFFSET } from './ship';
 
@@ -137,169 +144,38 @@ const KEY_AZIMUTH = new Vector3(-0.72, 0, 0.69).normalize();
 /* The sea shader                                                      */
 /* ------------------------------------------------------------------ */
 
-/**
- * The two octaves, as world-unit wavelengths and the world units per second
- * they drift at.
- *
- * Sized against the hull (about 3.1 units long), like every other ship-scale
- * constant: a 22-unit swell is seven hull lengths and a 5.9-unit wave is
- * about two, which are the numbers `waveconstants.ts` authors the real sea's
- * first two layers at. Written here rather than imported from that file
- * because these drive a normal on a flat plane, not a height field the hull
- * is riding, and nothing may come to depend on the two staying equal.
- */
-const SWELL_WAVELENGTH = 22;
-const SWELL_DRIFT = 0.85;
-const SWELL_AMPLITUDE = 0.3;
-const WAVE_WAVELENGTH = 5.9;
-const WAVE_DRIFT = 1.6;
-const WAVE_AMPLITUDE = 0.1;
-
-/**
- * Finite-difference step for the normal, world units, and the factor the
- * slope it measures is exaggerated by.
- *
- * A tenth of the fine octave's wavelength: small enough to read that octave's
- * slope, large enough that two nearly equal noise samples do not cancel into
- * noise of their own. The exaggeration is there because these amplitudes are
- * a fraction of a unit over wavelengths of tens of units, so the true surface
- * is almost flat and would take no glint at all; the same trick `water.ts`
- * plays with its own `uWaveStrength`.
- */
-const NORMAL_STEP = 0.6;
 /*
- * Three was too much, measured by eye against `?battle=1`: at that
- * exaggeration the fine octave's slopes are steep enough that the glint lobe
- * lands on scattered single facets rather than on runs of them, and the sea
- * reads as static. Read this together with SPEC_POWER above -- they are one
- * decision written as two numbers, and moving either alone brings the specks
- * back.
+ * The arena's water is `battlewave.ts`'s now, and so is the wall of it that
+ * crosses the ring.
+ *
+ * What used to live here was two octaves of plain `snoise` on a flat plane,
+ * with its own wavelengths written down beside a note saying nothing may come
+ * to depend on them staying equal to the globe's. That note has been overruled
+ * deliberately: the arena sea read as an older draft of the game's sea,
+ * because it was one, and the fix is for the two to compile the same field
+ * rather than to keep two descriptions of it in step by hand. See that file's
+ * module comment for exactly what is shared and what is still the sphere's
+ * own business.
+ *
+ * The palette below stays here because it is what this module hands the
+ * shader; the deep and ocean bands are `water.ts`'s, so both seas are the
+ * same colour before either is lit.
  */
-const NORMAL_STRENGTH = 1.7;
 
 /**
  * Deep-water colours, taken from `water.ts`'s own ocean and deep bands so the
  * arena's sea is the same sea, and the sky and horizon tints its Fresnel term
- * leans on. Hexes, so they decode from sRGB to linear on the way in exactly
- * as they do there.
+ * leans on. `SEA_SHALLOW` and `SEA_FOAM` are that file's own two as well, and
+ * are here for the crest alone: the thickness tint is authored as a fraction
+ * of the ocean's luminous teal and the froth as the ocean's white. Hexes, so
+ * they decode from sRGB to linear on the way in exactly as they do there.
  */
 const SEA_OCEAN = '#04243a';
 const SEA_DEEP = '#02101c';
 const SEA_SKY = '#3d74b4';
 const SEA_HORIZON = '#7ba4d4';
-
-/**
- * Blinn-Phong glint.
- *
- * `water.ts` runs a highlight three times tighter than this and it is right to
- * there, because the sea it runs it on is displaced geometry lit across a
- * whole planet: the exponent picks out a glitter path and everything either
- * side of it stays dark. Here the surface is one flat plane whose normal is
- * exaggerated by NORMAL_STRENGTH, so an exponent that tight lights only the
- * few facets that happen to align exactly and the sea comes out as white
- * static -- thousands of isolated specks, no path through them. Broadening the
- * lobe is what turns those specks back into water: the same total light, spread
- * over the crests around each one instead of stopping at its edge.
- *
- * Tuned by eye against `?battle=1`, which is the only way this can be tuned;
- * no test in this project asserts on how anything looks.
- */
-const SPEC_POWER = 110;
-const SPEC_STRENGTH = 0.6;
-
-const SEA_VERTEX = [
-  'varying vec3 vWorldPos;',
-  'void main() {',
-  '  vec4 world = modelMatrix * vec4(position, 1.0);',
-  '  vWorldPos = world.xyz;',
-  '  gl_Position = projectionMatrix * viewMatrix * world;',
-  '}',
-].join('\n');
-
-/**
- * @param fine whether the second octave is compiled in at all, from
- *   `quality.waveChop` -- the same field, and the same judgement, that
- *   decides whether the globe's own fine octave runs. On the low tier the
- *   arena sea keeps its swell and loses its texture, which is the cheapest
- *   thing here worth losing.
- */
-function seaFragment(fine: boolean): string {
-  const swellFreq = ((Math.PI * 2) / SWELL_WAVELENGTH).toFixed(6);
-  const waveFreq = ((Math.PI * 2) / WAVE_WAVELENGTH).toFixed(6);
-  return [
-    'uniform float uTime;',
-    'uniform float uDayFactor;',
-    'uniform vec3 uSunDirection;',
-    'uniform vec3 uSunColor;',
-    'uniform vec3 uOcean;',
-    'uniform vec3 uDeep;',
-    'uniform vec3 uSky;',
-    'uniform vec3 uHorizon;',
-    'varying vec3 vWorldPos;',
-    NOISE_GLSL,
-    // Declares uFogColorDay, uFogColorNight and uFogDensity itself; they are
-    // merged into this material's uniforms from `fog.ts` below and must not
-    // be declared a second time here.
-    FOG_GLSL,
-    `const float SWELL_FREQ = ${swellFreq};`,
-    `const float SWELL_DRIFT = ${SWELL_DRIFT.toFixed(3)};`,
-    `const float SWELL_AMPLITUDE = ${SWELL_AMPLITUDE.toFixed(3)};`,
-    `const float WAVE_FREQ = ${waveFreq};`,
-    `const float WAVE_DRIFT = ${WAVE_DRIFT.toFixed(3)};`,
-    `const float WAVE_AMPLITUDE = ${WAVE_AMPLITUDE.toFixed(3)};`,
-    `const float NORMAL_STEP = ${NORMAL_STEP.toFixed(3)};`,
-    `const float NORMAL_STRENGTH = ${NORMAL_STRENGTH.toFixed(3)};`,
-    `const float SPEC_POWER = ${SPEC_POWER.toFixed(1)};`,
-    `const float SPEC_STRENGTH = ${SPEC_STRENGTH.toFixed(3)};`,
-    // The arena is flat and centred on the world origin, so a point on it has
-    // no local vertical of its own; `applyAerial` derives one from the
-    // position it is handed. Lifting both the shaded point and the camera by
-    // GLOBE_RADIUS puts them where the same pair would sit on the globe, so
-    // the grazing-angle and camera-altitude terms in that contract mean here
-    // exactly what they mean out there instead of reading a horizontal
-    // "up" off a plane through the origin.
-    `const vec3 ARENA_LIFT = vec3(0.0, ${GLOBE_RADIUS.toFixed(1)}, 0.0);`,
-    '// Two scrolling octaves, each drifting along its own bearing and',
-    '// evolving slowly on the third noise axis, so the field never reads as',
-    '// one pattern sliding across the frame.',
-    'float seaHeight(vec2 p) {',
-    '  float h = snoise(vec3(p * SWELL_FREQ + vec2(SWELL_DRIFT, 0.42 * SWELL_DRIFT) * uTime * SWELL_FREQ, uTime * 0.05)) * SWELL_AMPLITUDE;',
-    ...(fine
-      ? [
-          '  h += snoise(vec3(p * WAVE_FREQ + vec2(-0.36 * WAVE_DRIFT, WAVE_DRIFT) * uTime * WAVE_FREQ, uTime * 0.13)) * WAVE_AMPLITUDE;',
-        ]
-      : []),
-    '  return h;',
-    '}',
-    'void main() {',
-    '  vec2 p = vWorldPos.xz;',
-    '  float h = seaHeight(p);',
-    '  float hx = seaHeight(p + vec2(NORMAL_STEP, 0.0));',
-    '  float hz = seaHeight(p + vec2(0.0, NORMAL_STEP));',
-    '  vec3 N = normalize(vec3((h - hx) * NORMAL_STRENGTH / NORMAL_STEP, 1.0, (h - hz) * NORMAL_STRENGTH / NORMAL_STEP));',
-    '  vec3 sun = normalize(uSunDirection);',
-    '  vec3 view = normalize(cameraPosition - vWorldPos);',
-    '  // Crests a shade lighter than troughs. The real sea gets this from its',
-    '  // depth ramp; a flat arena floor has one depth, so the height field is',
-    '  // the only thing left to key it to.',
-    '  vec3 base = mix(uDeep, uOcean, clamp(0.5 + h * 1.4, 0.0, 1.0));',
-    '  float ndl = max(dot(N, sun), 0.0);',
-    '  vec3 col = base * (0.22 + 0.95 * ndl * uDayFactor);',
-    '  // Sky in the shallow angles, which is what stops the far water going',
-    '  // black at night and flat at noon. Faded with the day, since there is',
-    '  // no sky shell over this scene to be reflecting after dark.',
-    '  float fres = pow(1.0 - clamp(dot(N, view), 0.0, 1.0), 5.0);',
-    '  col = mix(col, mix(uSky, uHorizon, fres) * (0.18 + 0.82 * uDayFactor), fres * 0.55);',
-    '  vec3 halfway = normalize(sun + view);',
-    '  col += uSunColor * (SPEC_STRENGTH * pow(max(dot(N, halfway), 0.0), SPEC_POWER) * uDayFactor);',
-    '  col = applyAerial(col, vWorldPos + ARENA_LIFT, cameraPosition + ARENA_LIFT, sun, uDayFactor);',
-    '  // A hand-written ShaderMaterial, so `postfx.ts` leaves it out of the',
-    '  // self-encode patch and it does the linear to sRGB step itself, exactly',
-    '  // as `water.ts` and `docks.ts` do on their last line.',
-    '  gl_FragColor = vec4(pow(col, vec3(0.4545454545)), 1.0);',
-    '}',
-  ].join('\n');
-}
+const SEA_SHALLOW = '#1fd0b4';
+const SEA_FOAM = '#e8fbff';
 
 /* ------------------------------------------------------------------ */
 /* Cannonballs, flashes and splashes                                   */
@@ -414,20 +290,26 @@ const FUSE_LOW = 4;
 const FUSE_HIGH = 48;
 
 /**
- * The crest quad: how long and wide it is drawn, how translucent, and how
- * hard it shoves a hull's bob when it passes one.
+ * The crest: how long and how deep it is drawn, and how hard it shoves a
+ * hull's bob when it passes one.
  *
  * `CREST_LENGTH` has to read as a wave crossing the whole arena, and the
  * ring is 40 units across at its widest, so 60 clears that with margin at
  * either end and never shows a hard tip at the frame's edge. `CREST_WIDTH`
- * is about a hull length: wide enough to be seen coming, thin enough that it
- * reads as a line sweeping past rather than a wall sitting on the water, and
- * it is also the distance `update` uses to decide when a hull is "under" the
- * crest for the heave and roll below -- one number doing both jobs, since a
- * hull only needs the extra motion for exactly as long as the crest is
- * actually near it. `CREST_OPACITY` is low for the same reason as the
- * width: a solid sheet reads as geometry, a faint one reads as a disturbance
- * of the water it is lying on, which is what a crest actually is.
+ * is about a hull length, and it is now doing THREE jobs rather than two: it
+ * is the distance `update` uses to decide when a hull is "under" the crest
+ * for the heave and roll below, and it is also the half-width the wave is
+ * actually built on -- `battlewave.ts` raises `hazardfield.ts`'s own crest
+ * profile against it, so the wall of water the player sees is the wall the
+ * hull is being rocked by rather than a sheet drawn near one.
+ *
+ * `CREST_OPACITY` is gone with the quad it belonged to. That quad was a flat
+ * translucent sheet laid on the water, and the note here used to argue that
+ * a faint sheet reads as a disturbance of the sea rather than as geometry
+ * sitting on it. It does -- but only because it has no shape to give away.
+ * A crest with a front face, a lip that breaks and a back it lets down over
+ * does not need to hide, so the wave is drawn solid and it is the profile's
+ * own skirt, not an opacity, that fades it into the sea it stands in.
  *
  * `CREST_HEAVE` and `CREST_ROLL` are on top of the ordinary bob and are
  * shaped, not flat: both are driven by the hull's signed distance from the
@@ -446,9 +328,42 @@ const FUSE_HIGH = 48;
  */
 const CREST_LENGTH = 60;
 const CREST_WIDTH = 3;
-const CREST_OPACITY = 0.4;
 const CREST_HEAVE = 0.35;
 const CREST_ROLL = 0.2;
+
+/**
+ * Where each of `battlesea.ts`'s four crest axes points, and the yaw that
+ * takes the crest mesh's own frame onto it.
+ *
+ * The unit vector is that file's `AXIS_VECTOR` -- north is +z, south -z, east
+ * +x, west -x -- and it is authored twice on purpose rather than imported: it
+ * is pinned by `ArenaCrest`'s own doc comment, and the two files are meant to
+ * be checkable against those words separately. The yaw is the rotation about
+ * Y that sends the mesh's local +z (the way the wave travels, and the axis
+ * the asymmetric profile is written about) onto that vector, so a rotation of
+ * theta sends local +z to (sin theta, 0, cos theta).
+ */
+const CREST_TRAVEL: Record<
+  ArenaCrest['axis'],
+  { readonly x: number; readonly z: number; readonly yaw: number }
+> = {
+  north: { x: 0, z: 1, yaw: 0 },
+  south: { x: 0, z: -1, yaw: Math.PI },
+  east: { x: 1, z: 0, yaw: Math.PI / 2 },
+  west: { x: -1, z: 0, yaw: -Math.PI / 2 },
+};
+
+/**
+ * The crest's footprint across its own travel line, as multiples of
+ * `CREST_WIDTH`: `hazardfield.ts`'s front and back ratios, which are what
+ * make a wave a steep face with a long back rather than a symmetric hump.
+ *
+ * Imported rather than written down, because the geometry has to be exactly
+ * as wide as the profile the vertex shader raises on it: a plane cut short of
+ * the back ratio would clip the wave's own tail off square.
+ */
+const CREST_FOOTPRINT_FRONT = CREST_FRONT_RATIO;
+const CREST_FOOTPRINT_BACK = CREST_BACK_RATIO;
 
 /**
  * How far to the side a fouled hull lists, radians.
@@ -600,6 +515,8 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
     uDeep: { value: new Color(SEA_DEEP) },
     uSky: { value: new Color(SEA_SKY) },
     uHorizon: { value: new Color(SEA_HORIZON) },
+    uShallow: { value: new Color(SEA_SHALLOW) },
+    uFoam: { value: new Color(SEA_FOAM) },
     // One shared object, owned by `fog.ts` and last written by the world's
     // own `globe.update` before the contact froze it. Nothing in the battle
     // branch updates it, which is exactly right: the weather the fight is
@@ -712,23 +629,68 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
 
   /* ---- the crest ---- */
 
-  // A unit quad. `sea` above is rotated the same -Math.PI/2 about X, and
-  // that one rotation is what lets `scale.set(alongX, alongZ, 1)` size this
-  // in world units below without a second rotation to swap the axes for an
-  // east/west crest -- see CREST_LENGTH's own comment.
-  const crestGeometry = new PlaneGeometry(1, 1, 1, 1);
-  const crestMaterial = new MeshBasicMaterial({
-    color: SPRAY_COLOR,
-    transparent: true,
-    opacity: CREST_OPACITY,
-    depthWrite: false,
-    side: DoubleSide,
-  });
-  const crest = new Mesh(crestGeometry, crestMaterial);
+  /*
+   * A real wall of water, on `hazardfield.ts`'s own profile: see
+   * `battlewave.ts` for what is shared with the open sea and why.
+   *
+   * The grid is authored in the crest's OWN frame -- x along the front, z
+   * across it and positive the way the wave travels -- and the whole mesh is
+   * then yawed onto whichever of the four axes the sim rolled. That is what
+   * lets the vertex shader raise the profile straight out of `position.xz`
+   * with nothing to un-rotate, and it replaces the old quad's trick of
+   * swapping its own scale for an east/west crest.
+   *
+   * The plane is `PlaneGeometry`'s usual XY, rotated onto XZ ONCE here rather
+   * than by a transform on the mesh, because the mesh's transform is spoken
+   * for by that yaw.
+   */
+  const crestGeometry = new PlaneGeometry(
+    CREST_LENGTH,
+    CREST_WIDTH * (CREST_FOOTPRINT_BACK + CREST_FOOTPRINT_FRONT),
+    CREST_GRID.along,
+    CREST_GRID.across,
+  );
+  crestGeometry.rotateX(-Math.PI / 2);
+  // The footprint is asymmetric -- a short steep front and a long back -- so
+  // its middle is not the crest line. Sliding the geometry puts z = 0 on the
+  // crest itself, which is the coordinate `battlesea.ts` reports as `at` and
+  // the one the profile is written about.
+  crestGeometry.translate(
+    0,
+    0,
+    (CREST_WIDTH * (CREST_FOOTPRINT_FRONT - CREST_FOOTPRINT_BACK)) / 2,
+  );
+
+  const crestUniforms = {
+    ...seaUniforms,
+    uCrestHeight: { value: ARENA_CREST_HEIGHT },
+    uHalfLength: { value: CREST_LENGTH / 2 },
+    uHalfWidth: { value: CREST_WIDTH },
+    uCrestAlong: { value: new Vector3(1, 0, 0) },
+    uCrestAcross: { value: new Vector3(0, 0, 1) },
+  };
+
+  const crest = new Mesh(
+    crestGeometry,
+    new ShaderMaterial({
+      uniforms: crestUniforms,
+      vertexShader: CREST_VERTEX,
+      fragmentShader: crestFragment(quality.waveChop),
+      // Transparent for its skirt alone: the body of the wave is solid and
+      // has to occlude a hull on the far side of it, which is the whole
+      // point of a wall of water. Depth is tested so a nearer hull covers it
+      // and not written so its own faded edge cannot punch a hole in one.
+      transparent: true,
+      depthWrite: false,
+      side: DoubleSide,
+    }),
+  );
   crest.name = 'arena-crest';
-  crest.rotation.x = -Math.PI / 2;
   crest.position.y = SPLASH_Y;
   crest.visible = false;
+  // It is 60 units long and crosses the whole ring; the corners of the grid
+  // leave the frustum constantly while the middle of the wave is dead centre.
+  crest.frustumCulled = false;
   root.add(crest);
 
   /* ---- the obstacles: a pool of three, each a shoal and a wreck in one ---- */
@@ -1003,20 +965,25 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
         fuseLight.intensity = FUSE_LOW + (FUSE_HIGH - FUSE_LOW) * t * t;
       }
 
-      // The crest: one long thin quad, hidden while nothing is rolling.
+      // The crest: a wall of water yawed onto its own axis, hidden while
+      // nothing is rolling.
       if (state.crest === null) {
         crest.visible = false;
       } else {
-        const sign = state.crest.axis === 'north' || state.crest.axis === 'east' ? 1 : -1;
-        const ns = state.crest.axis === 'north' || state.crest.axis === 'south';
-        const coord = sign * state.crest.at;
+        const travel = CREST_TRAVEL[state.crest.axis];
         crest.visible = true;
-        crest.position.x = ns ? 0 : coord;
-        crest.position.z = ns ? coord : 0;
-        // Perpendicular to the crest's own travel: long across it, thin
-        // along it. See CREST_LENGTH's comment for the axis convention this
-        // relies on.
-        crest.scale.set(ns ? CREST_LENGTH : CREST_WIDTH, ns ? CREST_WIDTH : CREST_LENGTH, 1);
+        // `at` is the crest's coordinate along its own travel direction, so
+        // the centre of the wave is that far out along it and nowhere else.
+        crest.position.x = travel.x * state.crest.at;
+        crest.position.z = travel.z * state.crest.at;
+        crest.rotation.y = travel.yaw;
+        // The same frame, in world space, for the fragment shader: it has to
+        // turn the profile's local gradient into a world horizontal and has
+        // no model matrix of its own to do it with. Rotating about Y by
+        // `yaw` sends local +z to `travel` and local +x to its starboard,
+        // which is the pair written out here.
+        crestUniforms.uCrestAcross.value.set(travel.x, 0, travel.z);
+        crestUniforms.uCrestAlong.value.set(travel.z, 0, -travel.x);
       }
 
       // The obstacles: rolled once at the sim's construction and never

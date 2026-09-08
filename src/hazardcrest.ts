@@ -45,10 +45,10 @@ import { freq } from './waveconstants';
  * the band's torn ends) and it is still one `snoise` tap, which is why they are
  * all keyed to this wavelength rather than each picking their own.
  */
-const FROTH_WAVELENGTH = 2.2;
+export const FROTH_WAVELENGTH = 2.2;
 
 /** How fast that breakup noise drifts, direction units per second. Slow: the froth belongs to the wave, not to the wind. */
-const FROTH_DRIFT = 0.35;
+export const FROTH_DRIFT = 0.35;
 
 /**
  * Where the crest's foam band sits and how wide it is, both as fractions of
@@ -69,8 +69,8 @@ const FROTH_DRIFT = 0.35;
  * The rest of the face is now the streaks below, which leave water between
  * them.
  */
-const FOAM_BIAS = 0.1;
-const FOAM_BAND = 0.28;
+export const FOAM_BIAS = 0.1;
+export const FOAM_BAND = 0.28;
 
 /**
  * How far the froth noise is allowed to walk that band's centre across the
@@ -99,9 +99,9 @@ const FOAM_BAND = 0.28;
  * ends in broken water rather than in a stripe that dims to nothing, and it is
  * the ends that a mesa gave itself away at.
  */
-const FOAM_WANDER = 0.12;
-const FOAM_TEAR = 0.35;
-const FOAM_TEAR_INV = 1 / (1 - FOAM_TEAR);
+export const FOAM_WANDER = 0.12;
+export const FOAM_TEAR = 0.35;
+export const FOAM_TEAR_INV = 1 / (1 - FOAM_TEAR);
 
 /**
  * The streaks that carry the foam down the face below the lip band, as two
@@ -120,10 +120,10 @@ const FOAM_TEAR_INV = 1 / (1 - FOAM_TEAR);
  * `STREAK_LIFE` walks the noise's third axis so streaks are born and die
  * where they are instead of being one rigid pattern in transit.
  */
-const STREAK_WIDTH = 0.5;
-const STREAK_LENGTH = 2.4;
-const STREAK_FALL = 0.6;
-const STREAK_LIFE = 0.15;
+export const STREAK_WIDTH = 0.5;
+export const STREAK_LENGTH = 2.4;
+export const STREAK_FALL = 0.6;
+export const STREAK_LIFE = 0.15;
 
 /**
  * How white the streaks get, and the noise window that decides how much of
@@ -138,9 +138,9 @@ const STREAK_LIFE = 0.15;
  * already computes, the face runs at 20 to 35% foam over about a quarter of
  * it, against the 100% over half of it that it used to.
  */
-const STREAK_FOAM = 0.5;
-const STREAK_LO = 0.2;
-const STREAK_HI = 0.58;
+export const STREAK_FOAM = 0.5;
+export const STREAK_LO = 0.2;
+export const STREAK_HI = 0.58;
 
 /**
  * How hard the crest's own gradient hands the core shader's four smooth-normal
@@ -170,7 +170,7 @@ const CREST_STEEP = 0.6;
  * wave field's own `w0` in a gale -- enough to read as light coming through
  * the water, not enough to turn the crest into a lamp.
  */
-const CREST_LIFT = 0.4;
+export const CREST_LIFT = 0.4;
 
 /**
  * Extra chop on the crest's two shoulders, as a multiplier on the core's
@@ -194,7 +194,7 @@ const CREST_LIFT = 0.4;
  * both at the middle of the crest and at its ends -- two bands, on the two
  * shoulders, and nowhere else.
  */
-const SHOULDER_CHOP = 1.2;
+export const SHOULDER_CHOP = 1.2;
 
 /**
  * The thickness tint: how far a standing wall of water is dragged toward a
@@ -209,8 +209,8 @@ const SHOULDER_CHOP = 1.2;
  * HEIGHT's shape rather than the mask's square; without it the tint collapses
  * onto the lip, where the foam has already covered it.
  */
-const CREST_THICK = 0.45;
-const CREST_SCOPE = 3.0;
+export const CREST_THICK = 0.45;
+export const CREST_SCOPE = 3.0;
 
 /**
  * The tint itself, derived from `uShallow` rather than from a new uniform.
@@ -222,9 +222,9 @@ const CREST_SCOPE = 3.0;
  * green more than in blue, because thick water backlit through its own body
  * goes green before it goes bright.
  */
-const THICK_SCALE = 0.85;
-const THICK_GREEN = 0.05;
-const THICK_BLUE = 0.02;
+export const THICK_SCALE = 0.85;
+export const THICK_GREEN = 0.05;
+export const THICK_BLUE = 0.02;
 
 /**
  * The lip band the Fresnel rim rides, and how much sky it catches.
@@ -240,9 +240,9 @@ const THICK_BLUE = 0.02;
  * a wave wants a bright line; over the ridge it is a lens, so the rim curves
  * down and away with the crest without a constant moving.
  */
-const LIP_LO = 0.45;
-const LIP_HI = 0.9;
-const LIP_RIM = 0.4;
+export const LIP_LO = 0.45;
+export const LIP_HI = 0.9;
+export const LIP_RIM = 0.4;
 
 /** `hazHeight0` over a full great wave, so the thickness term is 0..1 in the shader. */
 const INV_CREST_HEIGHT = 1 / GREAT_CREST_HEIGHT;

@@ -323,22 +323,31 @@ export function hazardStrength(h: Hazard): number {
  * Both profiles are branchless inside themselves: `max(..., 0.0)` is what
  * gives `bump` and the funnel their compact support, rather than an `if`.
  */
-export const HAZARD_GLSL: string = [
-  `const int MAX_HAZARDS = ${MAX_HAZARDS};`,
-  'uniform int uHazCount;',
-  'uniform vec3 uHazCentre[MAX_HAZARDS];',
-  'uniform vec3 uHazEast[MAX_HAZARDS];',
-  'uniform vec3 uHazNorth[MAX_HAZARDS];',
-  '// x: kind (0 crest, 1 maelstrom). y: half-length or radius, direction units.',
-  '// z: half-width, direction units (0 for a maelstrom).',
-  '// w: amplitude * envelope * distance fade, WORLD units.',
-  'uniform vec4 uHazShape[MAX_HAZARDS];',
+/**
+ * The two half-width ratios, as the GLSL `const float`s both crests compile.
+ *
+ * Split out of `HAZARD_GLSL` below so the arena's own wall of water
+ * (`battlewave.ts`) can declare the identical pair without dragging the
+ * sphere's uniform block in with it. Spliced back into `HAZARD_GLSL`
+ * unchanged, so the shader the globe compiles is the string it always was.
+ */
+export const HAZ_CREST_RATIO_GLSL: string = [
   `const float HAZ_CREST_FRONT = ${CREST_FRONT.glsl};`,
   `const float HAZ_CREST_BACK = ${CREST_BACK.glsl};`,
-  `const float HAZ_RIM_C = ${RIM_CENTRE.glsl};`,
-  `const float HAZ_RIM_INV = ${RIM_INV.glsl};`,
-  `const float HAZ_RIM_RATIO = ${RIM_RATIO.glsl};`,
-  `const float HAZ_MIN_SIZE = ${MIN_SIZE.glsl};`,
+].join('\n');
+
+/**
+ * `hazBump`, `hazCrest` and `hazRidge`: the three profiles, and nothing that
+ * knows where they are being evaluated.
+ *
+ * Split out for the same reason `HAZ_CREST_RATIO_GLSL` above is, and it is
+ * the more important of the two: the arena's crest is meant to be the SAME
+ * wave the open sea raises, and the only way to be sure of that is for both
+ * to compile these characters rather than two transcriptions of them. Nothing
+ * here reads a uniform, so it costs the arena no slot block; it is spliced
+ * back into `HAZARD_GLSL` unchanged.
+ */
+export const HAZARD_PROFILE_GLSL: string = [
   '// (1 - x*x)^2 inside |x| < 1, zero outside. Its own square root is the',
   '// wider, softer skirt the foam hook rides, and it is also the maelstrom',
   '// bowl and the maelstrom lip below: one shape, rounded one way, is one',
@@ -382,6 +391,24 @@ export const HAZARD_GLSL: string = [
   'float hazRidge(float x) {',
   '  return hazBump(x * x);',
   '}',
+].join('\n');
+
+export const HAZARD_GLSL: string = [
+  `const int MAX_HAZARDS = ${MAX_HAZARDS};`,
+  'uniform int uHazCount;',
+  'uniform vec3 uHazCentre[MAX_HAZARDS];',
+  'uniform vec3 uHazEast[MAX_HAZARDS];',
+  'uniform vec3 uHazNorth[MAX_HAZARDS];',
+  '// x: kind (0 crest, 1 maelstrom). y: half-length or radius, direction units.',
+  '// z: half-width, direction units (0 for a maelstrom).',
+  '// w: amplitude * envelope * distance fade, WORLD units.',
+  'uniform vec4 uHazShape[MAX_HAZARDS];',
+  HAZ_CREST_RATIO_GLSL,
+  `const float HAZ_RIM_C = ${RIM_CENTRE.glsl};`,
+  `const float HAZ_RIM_INV = ${RIM_INV.glsl};`,
+  `const float HAZ_RIM_RATIO = ${RIM_RATIO.glsl};`,
+  `const float HAZ_MIN_SIZE = ${MIN_SIZE.glsl};`,
+  HAZARD_PROFILE_GLSL,
   'float hazardHeight(vec3 p) {',
   '  float h = 0.0;',
   '  for (int i = 0; i < MAX_HAZARDS; i++) {',
