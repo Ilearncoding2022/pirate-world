@@ -196,6 +196,138 @@ export interface WindState {
   readonly along: number;
   /** Eased push along the ship's starboard axis, world units/s. */
   readonly across: number;
+  /**
+   * Which half of the cycle the wind is in. A LULL is never a calm — the
+   * speed is floored at `LULL_SPEED` — it is simply the quiet phase between
+   * two events.
+   */
+  readonly phase: 'lull' | 'event';
+  /** Seconds into the current phase. */
+  readonly phaseTime: number;
+  /** How long the current phase lasts, seconds. */
+  readonly phaseDuration: number;
+  /**
+   * Steps by one at every phase change, starting at 0.
+   *
+   * `weather.ts` rolls on the STEP rather than on the phase name, so a
+   * consumer that misses a frame still rolls exactly once per phase and one
+   * that runs twice in a phase rolls not at all. It is a counter and not a
+   * flag for that reason.
+   */
+  readonly phaseIndex: number;
+  /**
+   * The event's own rise-and-fall ramp, 0..1, and exactly 0 through every
+   * lull.
+   *
+   * This is the shape `wind.ts` already multiplies its cap by. The weather
+   * rides it rather than deriving a second envelope from `speed`, so a squall
+   * and the gale that carries it peak together and stop together whatever the
+   * coast has done to the cap in between.
+   */
+  readonly envelope: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* Weather — cells, squalls, and the one state everything downstream reads */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a weather cell carries. Two kinds and no more: a storm is dark, wet
+ * and windy, a fog bank is none of those and simply takes the horizon away.
+ */
+export type CellKind = 'storm' | 'fog';
+
+/**
+ * One region of weather drifting over the globe, owned by `weathercells.ts`
+ * and mutated in place for as long as it lives.
+ *
+ * Deliberately the same skeleton as a `Hazard`: a unit centre and a unit
+ * travel tangent, both carried by parallel transport rather than held as a
+ * compass bearing, for the reason `WindState.direction` records — an angle in
+ * a tangent frame spins where the meridians converge and the thing holding it
+ * wanders. A cell is bigger and slower than a hazard and shades rather than
+ * displaces, but it is moved by exactly the same arithmetic.
+ */
+export interface WeatherCell {
+  readonly kind: CellKind;
+  /** Unit direction of the centre. Mutated in place as the cell drifts. */
+  readonly centre: Vector3;
+  /** Unit tangent at `centre`: the way it is drifting. */
+  readonly north: Vector3;
+  /** Radius at full strength, world units. Fixed for the cell's life. */
+  readonly radius: number;
+  /** Lifecycle envelope, 0..1: grows in, holds, fades out. */
+  readonly strength: number;
+  /** Storm cells only. A fog cell is never lit from inside. */
+  readonly lightning: boolean;
+  /** Seconds since it formed. */
+  readonly age: number;
+  /** How long it lives in total, seconds. */
+  readonly life: number;
+}
+
+/**
+ * The cell population, as everything downstream sees it. One object, mutated
+ * in place for the life of the run, exactly as `HazardState` and `WindState`
+ * are.
+ *
+ * The three `AtShip` numbers are sampled ANALYTICALLY from `live`, never read
+ * back off `weathermap.ts`'s texture. The map is 2.45 world units per texel
+ * and a frame stale; these are exact and this frame's. Every rule that
+ * decides a number — the envelopes, the visibility, the wind's floor, the
+ * chart's stamp — reads these. Only the sky reads the map.
+ */
+export interface CellsState {
+  readonly live: readonly WeatherCell[];
+  /** Strongest storm contribution at the ship, 0..1. */
+  readonly stormAtShip: number;
+  /** Strongest fog contribution at the ship, 0..1. */
+  readonly fogAtShip: number;
+  /** True when the strongest storm at the ship is one that carries lightning. */
+  readonly lightningAtShip: boolean;
+}
+
+/** The label the HUD prints. Derived; nothing else may branch on it. */
+export type WeatherKind = 'clear' | 'overcast' | 'rain' | 'storm' | 'fog';
+
+/**
+ * The weather at the ship, produced by `weather.ts` and read by everything
+ * else — the sky, the lights, the haze, the rain, the plant, the spawn rolls,
+ * the scope.
+ *
+ * It is the ONE place the two sources meet. A squall (rolled off the wind's
+ * phases) and a cell (drifting over the globe) are combined here by `max`
+ * before any smoothing, so nothing downstream can tell them apart or has to.
+ *
+ * Every envelope is 0..1 and **zero means the game as it shipped**: at
+ * all-zero the sky, the sea, the lights and the scope are bit-for-bit what
+ * they were before any of this existed. That is a hard contract, not an
+ * aspiration — see docs/WEATHER_PLAN.md, Trap 2.
+ */
+export interface WeatherState {
+  readonly kind: WeatherKind;
+  /** Cloud build-up, 0..1. Every event greys the sky a little; a storm blackens it. */
+  readonly cover: number;
+  /** Rain density, 0..1. */
+  readonly rain: number;
+  /** Storm darkness, 0..1. Dims the key light, the sky and the solar panels. */
+  readonly storm: number;
+  /** Sea fog, 0..1. */
+  readonly fog: number;
+  /**
+   * Lightning, 0..1. Non-zero for a few hundred milliseconds at a time, in
+   * bursts of two or three pulses. Additive wherever it is used, so it reads
+   * at night.
+   */
+  readonly flash: number;
+  /**
+   * How far the ship can see, world units, in [VIS_MIN, RADAR_RANGE].
+   *
+   * The one number the weather and the chart meet at: the scope masks itself
+   * beyond it, and the chart is stamped with exactly the disc the scope could
+   * see. Clear weather is `RADAR_RANGE` exactly.
+   */
+  readonly visibility: number;
 }
 
 /* ------------------------------------------------------------------ */

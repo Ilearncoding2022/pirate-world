@@ -81,3 +81,43 @@ export function normalizeHeadingDeg(headingRad: number): number {
   deg = ((deg % 360) + 360) % 360;
   return deg;
 }
+
+/**
+ * Longitude half-width, radians, of the row at latitude `lat` inside a
+ * spherical cap of angular radius `angRadius` centred at latitude `lat0`.
+ *
+ * The one piece of arithmetic two unrelated systems both need and must not
+ * each derive: `chart.ts` stamps a disc of discovered water into an
+ * equirectangular bitmap, and `weathermap.ts` stamps a weather cell into an
+ * equirectangular texture. Both walk rows of latitude and need to know how
+ * many columns of that row the disc covers. Written twice they would drift,
+ * and the drift would show as a cell whose shading did not line up with the
+ * cell the scope drew.
+ *
+ * Returns:
+ *   - `Math.PI` when the whole row is inside the cap, which is what a cap
+ *     covering a pole does to every row above it. The caller writes the
+ *     entire row rather than a band, and the antimeridian is not a special
+ *     case because there is no band to wrap.
+ *   - `-1` when no part of the row is inside. The caller skips the row.
+ *   - otherwise a half-width in (0, PI): the row is covered between
+ *     `lon0 - w` and `lon0 + w`, which the caller wraps itself.
+ *
+ * From the spherical law of cosines,
+ * `cos θ = sin φ0 sin φ + cos φ0 cos φ cos Δλ`, solved for `Δλ`. Near a pole
+ * `cos φ0 cos φ` goes to zero and the quotient blows up; the two clamps below
+ * catch that before it becomes a NaN, so a cap at the pole and a row at the
+ * pole are both ordinary answers rather than special cases.
+ */
+export function capColumns(lat: number, lat0: number, angRadius: number): number {
+  if (!(angRadius > 0)) return -1;
+  const denom = Math.cos(lat0) * Math.cos(lat);
+  const num = Math.cos(angRadius) - Math.sin(lat0) * Math.sin(lat);
+  // A row through or beside a pole: `denom` is zero or all but, and the
+  // comparison is between the two latitudes alone.
+  if (denom < 1e-9) return num <= 0 ? Math.PI : -1;
+  const c = num / denom;
+  if (c <= -1) return Math.PI;
+  if (c >= 1) return -1;
+  return Math.acos(c);
+}

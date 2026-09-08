@@ -12,8 +12,13 @@ export interface Wind {
    * Runs after `energy.update` and before `ship.update`. After energy because
    * the berth verdict it shelters behind is this frame's; before the ship
    * because the ship spends the push this writes.
+   *
+   * `stormLift` is `CellsState.stormAtShip`, 0..1, and is why `weathercells.ts`
+   * runs BEFORE this in the loop: a storm cell floors the wind so that a storm
+   * always blows. Defaulted, so every caller that does not know about weather
+   * -- every existing test among them -- gets exactly the wind it had.
    */
-  update(dt: number, ship: ShipState, energy: EnergyState): void;
+  update(dt: number, ship: ShipState, energy: EnergyState, stormLift?: number): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -114,6 +119,22 @@ const LULL_MAX = 15;
  * is exactly where it was and only the bottom moved.
  */
 export const LULL_SPEED = 1.0;
+
+/**
+ * The share of its own cap the wind is floored at inside a full storm cell.
+ *
+ * A storm has to blow, and `weathercells.ts` rolls its cells without asking
+ * the wind what phase it is in, so the two have to be reconciled somewhere.
+ * Here, and as a floor: 0.8 of the cap is a gale by any reading -- 8.3 kn
+ * offshore against the 10.4 the wind can reach at all -- while leaving the
+ * gust envelope free to put the wind ABOVE it, so a storm cell during a
+ * strong event is still stronger than one during a lull.
+ *
+ * Not 1.0 deliberately. At the cap the sea saturates (`SEA_WIND_BIAS`) and
+ * every storm would look and sail identically; a little under it, the wind
+ * inside a cell still has somewhere to go.
+ */
+export const CELL_WIND_LIFT = 0.8;
 
 /**
  * Seconds an event spends ramping in, and again ramping out.
@@ -254,6 +275,11 @@ interface MutableWindState {
   cap: number;
   along: number;
   across: number;
+  phase: 'lull' | 'event';
+  phaseTime: number;
+  phaseDuration: number;
+  phaseIndex: number;
+  envelope: number;
 }
 
 /**
@@ -282,6 +308,14 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
     cap: COAST_CAP,
     along: 0,
     across: 0,
+    // The phase reading, for `weather.ts`. Every one of these is a local this
+    // function already kept; they are exposed rather than invented, and the
+    // opening values below match the lull the run opens on.
+    phase: 'lull',
+    phaseTime: 0,
+    phaseDuration: 0,
+    phaseIndex: 0,
+    envelope: 0,
   };
 
   /**
@@ -346,7 +380,7 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
     return OPEN_SEA_DISTANCE;
   }
 
-  function update(dt: number, ship: ShipState, energy: EnergyState): void {
+  function update(dt: number, ship: ShipState, energy: EnergyState, stormLift = 0): void {
     // A frame that advanced no time moves no air. Returning leaves the last
     // true reading standing rather than rewriting the HUD with a stale zero.
     if (!(dt > 0)) return;
@@ -382,6 +416,9 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
     if (phaseTime >= phaseDuration) {
       phaseTime -= phaseDuration;
       inEvent = !inEvent;
+      // Counted, not flagged: `weather.ts` rolls on the step, so a consumer
+      // that misses a frame still rolls exactly once for the phase it missed.
+      state.phaseIndex++;
       if (inEvent) {
         phaseDuration = EVENT_MIN + rng() * (EVENT_MAX - EVENT_MIN);
         // A bearing is how an event is AUTHORED -- one compass angle, drawn
@@ -415,6 +452,10 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
       const rise = fade > 0 ? phaseTime / fade : 1;
       const fall = fade > 0 ? (phaseDuration - phaseTime) / fade : 1;
       const ramp = Math.max(0, Math.min(1, Math.min(rise, fall)));
+      // Published as-is. `weather.ts` rides this rather than deriving its own
+      // envelope from `speed`, so a squall and the gale carrying it peak
+      // together whatever the coast has done to `cap` in between.
+      state.envelope = ramp;
 
       // Remap the noise's [-1, 1] into [GUST_FLOOR, 1].
       const n = gustNoise(phaseTime * GUST_RATE + gustLane, 0);
@@ -426,8 +467,34 @@ export function createWind(terrain: Terrain, heightMap: HeightMap, seed = WIND_S
       // stop. The cap and the gust shape above are untouched.
       state.speed = Math.max(LULL_SPEED, ramp * gust * state.cap);
     } else {
+      state.envelope = 0;
       state.speed = LULL_SPEED;
     }
+
+    /*
+     * A storm cell floors the wind.
+     *
+     * The one coupling between the weather and the wind, and it runs one way:
+     * a storm cell makes the wind blow, the wind never makes a cell. Without
+     * it a storm that formed during a lull would be a dark, wet, flat calm,
+     * which reads as a bug rather than as weather.
+     *
+     * A FLOOR, not an offset, for the same reason `LULL_SPEED` is one: the top
+     * of the range is exactly where it was and only the bottom moves, so a
+     * gale inside a cell is the gale it would have been. And it lifts the
+     * SPEED only -- the bearing stays the phase's own, so a storm cell does
+     * not get to choose which way it blows.
+     */
+    if (stormLift > 0) {
+      const lift = stormLift > 1 ? 1 : stormLift;
+      state.speed = Math.max(state.speed, lift * CELL_WIND_LIFT * state.cap);
+    }
+
+    // The phase reading, published after every branch above has run so it
+    // describes the phase this frame actually spent.
+    state.phase = inEvent ? 'event' : 'lull';
+    state.phaseTime = phaseTime;
+    state.phaseDuration = phaseDuration;
 
     // ---- Carry the wind across the ship's own motion ----------------------
     /*

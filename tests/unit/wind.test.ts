@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
-import { createWind, LULL_SPEED, OCEAN_CAP } from '../../src/wind';
+import { createWind, CELL_WIND_LIFT, LULL_SPEED, OCEAN_CAP } from '../../src/wind';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { createHeightMap } from '../../src/heightmap';
 import { latLonToDir, headingToForward } from '../../src/geo';
@@ -65,6 +65,66 @@ describe('wind', () => {
     // length of the run.
     const spread = Math.max(...bearings) - Math.min(...bearings);
     expect(spread).toBeGreaterThan(1);
+  });
+
+  it('steps phaseIndex once per phase and holds envelope at zero through a lull', () => {
+    const terrain = createTerrain(DEFAULT_SEED);
+    const heightMap = createHeightMap(terrain, 256, 128);
+    const wind = createWind(terrain, heightMap);
+    const ship = stationaryShip();
+    const energy = energyState('drain');
+    const dt = 0.05;
+
+    let lastIndex = wind.state.phaseIndex;
+    let lastPhase = wind.state.phase;
+    let transitions = 0;
+    for (let i = 0; i < 300 / dt; i++) {
+      wind.update(dt, ship, energy);
+      const stepped = wind.state.phaseIndex - lastIndex;
+      // Never more than one step in a frame, and a step exactly when the
+      // phase name changed: `weather.ts` rolls on the step and would roll
+      // twice for one phase, or not at all, if either half of that failed.
+      expect(stepped === 0 || stepped === 1).toBe(true);
+      if (stepped === 1) {
+        expect(wind.state.phase).not.toBe(lastPhase);
+        transitions++;
+      }
+      lastIndex = wind.state.phaseIndex;
+      lastPhase = wind.state.phase;
+
+      expect(wind.state.phaseTime).toBeGreaterThanOrEqual(0);
+      expect(wind.state.phaseTime).toBeLessThanOrEqual(wind.state.phaseDuration + 1e-9);
+      expect(wind.state.envelope).toBeGreaterThanOrEqual(0);
+      expect(wind.state.envelope).toBeLessThanOrEqual(1);
+      // The contract `weather.ts` rides: a lull has no envelope at all.
+      if (wind.state.phase === 'lull') expect(wind.state.envelope).toBe(0);
+    }
+    // 300 s of phases that are at most 30 s long has to cycle several times.
+    expect(transitions).toBeGreaterThan(5);
+  });
+
+  it('floors the speed inside a storm cell without touching the bearing', () => {
+    const terrain = createTerrain(DEFAULT_SEED);
+    const heightMap = createHeightMap(terrain, 256, 128);
+    const wind = createWind(terrain, heightMap);
+    const lifted = createWind(terrain, heightMap);
+    const ship = stationaryShip();
+    const energy = energyState('drain');
+    const dt = 0.05;
+
+    for (let i = 0; i < 120 / dt; i++) {
+      wind.update(dt, ship, energy);
+      lifted.update(dt, ship, energy, 1);
+      // The floor: inside a full cell the wind is never under its share of
+      // the cap, whatever phase it is in.
+      expect(lifted.state.speed).toBeGreaterThanOrEqual(
+        CELL_WIND_LIFT * lifted.state.cap - 1e-6,
+      );
+      // And never under the wind it would have been: a floor, not a cap.
+      expect(lifted.state.speed).toBeGreaterThanOrEqual(wind.state.speed - 1e-6);
+      // The lift moves the speed only. Same seed, same draws, same compass.
+      expect(lifted.state.bearing).toBeCloseTo(wind.state.bearing, 9);
+    }
   });
 
   it('eases the push to zero once docked', () => {
