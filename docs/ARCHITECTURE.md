@@ -45,6 +45,10 @@ These have bitten us once. Do not reinterpret them in a consumer.
   it is the one the wind is actually kept as; `bearing` is derived from it.
   Prefer the vector for anything geometric. Same rule as `ShipState.forward`
   against `ShipState.heading`.
+- `WeatherState.storm`, `.rain`, `.fog`, `.cover` and `.flash` are **dimensionless [0, 1] envelopes**, and **zero means the game as it shipped**: at all-zero the sky, the sea, the lights and the scope are what they were before any of it existed. That is a hard contract — see **Weather**.
+- `WeatherState.visibility` is **world units**, in `[VIS_MIN, RADAR_RANGE]`, and is the one number the weather and the chart meet at: the scope masks itself beyond it and the chart is stamped with exactly the disc the scope could see. Clear weather is `RADAR_RANGE` exactly.
+- `WeatherCell.radius` is **ship-scale world units**; its `centre` and `north` are **unit vectors**, transported, never held as a bearing — the same rule as `WindState.direction` and for the same reason.
+- `weathermap.ts`'s texture is **data, not colour**, in exactly the sense `wakemap.ts`'s is: R is storm, G is fog, B is a lightning flag, and its `colorSpace` is `NoColorSpace`.
 - `Water.offsets` (and the `WaveOffsets` that `wavefield.ts` and `ship.ts`
   read) are in **direction space** — already divided by `GLOBE_RADIUS` —
   never world units. `water.ts` integrates them that way so its shader can add
@@ -248,7 +252,7 @@ shader.
 |---|---|---|
 | `geo.ts` | `GLOBE_RADIUS`, `latLonToDir`, `dirToLatLon`, `tangentFrame`, `headingToForward`, `normalizeHeadingDeg` | conventions |
 | `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode`, `WindState` | interfaces only |
-| `quality.ts` | `QualityTier`, `QualitySettings`, `Quality`, `createQuality(search?)`, `QUALITY_STORAGE_KEY` | resolved once at startup (`?quality=` beats `localStorage` beats `'high'`); frozen, read-only table everything built after it treats as fixed; `reflectionSize`/`reflectionFacesPerFrame` of 0 means the reflection pass is absent, not idle |
+| `quality.ts` | `QualityTier`, `QualitySettings`, `Quality`, `createQuality(search?)`, `QUALITY_STORAGE_KEY` | resolved once at startup (`?quality=` beats `localStorage` beats `'high'`); frozen, read-only table everything built after it treats as fixed; `reflectionSize`/`reflectionFacesPerFrame` of 0 means the reflection pass is absent, not idle, and `rainDrops` of 0 means the same for `rain.ts` |
 | `layers.ts` | `LAYER_DEFAULT`, `LAYER_REFLECTED` | the two `Object3D.layers` bit indices every rendering stream shares; wiring constants, not world- or ship-scale |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
 | `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once; `aux`/`horizon` start `null` and are filled in later by `land.ts`'s startup bake (`terrainbake.ts`) |
@@ -261,22 +265,27 @@ shader.
 | `waveconstants.ts` | `SWELL_WAVELENGTH`, `WAVE_WAVELENGTH`, `CHOP_WAVELENGTH`, `AXIS_WAVE`, `AXIS_CHOP`, `DISPLACE_AMPLITUDE`, `freq`, `freqNumber`, `vec3Literal` | the one source both `waterglsl.ts` (GPU) and `wavefield.ts` (CPU) read, so the two wave fields can never numerically drift apart — see **The wave field** |
 | `waterglsl.ts` | `WATER_UNIFORMS`, `waterWavefield`, `waterDepth`, `WATER_LIGHTING_HEAD`/`_TAIL`, `waterFoam`, `WATER_FOAM_TAIL`, `WATER_OUTPUT` | the water fragment shader, as named chunks `water.ts` assembles; see **Shader notes** for the plugin hook seams between them |
 | `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective blend toward the atmosphere colour, thickened at grazing angles and weakened with camera altitude, capped at `FOG_MAX_AMOUNT`; called from water and land |
-| `fog.ts` | `fogUniforms`, `updateFog(env)` | owns the three uniforms `applyAerial` reads; called from `globe.update` before water and land |
+| `fog.ts` | `fogUniforms`, `updateFog(env, weather?)` | owns the seven uniforms `applyAerial` reads; called from `globe.update` before water and land. `uFogMax` is a uniform whose resting value is the constant `FOG_MAX_AMOUNT` used to be; `uFogBankColor` and `uFogStormColor` are the two endpoints weather fades the distance toward, and they pull opposite ways — a bank whitens, a downpour darkens. Deliberately does NOT rewrite the day/night colours: `battlescene.ts` merges this same object and `globe.update` does not run during a fight, so anything written here would freeze into the arena's haze |
+| `weathermap.ts` | `createWeatherMap()`, `bakeWeatherMap(cells, data, w, h)`, `WEATHERMAP_GLSL`, `weatherMapUniforms`, `MAP_WIDTH/HEIGHT/HZ` | the live cells baked into a 512×256 RGBA8 equirect texture at 4 Hz: R storm, G fog, B a lightning flag, `NoColorSpace`. Data, not colour, in `wakemap.ts`'s sense. `WEATHERMAP_GLSL` declares `uWeatherMap` itself and is pasted after `HEIGHTMAP_GLSL`, whose `dirToEquirect` it reuses. Read by the water, the land and the cloud deck; read by nothing that decides a number — see **Weather** |
 | `water.ts` | `createWater(terrain, heightMap, waterBodies, plugins?: WaterPlugin[])`, `WaterPlugin`, `WaterHook` | full sphere at `GLOBE_RADIUS`; `update(dt, env, wind, ship, camera)` — the only module that reads the weather; exposes `offsets`, the three wave layers' integrated drift (direction-space, read-only), for `wavefield.ts`'s CPU port; see **Shader notes** for the plugin contract |
 | `wavefield.ts` | `snoise`, `sampleWave`, `waveHeight`, `waveNormalBasis`, `WaveOffsets`, `WaveSample` | float32-rounded CPU port of `waterglsl.ts`'s swell+wave `waveField`; `ship.ts` rides this, the player sees the GPU copy — see **The wave field** |
 | `hazardfield.ts` | `HAZARD_GLSL`, `hazardHeight(dir, hazards)`, `MAX_HAZARDS`, the crest/funnel sizes | the SECOND height field, beside `waveField` and never inside it: GLSL for three consumers and a float32 CPU port for the hull. Polynomial plus one `sqrt`, which is what makes its parity free — see **Hazards** |
 | `waterpatch.ts` | `createWaterPatch(water, quality)`, `WaterPatch` | ship-following grid that actually displaces in the vertex shader, reusing the sphere's already-assembled fragment shader byte for byte; built after the water plugins are woven in |
 | `grid.ts` | `createGrid()` | lat/long lines |
-| `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
-| `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS`, `START_ELAPSED` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time |
+| `sky.ts` | `createSky()`, `skyHorizonColor(env, out)`, `ATMOSPHERE_COLOR` | `update(dt, env, weather?)`. The DOME carries the storm (`uGloom` greys the day pair before the day/night mix, so a stormy midnight is still midnight) and the flash; the SHELL carries neither, because a limb is an orbital effect and a storm is a deck one and the two already cross-fade. The dome reads the AT-SHIP envelope and never the weather map: it is what shows between the clouds, and under a distant cell the clouds carry the weather while the gaps stay the day's own colour. graded sky dome + atmosphere shell + starfield. The dome and the shell are a CROSS-FADE, not two effects: the dome fades out over `SKY_FADE_LO`..`SKY_FADE_HI` of camera altitude and the shell fades in over the same two, because a limb is something you see from outside an atmosphere and additively over a lit sky it bleaches the horizon. `skyHorizonColor` is what `fog.ts` fades the sea toward |
+| `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS`, `START_ELAPSED` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time. `update(dt, env, weather?)`: a storm dims the key light by 0.7 and the hemisphere bounce by only 0.35 — that split is the look, since killing both equally is just night — and a flash is ADDED to each so it reads after dark. It stays the sole writer of `WorldEnv`; the weather reaches the lights and never `env`, because the fog, the sky and the water all mix by `sunColor` and `dayFactor` and a grey sun would double the gloom in every one of them |
 | `celestial.ts` | `createCelestial()` | the sun disc, the moon and the moon's halo as things you can see; draws only what `daynight.ts` already decided and writes nothing |
-| `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices |
+| `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices. `update(dt, env, weather?)`: `uCover`/`uGloom` are the at-ship envelopes and `weatherAt(uWeatherMap, nWorld)` is the map, maxed together per pixel, so a cell forty units away fills in and blackens its own patch of sky. `COVER_GAIN` lowers `uThreshold`, and it is applied to `thrBase` — i.e. BEFORE the two-octave early-out — so a storm genuinely makes cloud rather than merely darkening what was there. `uFlashLocal` decides whether a strike lights the whole deck (a squall, which has no place) or only the cell that threw it (`wx.b`) |
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
 | `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
-| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | burn / solar / dock charge, and the bought cell behind them; owns `EnergyState`; `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
-| `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast |
-| `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards** |
+| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | `update`'s optional sixth argument is the weather: a full storm leaves 5% of the panels and a full fog bank half, moonlight cut by the same factor, and a berth untouched — which is what makes a berth worth running for. burn / solar / dock charge, and the bought cell behind them; owns `EnergyState`; `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
+| `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED`, `CELL_WIND_LIFT` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast. Also publishes the phase reading `weather.ts` rolls on — `phase`, `phaseTime`, `phaseDuration`, `phaseIndex`, `envelope` — all of which were already locals. `update`'s optional fourth argument is `CellsState.stormAtShip`, a FLOOR on the speed (never the bearing) so a storm always blows: the one coupling from the weather back into the wind, and the reason `weatherCells.update` runs first in the loop |
+| `weathercells.ts` | `createWeatherCells(terrain, heightMap, seed?)`, `cellProfile`, `CELL_CORE` | the drifting weather: a population of `CELL_TARGET` storm and fog cells in a bubble around the ship, each a centre and a travel tangent carried by parallel transport exactly as a hazard's is. Owns `CellsState`, mutated in place; DOM-free, scene-free and seeded, like `wind.ts` and `hazards.ts`. Its own PRNG, never the wind's — see **Weather** |
+| `weather.ts` | `createWeather(seed?, pin?)`, `WeatherPin`, `VIS_MIN`, the share constants | the weather AT THE SHIP: squalls rolled off `WindState`'s phases, combined with the cells by `max` BEFORE smoothing. Owns `WeatherState`. `?weather=` pins the envelopes and switches the squall roll off; cells keep running under a pin |
+| `rain.ts` | `createRain(drops)` | a ship-scale box of `quality.rainDrops` drops, all motion in the vertex shader, hidden entirely below `rain > 0.02`. `LAYER_DEFAULT` only: rain in the reflection cube is rain reflected in rain, directly under the hull |
+| `chart.ts` | `createChart(w?, h?, encoded?)`, `CHART_WIDTH/HEIGHT`, `CHART_SAVE_INTERVAL`, `CHART_VERSION` | the fog-of-war bitmap: 1024×512 bytes in memory (the scope samples it 37 000 times a raster and a byte read beats a shift), bit-packed and base64'd in storage. `reveal` stamps a spherical cap through `geo.ts`'s `capColumns`, the same function `weathermap.ts` stamps a cell with |
+| `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards**. `update`'s optional fifth argument is `stormOdds`, a multiplier on the roll's COMPARISON only (the draw stays unconditional, so the stream still replays) |
 | `aiboats.ts` | `createAiBoats(deps)`, `AiBoatsDeps`, `AiBoats`, `ROLL_PERIOD`, the spawn and pursuit constants | the raider sim: the roll, spawning, transport, pursuit, conversion, contact and the post-fight grace. Owns `AiBoatState`, mutated in place; DOM-free, scene-free and seeded, exactly as `hazards.ts` is; see **AI boats and the battle** |
 | `aihulls.ts` | `createAiHulls(scene, cloneHull)`, `AiHulls` | the raiders as things you can see: at most two hull clones from `ship.cloneHull()`, placed on the globe from `AiBoatState` each frame, neon recoloured, `rimglow.ts` installed. `hullOf(boat)` is what the arena borrows |
 | `rimglow.ts` | `installRimGlow(root, color, strength?)`, `RimGlow`, `RIM_STRENGTH` | the Fresnel `onBeforeCompile` patch that lights a whole silhouette in one colour. Installed BEFORE `postFx.adopt` chains its own hook; see **Post-processing** |
@@ -305,7 +314,7 @@ shader.
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
 | `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
 | `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
-| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?)`; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
+| `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?, weather?, cells?, chart?)`. The scope's GEOMETRY never changes with the weather — `RADAR_RANGE`, the projection tables and the range rings are fixed — what changes is how much of it has anything in it: beyond `WeatherState.visibility` a pixel is `SCOPE_FOG` if uncharted and the coast dimmed toward it if charted. Cells draw as discs of `radius * strength`, culled on `visibility + radius` so a bank whose centre is off the scope still shows. It is also where the chart is STAMPED, because this is the one place that knows both the visibility and when it last looked; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
 | `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
@@ -323,7 +332,7 @@ shader.
 | `chumdrum.ts`, `barbedheads.ts` | `createChumDrumStore`/`createBarbedHeadsStore` | the two Fishing consumables, armed on `fishcover.ts` and spent by `fishing.ts` into `createFishingSim`'s `minSpawnTier`/`tensionDrainScale` |
 | `arclamp.ts`, `governor.ts` | `createArcLampStore`/`createGovernorStore` | the two Fishing durables; `arcLamp.sessionSeconds` and `governor.sessionCost` feed `fishing.ts`/`fishsim.ts` directly |
 | `tierstore.ts`, `stockstore.ts` | `createTierStore`, `createStockStore` | the shared shape behind all eight items above — a tier ladder and a one-at-a-time stock cap, respectively; see `docs/SHOP_PLAN.md` for why the eight do not each reimplement one |
-| `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY` | localStorage, versioned, tolerant of garbage |
+| `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY`, `loadChart()`, `writeChart(encoded)`, `CHART_KEY` | localStorage, versioned, tolerant of garbage. TWO keys: the save file, rewritten in full on every catch, purchase and whole percent of battery, and the chart, 87 KB written at most every five seconds while it changes. Opposite cadences, so they are not one file — the price being that clearing a player's progress means clearing both |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `blackout.ts` | `createBlackout()` | the fade a wreck happens behind, and both of a battle's; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
 | `loading.ts` | `createLoading()` | drives the splash `index.html` ships visible; the only UI a module does not build |
@@ -397,6 +406,141 @@ The inland flag is bled a few texels *into the surrounding land* so bilinear
 filtering cannot drag a lake's own shoreline back toward sea colour. It is
 never bled into reachable water.
 
+## Weather
+
+Three modules, and they meet at two numbers. `weathercells.ts` is a drifting
+population of storms and fog banks with a place, a radius and a bearing;
+`weather.ts` rolls placeless SQUALLS off the wind's own phases and combines
+both into one `WeatherState`; `chart.ts` records what the ship has seen. The
+two numbers are the five envelopes at the ship and `visibility`.
+
+Two sources rather than one is the design and not an accident. A cell can be
+seen coming, sailed around and outrun; a squall cannot, and arrives with the
+gale. A world with only the first kind never surprises anybody, and one with
+only the second never rewards looking out of the window. They are combined by
+`max` **before** any smoothing, so nothing downstream can tell them apart or
+has to — and combining after would let a squall ending inside a cell pull the
+total down for a moment, because the max of two eased numbers is not the ease
+of their max.
+
+### The three traps
+
+**1. The wind's PRNG is not touched.** `wind.ts` draws a fixed sequence per
+phase and `tests/unit/wind.test.ts`, `terrain-golden` and `world-golden`
+replay it. One extra `rng()` there shifts every draw after it. Squalls and
+cells each own a `mulberry32` on their own seed, and both draw a FIXED number
+of numbers per roll whatever the outcome — the same unconditional-draw
+discipline `hazards.ts` records on its `ROLL_ORDER`.
+
+**2. Zero is the game as it shipped.** Every shader and light the weather
+touches gains a term multiplied by an envelope or a map sample, and at zero
+each must vanish *exactly*. `applyAerial`'s ceiling is a uniform whose resting
+value is the constant it replaced; the cloud, dome and light terms are all
+multiplied by an envelope; an empty map is zero everywhere. `?weather=clear`
+exists to check it, and the check is a `npm run shots` comparison against
+`main` rather than a test, because what it protects — the ocean's
+`uShallow`..`uAbyss` depth ramp — has been washed out by a careless additive
+term three times now and every one was found by eye.
+
+**3. The map is not the truth.** `weathermap.ts` is 2.45 world units per
+texel, bilinear and up to a quarter-second stale. It is what the SKY reads.
+Everything that decides a number — the envelopes at the ship, the visibility,
+the wind's floor, the chart's stamp, the battle's sea — samples the cells
+analytically on the CPU through `CellsState`. The two disagree by a texel at
+a cell's edge, where the sky is soft and nobody can tell.
+
+### Why the map is a texture and not uniform slots
+
+`waterhazard.ts` packs three hazards into uniform arrays, and that is right
+for a hazard: there are exactly three, each is a height the hull must ride,
+and the loop is three iterations of polynomial arithmetic. A cell is none of
+those. It shades rather than displaces, the population is not fixed, and the
+orbital shot wants every cell on the lit hemisphere rather than the three
+nearest the ship. So the cells are rasterised into a small equirect texture at
+4 Hz and read with the same `dirToEquirect` the height map and the water-body
+mask already use: one fetch per pixel whatever the population, and no
+`MAX_CELLS` in any shader.
+
+### What the storm multiplier actually buys
+
+`main.ts` computes `stormOdds` once and hands it to both spawn sims, where it
+multiplies the roll's comparison and nothing else. It triples the
+PROBABILITY in both. It does not triple the encounters in either, and the two
+differ by a factor of two:
+
+- **Raiders: about 2.7x.** `aiboats.ts` rolls once every ten seconds at 0.16
+  and 0.24, nowhere near saturating its one-of-each-kind cap, so tripled odds
+  are worth very nearly tripled spawns.
+- **Hazards: about 1.5x.** `hazards.ts` rolls every SECOND at 0.2, and a free
+  wave slot refills almost at once even in fair weather. What limits the
+  hazard population is how long one LIVES, not how often one is rolled for,
+  and tripling a probability that already saturates buys the difference
+  between "almost immediately" and "immediately".
+
+Both figures are measured, in `aiboats.test.ts` and `hazards.test.ts`
+respectively, over 100 minutes of sim. Anyone reading "tripled" and expecting
+it of the hazards would be wrong about half the system.
+
+### Why a harsh solar cut cannot strand anybody
+
+`STORM_SOLAR_CUT` is 0.95: a full storm leaves 5% of the panels. The question
+that number has to answer is whether a ship can be caught under permanent
+cloud with an empty tank, and it cannot, because both sources are bounded:
+
+- A squall is a subset of a wind event, and `wind.ts` caps an event at
+  `EVENT_MAX` = 30 s. That costs 15% of `SOLAR_FULL_SECONDS`, and the lull
+  after it is guaranteed.
+- A cell fades to nothing at the end of a life of at most six minutes, and
+  drifts at 2 u/s while a dead hull does not — so even a stationary ship is
+  clear of a 40-unit storm within about 40 s of its centre passing.
+
+Against `IDLE_ENDURANCE` of 42 minutes neither is close to dangerous, and a
+floor here would only hide those two bounds from whoever next changes them.
+
+### The chart, and why it has its own storage key
+
+`chart.ts` is bytes in memory and bits in storage, and both choices are the
+scope's: it samples the bitmap ~37 000 times per raster at 10 Hz, where a byte
+read beats a shift, and the same map packed is 64 KB, where 512 KB would not
+belong in localStorage.
+
+It lives under `CHART_KEY`, beside `SaveData` rather than inside it, because
+the two have opposite cadences. The save file is two numbers and twenty counts
+rewritten in full on every catch, purchase and whole percent of battery; the
+chart is 87 KB that changes continuously while a player explores. Together
+they would have dragged one onto the other's schedule. Apart, each writes at
+the rate it should — and the price, recorded here so it is not forgotten, is
+that clearing a player's progress means clearing two keys.
+
+Discovery is stamped with `WeatherState.visibility`, not with `RADAR_RANGE`,
+which is what makes fog cost something lasting: a coast passed in thick
+weather is not charted and has to be passed again.
+
+### What the weather does NOT reach
+
+The battle arena. A fight is a second `Scene` with its own flat sea nowhere on
+the globe, so `battlescene.ts` passes `vec2(0.0)` to `applyAerial` and gets
+exactly the arena it always had. The one thing that does reach it is
+`battlesea.ts`'s CALM/ROUGH switch, decided once when the cover card opens —
+`?calm=1` and `?rough=1` override it. `fog.ts` is careful not to write the
+day/night fog colours for the same reason: the arena merges that same uniform
+object, and `globe.update` does not run during a fight, so a storm's colour
+would freeze into the arena's haze for the length of it.
+
+The fishing card, and the frozen-overlay and battle branches of the frame
+loop, where neither `weatherCells.update` nor `weather.update` is called —
+the weather freezes with the rest of the world, exactly as the wind does, so a
+storm cannot quietly pass while the player reads a menu.
+
+### Dev queries
+
+`?weather=clear|overcast|rain|storm|lightning|fog` pins the envelopes and
+switches the squall roll off. `?cell=storm|fog|lightning` forces one cell 60
+units dead ahead — further than `?hazard=`'s 25, because the half of a cell
+worth photographing is the half seen from outside it. The two combine.
+`?debug` publishes the live envelopes, every cell, and `encounters`, which is
+the measurement `CELL_TARGET` was chosen against.
+
 ## The cloud deck
 `clouds.ts` is not one sphere but `SHELL_COUNT` concentric ones spanning
 `SHELL_DEPTH`, all sampling the same fractal field. The coverage threshold
@@ -432,19 +576,22 @@ Two more things follow from the stack and are easy to undo by accident:
 
 ## Frame loop
 ```
-energy.update(dt, shipState, env)          // burn / solar / dock, on last frame's speed
-wind.update(dt, shipState, energyState)    // needs this frame's docked verdict
-hazards.update(dt, shipState, energyState) // rolls, transport, contact, push, spiral; writes HazardState
-aiBoats.update(dt, shipState, energyState, hazards.state, suppressed())  // after hazards: needs this frame's phase. Before the ship: a contact halts the hull this frame
+energy.update(dt, shipState, env, ..., weather.state)   // burn / solar / dock, on last frame's speed and last frame's sky
+weatherCells.update(dt, shipState, energyState)         // BEFORE the wind: a storm cell floors the wind, so the wind needs this frame's sample
+wind.update(dt, shipState, energyState, cells.stormAtShip)  // needs this frame's docked verdict
+weather.update(dt, wind.state, cells.state)             // after the wind (this frame's phase), before the hazards (this frame's odds)
+hazards.update(dt, shipState, energyState, wind.state, stormOdds) // rolls, transport, contact, push, spiral; writes HazardState
+aiBoats.update(dt, shipState, energyState, hazards.state, suppressed(), stormOdds)  // after hazards: needs this frame's phase. Before the ship: a contact halts the hull this frame
 ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
-globe.update(dt, env, wind.state, shipState, camera)  // daynight (places sun AND moon, writes env), fog, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
+globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
+rain.update(dt, shipState, wind.state, weather.state)  // after globe: the box hangs on the hull the camera has just been framed against
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
 docks.update(dt, env, shipState, energyState)
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
-hud.update(shipState, energyState, windState)
-radar.update(dt, shipState, windState, hazards.state, aiBoats.state)
+hud.update(shipState, energyState, windState, weather.state)
+radar.update(dt, shipState, windState, hazards.state, aiBoats.state, weather.state, cells.state, chart)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
@@ -535,6 +682,8 @@ sees black. `wake.update` fills its map *last* within itself, after `now` and
 every rib/spray value for the frame are final, rather than from an
 `onBeforeRender` callback, so the fill happens at one predictable point in the
 loop instead of at a moment tied to when Three happens to draw the ribbon.
+
+`stormOdds` is `main.ts`'s own one-line number, `1 + STORM_ODDS_GAIN * weather.state.storm`, computed there for the same reason `suppressed()` is: two sims must not develop two opinions of one sky. What it buys differs sharply between them and "tripled" is only half true — see **Weather**.
 
 Wind and hazards are wedged **between** the two, and the order is load bearing
 in both directions. It runs after energy because a berth is shelter and `energy.ts`

@@ -1,7 +1,48 @@
 # Weather and the chart: implementation plan
 
-Status: **proposed**, awaiting the owner's approval. No code has been written
-against it.
+Status: **implemented**, and landed on `claude/weather-fog-of-war-uicz6r`.
+
+This document is kept as the record of what was approved. It is deliberately
+NOT updated to follow later tuning — `docs/ARCHITECTURE.md` is the current
+truth, and its **Weather** section is where to start. Seven things below were
+changed by the build itself, and they are worth knowing before trusting the
+rest:
+
+- **The storm's haze got its own colour and a much smaller ceiling.**
+  `STORM_MAX_GAIN` is **0.08**, not 0.25, and a downpour fades toward a dark
+  `uFogStormColor` rather than toward the fog bank's pale grey. As written,
+  the plan put a full storm at a 0.40 blend toward a bright grey and painted
+  the entire ocean the "flat pale sheet" `fogglsl.ts` warns about twice. It
+  was caught in a `?weather=storm` shot, which is exactly the failure mode
+  those warnings describe.
+- **The fog bank came down too.** `FOG_DENSITY_GAIN` is **3.5**, not 6, and
+  `FOG_MAX_BANK` is **0.75**, not 0.85. At the planned numbers the water
+  under the hull was 60% fog and the ship appeared to be sailing on paper —
+  which `FOG_MAX_BANK`'s own comment forbids in those words.
+- **`STORM_ODDS_GAIN` does not triple the encounters.** It triples the
+  probability, which is worth about **2.7x** the raiders and only about
+  **1.5x** the hazards, whose 1 Hz roll already saturates their
+  one-of-each-kind cap. Both measured; see **Weather** in ARCHITECTURE.
+- **`WeatherState` gained a sixth field, `flashLocal`.** Without it a
+  squall's lightning lights nothing (no cell claims it in the map) or a
+  cell's lightning flashes the clear sky overhead. The plan had neither case.
+- **`WEATHERMAP_GLSL` declares its own sampler.** The plan told each consumer
+  to declare `uWeatherMap` itself; two of the three did not, and the water and
+  land shaders failed to compile. Nothing in the Node tier compiles GLSL, so
+  only the browser tier saw it.
+- **`applyAerial` gained a `wx` ARGUMENT rather than reading uniforms.** The
+  plan implied uniforms; that would have hazed the battle arena, which merges
+  the same `fogUniforms` object and freezes it for the length of a fight.
+- **The plan's claim that fog cells never touch land is only true at BIRTH.**
+  A bank drifts for up to six minutes and may perfectly well reach a coast
+  afterwards. Left as it is: a bank that dissolved at a shoreline would be
+  stranger to watch than the thing it prevents.
+
+Two things the plan promised and the build did not do: `waterrain.ts`, the
+rain-ripple water plugin, was the stated stretch goal and was not built; and
+the four streams were run sequentially by one agent rather than in parallel
+worktrees, so the file-ownership table below is a record of intent rather
+than of who touched what.
 
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially
