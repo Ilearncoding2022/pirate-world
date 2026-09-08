@@ -52,7 +52,6 @@ import { mulberry32, randomDirection } from './towns';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import {
   CREST_HALF_LENGTH,
-  CREST_HALF_WIDTH,
   CREST_HEIGHT,
   FUNNEL_DEPTH,
   GREAT_CREST_HEIGHT,
@@ -113,22 +112,31 @@ export interface Hazards {
  * together, which is usually not what you wanted; move a single probability
  * instead.
  *
- * At one roll a second the nominal waits are a strong wave every 5 s, a great
- * wave every 10 and a maelstrom every 50 s of sailing. Those are ceilings
- * rather than rates: only one hazard of each kind is ever on the water (see
- * ROLL_ORDER), a crest lives up to CREST_LIFE = 10 s and a funnel up to
- * MAELSTROM_LIFE + 2 * MAELSTROM_GROW = 36, so what a second-by-second roll
- * actually buys is that the next one rises very soon after the last one dies,
- * not three hazards deep. The sea is close to always running, and a maelstrom
- * is a thing a player meets rather than a thing they have to be told exists.
+ * At one roll a second the nominal waits are a strong wave every 3.3 s, a
+ * great wave every 6.7 and a maelstrom every 50 s of sailing. Those are
+ * ceilings rather than rates: only one hazard of each kind is ever on the
+ * water (see ROLL_ORDER), a crest lives CREST_LIFE_MIN to CREST_LIFE_MAX
+ * seconds and a funnel up to MAELSTROM_LIFE + 2 * MAELSTROM_GROW = 36, so
+ * what a second-by-second roll actually buys is that the next one rises very
+ * soon after the last one dies, not three hazards deep. The sea is close to
+ * always running, and a maelstrom is a thing a player meets rather than a
+ * thing they have to be told exists.
+ *
+ * The two crest odds are half again what they were (0.2 and 0.1), on the
+ * owner's ask for more weather. Read that together with the shorter, rolled
+ * lifetimes below rather than on its own: a crest now clears the water sooner
+ * than it used to, so raising the odds is what keeps the gap between one wave
+ * and the next from GROWING when their lives were cut. The maelstrom is
+ * deliberately not touched -- it is the rare thing, and the one hazard that
+ * can end a run.
  *
  * Note the odds are per roll and per KIND: a kind that is already on the
  * water is drawn for and skipped, so the actual rate is well under these
  * numbers once the sea is busy enough to be holding one of each.
  */
 export const ROLL_PERIOD = 1;
-const P_WAVE = 0.2;
-const P_GREATWAVE = 0.1;
+const P_WAVE = 0.3;
+const P_GREATWAVE = 0.15;
 const P_MAELSTROM = 0.02;
 
 /**
@@ -203,15 +211,55 @@ const BERTH_MARGIN = 4;
 const SPAWN_TRIES = 24;
 
 /**
- * How fast a crest travels, world units/s, and how long it lives.
+ * How fast a crest travels, world units/s, and the seconds of life it rolls
+ * for itself when it rises.
  *
  * 6 is slower than the hull's 10, so a wave can always be outrun downwind and
- * never quite dodged by acceleration alone. Over its 10 s life it covers 60
- * units, which is comfortably past the distance fade in every direction: a
- * crest that misses is gone rather than loitering at the edge of the patch.
+ * never quite dodged by acceleration alone.
+ *
+ * The life used to be a flat 10 s for every crest, and it is now drawn per
+ * wave, uniformly, with the top of the range held under that: a sea in which
+ * every wave lasts exactly as long as every other is a metronome, and a
+ * player who has watched two of them knows precisely how long to hold a
+ * course. Rolled, some pass in half a minute's worth of hull lengths and some
+ * only just reach.
+ *
+ * The floor is where it is because of what a crest has to be able to DO. It
+ * rises 18 to 30 units off the bow (SPAWN_MIN/SPAWN_MAX) and closes at 6
+ * units a second, so five seconds is thirty units of travel: the shortest
+ * wave this can roll still crosses the whole spawn band, and there is no
+ * draw that puts a wave on the water which was never able to reach the ship
+ * at all. The ceiling is 9.5 rather than 10 so that "under ten seconds" is
+ * true of every wave and not merely of almost all of them; at 57 units of
+ * travel the longest-lived one still ends up well past the distance fade,
+ * which is what stops a crest loitering at the edge of the patch.
  */
 const CREST_SPEED = 6;
-const CREST_LIFE = 10;
+export const CREST_LIFE_MIN = 5;
+export const CREST_LIFE_MAX = 9.5;
+
+/**
+ * The narrowest and widest a crest may roll, world units of FULL width across
+ * its own travel line -- so the half-width `hazardfield.ts` builds the
+ * profile from is half of whatever is drawn here.
+ *
+ * `hazardfield.ts` used to hand every wave the same 5-unit width, and a sea
+ * of identical waves is a sea a player reads once. One unit is a wave a hull
+ * is through before it has finished heeling -- a slap rather than a wall --
+ * and twelve is four hull lengths of water to cross, which at CREST_SPEED is
+ * two full seconds under it. Both ends are deliberately past what reads as
+ * "a wave": the point is the spread, and the ordinary middle of the range is
+ * still about the five units this always was.
+ *
+ * What the width does NOT change is how hard the wave hits. The push is
+ * PUSH_PEAK by kind and the height is CREST_HEIGHT by kind, so a wide wave is
+ * a longer shove of the same strength rather than a bigger one, and the two
+ * kinds stay the two kinds. It does change the contact test, which measures
+ * against `halfWidth` -- a 12-unit wave is genuinely harder to be missed by,
+ * which is the honest consequence of it being wider water.
+ */
+export const CREST_WIDTH_MIN = 1;
+export const CREST_WIDTH_MAX = 12;
 
 /**
  * Seconds a crest spends rising, and seconds it spends fading out at the end
@@ -417,6 +465,12 @@ interface MutableHazard {
   envelope: number;
   size: number;
   age: number;
+  /**
+   * Seconds this crest lives if nothing consumes it, rolled once when it
+   * rises. Zero on a maelstrom, which expires on MAELSTROM_LIFE instead and
+   * never reads this.
+   */
+  life: number;
   consumed: boolean;
   /** The age at which it was consumed; -1 while it is still travelling. */
   consumedAt: number;
@@ -516,6 +570,24 @@ export function createHazards(deps: HazardsDeps): Hazards {
    * unit tests on both sides still pass, and the only thing that is wrong is
    * the sea. See `hazardStrength`, which is the other half of this contract.
    */
+  /**
+   * Half the full width this crest rolls, world units.
+   *
+   * Uniform between the two bounds. Not weighted toward the middle: the
+   * whole reason the width moved off a constant is that the sea should be
+   * able to produce a wave a player has not seen before, and a distribution
+   * that quietly avoided its own ends would only be the old single width
+   * with jitter on it.
+   */
+  function rollHalfWidth(): number {
+    return (CREST_WIDTH_MIN + rng() * (CREST_WIDTH_MAX - CREST_WIDTH_MIN)) / 2;
+  }
+
+  /** Seconds this crest lives untouched. See CREST_LIFE_MIN/MAX. */
+  function rollLife(): number {
+    return CREST_LIFE_MIN + rng() * (CREST_LIFE_MAX - CREST_LIFE_MIN);
+  }
+
   function amplitudeOf(kind: HazardKind): number {
     if (kind === 'maelstrom') return FUNNEL_DEPTH;
     return kind === 'greatwave' ? GREAT_CREST_HEIGHT : CREST_HEIGHT;
@@ -544,11 +616,15 @@ export function createHazards(deps: HazardsDeps): Hazards {
       east: e,
       north: n,
       extent: extentOf(kind),
-      halfWidth: kind === 'maelstrom' ? 0 : CREST_HALF_WIDTH,
+      // Both rolled here rather than in `trySpawn`, so a wave forced by a
+      // test or by `?hazard=` is as varied as one the weather raised: there
+      // is no such thing in this file as a crest of the default width.
+      halfWidth: kind === 'maelstrom' ? 0 : rollHalfWidth(),
       amplitude: amplitudeOf(kind),
       envelope: 0,
       size: kind === 'maelstrom' ? 0 : 1,
       age: 0,
+      life: kind === 'maelstrom' ? 0 : rollLife(),
       consumed: false,
       consumedAt: -1,
       pushing: false,
@@ -748,8 +824,8 @@ export function createHazards(deps: HazardsDeps): Hazards {
       if (t >= span) return true;
       fall = 1 - smoothstep01(t / span);
     } else {
-      if (h.age >= CREST_LIFE) return true;
-      fall = smoothstep01((CREST_LIFE - h.age) / CREST_FADE);
+      if (h.age >= h.life) return true;
+      fall = smoothstep01((h.life - h.age) / CREST_FADE);
     }
     h.size = 1;
     h.envelope = rise * fall * distanceFade(ship, h.centre);
@@ -856,11 +932,13 @@ export function createHazards(deps: HazardsDeps): Hazards {
    *   - **The longest run wins.** A wave cut in two by an islet keeps the
    *     bigger half. One hazard is one span in the shader's uniforms, so the
    *     alternative to choosing is drawing a wall of water across the rock.
-   *   - **The line is the whole test.** The crest has depth (`halfWidth`, 2.5
-   *     units) but only its own centre line is probed, so a wave's face may
-   *     overlap a beach for a fraction of a second before the line does. A
-   *     second row of probes would double the cost to move the moment of
-   *     breaking by about 0.4 s at CREST_SPEED.
+   *   - **The line is the whole test.** The crest has depth (`halfWidth`,
+   *     which a wave now rolls for itself between half of CREST_WIDTH_MIN and
+   *     half of CREST_WIDTH_MAX) but only its own centre line is probed, so a
+   *     wave's face may overlap a beach for a fraction of a second before the
+   *     line does. A second row of probes would double the cost to move the
+   *     moment of breaking by under a second at CREST_SPEED, and the widest
+   *     wave this can roll is the only one for which it is even that.
    */
   function clipToWater(h: MutableHazard): boolean {
     const half = h.extent;

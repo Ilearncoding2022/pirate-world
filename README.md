@@ -130,7 +130,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   weather is doing before the panel does. The weather is seeded, so the same
   world always blows the same way.
 - **Rough water.** Every second the sea rolls for trouble. A strong wave rises
-  a fifth of the time, a great wave a tenth, and a maelstrom one time in fifty.
+  three times in ten, a great wave three times in twenty, and a maelstrom one
+  time in fifty.
   Only one of each is ever on the water at once, so what a roll a second buys
   is that the next one is up almost as soon as the last one has gone: the sea
   is nearly always running something, and the wait for a maelstrom is under a
@@ -142,7 +143,14 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   went — five knots for a strong one, ten for a great one, over the three or
   five seconds it breaks up against you, which is thirty units of the scope for
   the big one. You keep the helm the whole time; the crest is spent once it has
-  hit you, and one that misses lives ten seconds and fades. **A wave breaks on
+  hit you. **No two waves are the same size any more**: every one rolls its own
+  width, anywhere from a single unit — a slap you are through before you have
+  finished heeling — to twelve, four hull lengths of water taking two full
+  seconds to pass under you. It rolls its own life too, five to nine and a half
+  seconds, so a wave you decide to outrun is a different bet each time and
+  watching two of them tells you nothing about the third. A wide wave is not a
+  harder one, mind: the shove is the same five or ten knots either way. It is
+  just much harder to be missed by. **A wave breaks on
   the shore the instant it reaches it** — and only the part of it that got
   there: run a twenty-unit front onto a headland and the arm over the rock is
   gone at once while the rest keeps coming, shortening as it goes, until there

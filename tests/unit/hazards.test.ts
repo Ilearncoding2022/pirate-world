@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
-import { createHazards, DISSIPATE, PUSH_PEAK, SPIRAL_SECONDS } from '../../src/hazards';
+import {
+  createHazards,
+  CREST_LIFE_MAX,
+  CREST_LIFE_MIN,
+  CREST_WIDTH_MAX,
+  CREST_WIDTH_MIN,
+  DISSIPATE,
+  PUSH_PEAK,
+  SPIRAL_SECONDS,
+} from '../../src/hazards';
 import { MAELSTROM_RADIUS, MAX_HAZARDS } from '../../src/hazardfield';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { createHeightMap } from '../../src/heightmap';
@@ -128,6 +137,78 @@ describe('hazards — the roll', () => {
   });
 });
 
+describe('hazards — a crest rolls its own width and its own life', () => {
+  /**
+   * Watches a long stretch of weather and records every crest it sees, once
+   * each: the width it rose with, and the age it was still alive at on the
+   * last frame it existed.
+   *
+   * The life has to be measured rather than read, because `Hazard` does not
+   * expose it -- and measuring is the better test anyway, since what matters
+   * is when the sea actually takes the wave away.
+   */
+  function survey(seconds: number): { widths: number[]; lives: number[] } {
+    const hazards = makeHazards();
+    const ship = stationaryShip();
+    const energy = energyState('drain');
+    const dt = 0.1;
+    const widths: number[] = [];
+    const lives: number[] = [];
+    const lastAge = new Map<Hazard, number>();
+
+    for (let i = 0; i < seconds / dt; i++) {
+      const before = new Set(hazards.state.live);
+      hazards.update(dt, ship, energy, wind);
+      for (const h of hazards.state.live) {
+        if (h.kind === 'maelstrom') continue;
+        if (!lastAge.has(h)) widths.push(h.halfWidth * 2);
+        lastAge.set(h, h.age);
+      }
+      // A crest that was on the water and is not any more has lived out
+      // whatever life it rolled -- unless the hull consumed it, which a
+      // stationary ship at the spawn point mostly avoids and which only ever
+      // shortens a life, so it cannot push one over the ceiling below.
+      for (const h of before) {
+        if (h.kind === 'maelstrom' || hazards.state.live.includes(h)) continue;
+        const age = lastAge.get(h);
+        if (age !== undefined) lives.push(age);
+      }
+    }
+    return { widths, lives };
+  }
+
+  it('rolls every width inside 1 to 12 units, and spreads across the range', () => {
+    const { widths } = survey(1200);
+    expect(widths.length).toBeGreaterThan(30);
+    for (const w of widths) {
+      expect(w).toBeGreaterThanOrEqual(CREST_WIDTH_MIN);
+      expect(w).toBeLessThanOrEqual(CREST_WIDTH_MAX);
+    }
+    // Not a constant with jitter on it: the sea has to be able to raise a
+    // wave near either end of the range, or the spread buys nothing.
+    const span = CREST_WIDTH_MAX - CREST_WIDTH_MIN;
+    expect(Math.min(...widths)).toBeLessThan(CREST_WIDTH_MIN + span * 0.2);
+    expect(Math.max(...widths)).toBeGreaterThan(CREST_WIDTH_MAX - span * 0.2);
+  });
+
+  it('never lets a crest live ten seconds, and never lets one live too short to arrive', () => {
+    const { lives } = survey(1200);
+    expect(lives.length).toBeGreaterThan(20);
+    for (const life of lives) {
+      // One frame of slack at the top: the wave is removed on the first
+      // update that finds it past its own life, so the age it was last seen
+      // at can be up to a tick over what it rolled.
+      expect(life).toBeLessThan(CREST_LIFE_MAX + 0.1);
+      expect(life).toBeLessThan(10);
+    }
+    // Every wave has to be able to cross the spawn band: see CREST_LIFE_MIN.
+    const untouched = lives.filter((life) => life > CREST_LIFE_MIN - 0.5);
+    expect(untouched.length).toBeGreaterThan(lives.length * 0.5);
+    // And they differ from one another, which is the whole change.
+    expect(Math.max(...lives) - Math.min(...lives)).toBeGreaterThan(1);
+  });
+});
+
 describe('hazards — the push', () => {
   it('shoves the hull the way the crest went, peaking at PUSH_PEAK and gone by DISSIPATE', () => {
     const hazards = makeHazards();
@@ -138,6 +219,7 @@ describe('hazards — the push', () => {
     // Dead astern of the bow: a crest travelling the way the ship points is
     // pure `along`, which is the pair's whole convention.
     hazards.force('greatwave', ship.position, ship.forward);
+    const forced = hazards.state.live.find((h) => h.kind === 'greatwave');
     let peakAlong = 0;
     let peakAcross = 0;
     for (let t = 0; t < DISSIPATE.greatwave - dt; t += dt) {
@@ -150,10 +232,13 @@ describe('hazards — the push', () => {
     expect(peakAcross).toBeLessThan(PUSH_PEAK.greatwave * 0.02);
 
     // One dissipation later the hump is over and the crest is gone with it.
+    // The forced wave specifically, not the whole list: six seconds of rolls
+    // at ROLL_ODDS raise weather of their own, and none of it has reached the
+    // hull -- which is what `along` and `across` being exactly zero says.
     for (let t = 0; t < 1; t += dt) hazards.update(dt, ship, energy, wind);
     expect(hazards.state.along).toBe(0);
     expect(hazards.state.across).toBe(0);
-    expect(hazards.state.live.length).toBe(0);
+    expect(hazards.state.live).not.toContain(forced);
 
     // And a crest crossing the bow is pure `across`, on the starboard sign.
     hazards.reset();

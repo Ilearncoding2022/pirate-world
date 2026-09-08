@@ -1438,10 +1438,41 @@ There is ONE roll timer and both waves and maelstroms are drawn on it, so
 `hazards.ROLL_PERIOD` moves all three frequencies together — retune a single
 probability instead. Note `aiboats.ts` exports a `ROLL_PERIOD` of its own on
 the same name and a different value (10 s); nothing imports both, and neither
-is the other's to retune. At a roll a second the nominal waits are 5 s / 10 s / 50 s,
-but those are ceilings rather than rates: only one hazard of each kind is ever
-on the water, so what the fast tick actually buys is that the next one rises
-soon after the last one dies, not a sea three deep. A crest is a 20-unit
+is the other's to retune. At a roll a second the nominal waits are
+3.3 s / 6.7 s / 50 s, but those are ceilings rather than rates: only one hazard
+of each kind is ever on the water, so what the fast tick actually buys is that
+the next one rises soon after the last one dies, not a sea three deep.
+
+**The two crest odds are half again what they were, and their lives are
+shorter and rolled.** Read the two together: a crest now clears the water
+sooner than a flat `CREST_LIFE = 10` left it, so raising 0.2/0.1 to 0.3/0.15 is
+what stops the gap between one wave and the next GROWING when their lives were
+cut. The maelstrom is deliberately untouched — it is the rare thing, and the
+one hazard that can end a run.
+
+**Every crest also rolls its own width and its own life** (`CREST_WIDTH_MIN` /
+`_MAX`, 1 to 12 units of full width; `CREST_LIFE_MIN` / `_MAX`, 5 to 9.5 s),
+both drawn uniformly in `build()` so a wave forced by a test or by `?hazard=`
+is as varied as one the weather raised — there is no such thing in that file as
+a crest of the default width. Neither end is weighted toward the middle: the
+whole point of the width moving off a constant is that the sea can produce a
+wave the player has not seen before, and a distribution avoiding its own ends
+would be the old single width with jitter on it. Two bounds are load-bearing
+rather than aesthetic. `CREST_LIFE_MIN` is 5 because a crest rises 18 to 30
+units off the bow and closes at 6 units/s: five seconds is thirty units of
+travel, so the shortest wave that can be rolled still crosses the whole spawn
+band and no draw puts a wave on the water that could never have arrived.
+`CREST_LIFE_MAX` is 9.5 rather than 10 so that "under ten seconds" is true of
+every wave and not merely of almost all of them.
+
+What the width does NOT change is how hard a wave hits: the push is
+`PUSH_PEAK` by kind and the height is `CREST_HEIGHT` by kind, so a wide wave is
+a longer shove of the same strength rather than a bigger one, and the two kinds
+stay the two kinds. It does change the contact test, which measures against
+`halfWidth` — a 12-unit wave is genuinely harder to be missed by, which is the
+honest consequence of it being wider water.
+
+A crest is a 20-unit
 travelling line that
 shoves the hull the way the water went — the push is a velocity, added exactly
 as the wind's is, so the bow holds its heading and the ship is carried off its

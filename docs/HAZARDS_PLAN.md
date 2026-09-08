@@ -1,6 +1,13 @@
 # Strong waves and maelstroms — implementation plan
 
-Status: **approved, not started.**
+Status: **built and shipped.** This plan is left as written, per the convention
+at the top of `WIND_PLAN.md`, so the tables below are the brief and not the
+build — several of their numbers have since moved under play (the roll cadence,
+the three probabilities, the funnel's depth, and the crest's width and life,
+which are no longer constants at all). `docs/ARCHITECTURE.md`'s **Hazards**
+section and the constants at the top of `hazards.ts` and `hazardfield.ts` are
+what ships; read those for current values and this for the reasoning they came
+from.
 
 This document is the complete brief. An implementing agent should not need the
 conversation it came from. Read `docs/ARCHITECTURE.md` first, especially
