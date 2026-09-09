@@ -196,6 +196,57 @@
               <span class="rsv__seg"></span>
             </div>
           </div>
+
+          <!-- The hull. The SECOND reserve, and it sits inside the power
+               block rather than beside it because a player reads this panel
+               top to bottom looking for one thing: what is going to stop the
+               ship. The tank, the cell and the hull are three answers to that
+               question and belong in one column.
+
+               It borrows the power bar's ten notches, because a notch there
+               and a notch here are both a tenth of the thing they measure,
+               and the backup cell's hairline rule, because it is a second
+               instrument bolted under the first. What it does NOT borrow is
+               the colour: brass, which nothing else on this HUD is, so a
+               glance can tell the hull from the plant before either number is
+               read.
+
+               Ships sound and full, matching the hull a new save carries, and
+               hud.ts reads both the modifier and the lit segments back off
+               this markup rather than assuming them. -->
+          <div class="hull hull--sound" id="hud-hull">
+            <div class="readout hull__head">
+              <span class="readout__key">HULL</span>
+              <span class="readout__val hull__val" id="hud-hull-value">100%</span>
+            </div>
+            <!-- aria-valuemin is 1, not 0: there is no sinking and no game
+                 over, so 1% is the floor of the range this meter measures and
+                 an empty bar is a state the hull can never be in. -->
+            <div
+              class="hull__bar"
+              id="hud-hull-bar"
+              role="meter"
+              aria-label="Hull durability"
+              aria-valuemin="1"
+              aria-valuemax="100"
+              aria-valuenow="100"
+            >
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+              <span class="hull__seg is-lit"></span>
+            </div>
+            <div class="hull__status">
+              <span class="hull__tag" id="hud-hull-mode">HULL FULL</span>
+              <span class="hull__rate" id="hud-hull-rate">0.00 %/min</span>
+            </div>
+          </div>
         </div>
 
         <div class="panel__rule"></div>
@@ -590,6 +641,13 @@
           <h2 class="menu__title" id="menu-title">MENU</h2>
           <div class="menu__actions">
             <button class="fbtn fbtn--go menu__btn" id="menu-controls" type="button">Controls</button>
+            <!-- The harbour list. It is a menu page rather than a HUD panel
+                 because it is a thing a player consults between passages, not
+                 while steering: the scope answers "what is near me" and this
+                 answers "where is the place I remember". Without it a
+                 remembered harbour beyond the scope's 50 units cannot be
+                 found at all in a world that was redrawn on this load. -->
+            <button class="fbtn menu__btn" id="menu-harbours" type="button">Harbours</button>
           </div>
           <p class="menu__hint">Esc closes</p>
         </div>
@@ -607,6 +665,22 @@
           </ul>
           <div class="menu__actions">
             <button class="fbtn menu__btn" id="menu-back" type="button">Back</button>
+          </div>
+        </div>
+
+        <!-- The harbours pane.
+
+             The list ships EMPTY, on the Fish Book's terms: there are 36 rows,
+             every one of them carries a fix that is only true for the instant
+             the pane was opened, and a hand-written row here would be 36
+             chances to disagree with `harbournames.ts`. menu.ts builds them
+             from its `harbours` callback each time the pane is shown, which is
+             also what keeps this file from knowing what a `Towns` is. -->
+        <div class="menu__pane menu__pane--harbours">
+          <h2 class="menu__title">HARBOURS</h2>
+          <ul class="harbours__list" id="menu-harbours-list"></ul>
+          <div class="menu__actions">
+            <button class="fbtn menu__btn" id="menu-harbours-back" type="button">Back</button>
           </div>
         </div>
       </section>

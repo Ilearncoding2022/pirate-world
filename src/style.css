@@ -3669,3 +3669,326 @@ body.in-battle .dbtn--right {
 }
 
 /* END BLACKOUT */
+
+/* =====================================================================
+   HARBOURS, STREAM C — the hull block, the berth name and the
+   HARBOURS menu page.
+
+   One appended section, on docs/HARBOURS_PLAN.md's terms: this stream and
+   Stream D each add a block at the end of this file and neither edits a
+   rule the other could be holding. Nothing above this line is touched.
+
+   Four rules here deliberately re-address a selector defined earlier —
+   `#hud-pwr`, `#hud-pwr-mode` and the two `.menu--harbours` pane swaps.
+   Every one of them is an OVERRIDE rather than an edit, and each says
+   below what the earlier rule could not have known: that the power tag
+   stopped being a fixed phrase the day harbours got names, and that the
+   menu grew a third pane after its root rule was written as "not
+   controls".
+   ===================================================================== */
+/* HARBOURS C */
+
+/* ---------------------------------------------------------------------
+   HULL — durability, under the backup cell inside the POWER block
+
+   The third instrument in one column, and the reason it is in that column
+   rather than beside it: a player scanning this panel is looking for one
+   thing, which is what is going to stop the ship. The tank, the cell and
+   the hull are three answers to that question.
+
+   It is built like the power block — one `hull--*` modifier on the wrapper
+   fanning out to the number, the bar and the tag — and separated like the
+   backup cell, by a hairline rule. What it does not share with either is
+   the palette. The plant owns cyan, green, amber, pink and red; the cell
+   owns violet; the hull is BRASS, ageing through amber to red as it goes.
+   Brass because the hull is the one thing on this panel that is a physical
+   object rather than a flow, and ART-DIRECTION.md's wood-and-brass against
+   neon is exactly that reading.
+
+   Four severities, and they are severities and not causes, on the power
+   block's rule: `hullSeverity` in hud.ts derives them from the percent
+   alone, while `hullTag` beside the bar names what is happening to it.
+   Seven tags share these four colours.
+   ------------------------------------------------------------------- */
+
+.hull {
+  /* sound, 50..100. Deeper than `--gold` on purpose: the purse's figure is
+     three rows up this same column, and a hull bar in the identical brass
+     would read as more of that reading rather than as a different one. */
+  --hull-accent: #d8a63f;
+  --hull-glow: rgba(216, 166, 63, 0.42);
+  --hull-rail: rgba(216, 166, 63, 0.1);
+  --hull-rail-edge: rgba(216, 166, 63, 0.24);
+  margin-top: 6px;
+  padding-top: 5px;
+  /* The backup cell's hairline, in the hull's own hue: this is a second
+     instrument bolted under the first, and the rule is what says so. */
+  border-top: 1px solid rgba(216, 166, 63, 0.2);
+}
+
+/* worn, 25..49 — a 10 kn cap the player has to plan around. The same amber
+   `pwr--warn` uses, so a worn hull and a low tank read as one level of
+   alarm rather than two. */
+.hull--worn {
+  --hull-accent: #ffb445;
+  --hull-glow: rgba(255, 180, 69, 0.45);
+  --hull-rail: rgba(255, 180, 69, 0.1);
+  --hull-rail-edge: rgba(255, 180, 69, 0.26);
+}
+
+/* failing, 2..24 — 5 kn, and no fishing. Past amber and not yet the alarm
+   colour, because there is still one band below this one and the ramp has
+   to have somewhere left to go. */
+.hull--failing {
+  --hull-accent: #ff7a4a;
+  --hull-glow: rgba(255, 122, 74, 0.48);
+  --hull-rail: rgba(255, 122, 74, 0.13);
+  --hull-rail-edge: rgba(255, 122, 74, 0.32);
+}
+
+/* critical, 1 — the floor. `pwr--dead`'s red, and it flashes on `pwr--dead`'s
+   own 900ms, because it means the same thing that state does: this is as bad
+   as the instrument goes. Warmer rails than the bands above, for that state's
+   reason — one notch is still lit down here, and an alarm needs something to
+   flash. */
+.hull--critical {
+  --hull-accent: #ff5470;
+  --hull-glow: rgba(255, 84, 112, 0.5);
+  --hull-rail: rgba(255, 84, 112, 0.16);
+  --hull-rail-edge: rgba(255, 84, 112, 0.42);
+}
+
+/* The row's own padding would push the bar away from its key; the block
+   already spaces the two apart. The backup cell's head does the same. */
+.hull__head {
+  padding: 0;
+}
+
+/* One size down from the tank's figure, matching the cell's: both are
+   secondary readings under the number the panel is named for. */
+.hull__val {
+  font-size: 13px;
+  color: var(--hull-accent);
+  text-shadow: 0 0 11px var(--hull-glow);
+}
+
+/* Ten notches at the power bar's full width, and the width is the claim: a
+   notch here is a tenth of the hull exactly as a notch up there is a tenth
+   of the tank, so the two bars can be read against each other without a
+   conversion. The cell is the odd one out at half length, and it is half
+   length because it holds half a tank. */
+.hull__bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  margin: 4px 0 5px;
+}
+
+.hull__seg {
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 1px;
+  background: var(--hull-rail);
+  box-shadow: inset 0 0 0 1px var(--hull-rail-edge);
+  transition: background-color 110ms linear;
+}
+
+.hull__seg.is-lit {
+  background: var(--hull-accent);
+  box-shadow: inset 0 0 0 1px var(--hull-accent), 0 0 6px var(--hull-glow);
+}
+
+.hull__status {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* The power tag's tracking and one size down, because this pair sits under a
+   bar that is already the second one in the block. */
+.hull__tag {
+  font-size: 8.5px;
+  letter-spacing: 0.1em;
+  color: var(--hull-accent);
+  text-shadow: 0 0 9px var(--hull-glow);
+  /* "BERTH - REPAIRING" and "SOUND - WEATHERING x2" are the long ones and
+     both fit; the clamp is here so a future phrase cannot silently widen the
+     panel instead of announcing itself. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hull__rate {
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* Opacity on two elements and nothing else, exactly as `pwr-alarm` is, and
+   on the same 900ms: the power block and this one are watched together, and
+   two alarms beating at slightly different rates read as a fault rather than
+   as a warning. Only `critical` flashes — a hull that is merely failing is a
+   cap to sail around, not an emergency, and an alarm that runs for the hour
+   it takes to reach a berth is an alarm nobody sees any more. */
+.hull--critical .hull__bar,
+.hull--critical .hull__tag {
+  animation: hull-alarm 900ms ease-in-out infinite;
+}
+
+@keyframes hull-alarm {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   The berth name in the power tag
+
+   `hud.ts` now writes "<HARBOUR> - CHARGING" where it used to write
+   "BERTH - CHARGING", and the longest name in `harbournames.ts` is 17
+   characters — so the tag went from a fixed phrase whose widest form the
+   panel was sized around ("IDLE - SOLAR CHARGING") to one that can reach
+   30. The panel is shrink-to-fit, so without a ceiling the telemetry block
+   would simply get wider every time the ship moored somewhere with a long
+   name, and the HUD would change shape as a side effect of arriving.
+
+   The cap is the POWER block's, not the panel's, because the power block is
+   the widest thing in it: 216px is `.panel--telemetry`'s 246px floor less
+   its 14px padding either side and its 1px borders, so the panel keeps
+   exactly the width it has always had and the tag ellipsises inside it.
+   ------------------------------------------------------------------- */
+
+#hud-pwr {
+  max-width: 216px;
+}
+
+#hud-pwr-mode {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------
+   HARBOURS — the menu's third pane
+
+   The root pane's rule above is written `.menu:not(.menu--controls)`,
+   from a time when there were two panes and "not the controls one" meant
+   the root. With a third it does not, so these two rules put it right.
+   They are written with the overlay class repeated (`.menu.menu--harbours`)
+   for one reason: that gives them the same specificity as the earlier
+   rule, and source order — this section is last — is then what decides.
+   ------------------------------------------------------------------- */
+
+.menu.menu--harbours .menu__pane--root,
+.menu.menu--harbours .menu__pane--controls {
+  display: none;
+}
+
+.menu.menu--harbours .menu__pane--harbours {
+  display: flex;
+}
+
+/*
+ * The roll of 36, and the one thing that matters about it is that it is a
+ * SCROLLING list inside a panel that is already capped at 86vh.
+ *
+ * Every other pane in this menu is short enough to size the panel itself.
+ * This one is not, and a list that pushed the panel past the viewport would
+ * take the Back button off the bottom of the screen with it — on the one
+ * screen in the project whose entire job is to be easy to leave.
+ */
+.harbours__list {
+  margin: 4px 0 2px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+/* Name left, fix right, in the readout's own shape: this is a panel of
+   instrument rows and should be built like one. */
+.harbours__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 3px 6px 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid rgba(63, 224, 255, 0.07);
+}
+
+/* The berth's mint, the same hue the scope's diamond and the world label
+   carry, so the three readings of one harbour are recognisably one harbour. */
+.harbours__name {
+  color: #8affc4;
+  letter-spacing: 0.06em;
+}
+
+/* The fix. Tabular, because a column of bearings is read down rather than
+   across and a proportional 1 would make the degrees ragged. */
+.harbours__fix {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* UNCHARTED, in the panel's quietest voice. It is not a warning and not an
+   error: most of the world is unvisited on any given load, and a list where
+   two thirds of the rows shouted would be a list nobody reads. */
+.harbours__fix--unknown {
+  color: var(--ink-mute);
+  letter-spacing: 0.14em;
+}
+
+/* ---------------------------------------------------------------------
+   Small viewports, and reduced motion — the same two exceptions the
+   POWER block above makes, for the same two reasons.
+   ------------------------------------------------------------------- */
+
+@media (max-width: 720px) {
+  /* The panel is content-width here, so the status line is what could widen
+     it; trim the pair rather than let the tag and the rate crowd each other.
+     The power block's own trim, one size down again. */
+  .hull__bar {
+    height: 5px;
+  }
+  .hull__tag {
+    font-size: 7.5px;
+    letter-spacing: 0.06em;
+  }
+  .hull__rate {
+    font-size: 9px;
+  }
+  .hull__status {
+    gap: 7px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The critical state still reads with the flash off: red rails, a red tag
+     and one notch lit. Exactly what `pwr--dead` falls back to. */
+  .hull--critical .hull__bar,
+  .hull--critical .hull__tag {
+    animation: none;
+  }
+  .hull__seg {
+    transition: none;
+  }
+}
+
+/* END HARBOURS C */
