@@ -12,7 +12,15 @@ import type { GpuFrameStats } from './postfx';
 import type { SeaAnchorStore } from './seaanchor';
 import type { OverdriveStore } from './overdrive';
 import type { Hull } from './hull';
-import { createStubHull } from './hull';
+import {
+  HULL_CAP_CRITICAL,
+  HULL_CAP_FAILING,
+  HULL_CAP_WORN,
+  HULL_FAILING_BELOW,
+  HULL_MIN,
+  HULL_WORN_BELOW,
+  createStubHull,
+} from './hull';
 import { BATTERY_CAPACITY } from './battery';
 
 /**
@@ -459,20 +467,23 @@ export function powerTagText(tag: PwrTag, berth: string | null): string {
 const HULL_SEGMENTS = 10;
 
 /**
- * The two thresholds the four hull bands are cut at, and the floor.
+ * The floor, under the name this file's phrasing uses for it.
  *
- * These are the panel's copy of numbers `hull.ts` owns for the sim
- * (`HULL_WORN_BELOW`, `HULL_FAILING_BELOW`, `HULL_MIN`), and the duplication
- * is deliberate rather than lazy: the sim derives a speed cap and a fishing
- * gate from them, this file derives a colour and a phrase, and importing the
- * sim's constants into the HUD would tie the panel's build to the sim's while
- * saving two lines. They must move together — a panel that says WORN while the
- * ship is still making its full speed is worse than no panel — and the test
- * pins both sides at every boundary for exactly that reason.
+ * The two band edges and the three caps are IMPORTED from `hull.ts` rather
+ * than copied. This panel had its own 50 and 25 for one commit, on the
+ * argument that the sim derives a speed from them and the panel derives a
+ * colour, so the two are different subjects that happen to share a number.
+ * They are not. A panel that says WORN while the ship is still making its
+ * full speed is worse than no panel at all, which means the two are one
+ * subject with two consumers -- and a shared subject belongs in the module
+ * that owns the behaviour, not in a copy beside the one that describes it.
+ *
+ * The caps are imported for the same reason and one better: the tag says
+ * `CAP 10 KN` in words, so a retune of `HULL_CAP_WORN` that this file did not
+ * hear about would leave the panel telling the player a speed the ship has
+ * not got.
  */
-const HULL_WORN_BELOW = 50;
-const HULL_FAILING_BELOW = 25;
-const HULL_FLOOR = 1;
+const HULL_FLOOR = HULL_MIN;
 
 /**
  * How alarming the hull is, which is a different question from what it is
@@ -528,9 +539,9 @@ export function hullTag(mode: HullMode, percent: number): string {
   if (mode === 'repairing') return 'BERTH - REPAIRING';
   if (percent >= 100) return 'HULL FULL';
   const doubled = mode === 'weathering' ? ' x2' : '';
-  if (percent <= HULL_FLOOR) return 'CRITICAL - CAP 1 KN';
-  if (percent < HULL_FAILING_BELOW) return `FAILING - CAP 5 KN${doubled}`;
-  if (percent < HULL_WORN_BELOW) return `WORN - CAP 10 KN${doubled}`;
+  if (percent <= HULL_FLOOR) return `CRITICAL - CAP ${HULL_CAP_CRITICAL} KN`;
+  if (percent < HULL_FAILING_BELOW) return `FAILING - CAP ${HULL_CAP_FAILING} KN${doubled}`;
+  if (percent < HULL_WORN_BELOW) return `WORN - CAP ${HULL_CAP_WORN} KN${doubled}`;
   return mode === 'weathering' ? 'SOUND - WEATHERING x2' : 'SOUND - WEARING';
 }
 
