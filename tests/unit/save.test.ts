@@ -60,6 +60,9 @@ describe('save', () => {
       moonglassTier: 1,
       arcLampTier: 3,
       governorTier: 2,
+      hull: 74,
+      knownHarbours: ['Rustwharf', 'Neon Reach'],
+      harbourStock: { Rustwharf: ['trim', 'governor'] },
     };
     writeSave(data);
     const loaded = loadSave();

@@ -1,4 +1,4 @@
-import type { SaveData } from './types';
+import type { SaveData, UpgradeLine } from './types';
 import type { Wallet } from './wallet';
 import type { FishBookStore } from './fishbook';
 import type { Battery } from './battery';
@@ -11,6 +11,7 @@ import type { TrimStore } from './trim';
 import type { MoonglassStore } from './moonglass';
 import type { ArcLampStore } from './arclamp';
 import type { GovernorStore } from './governor';
+import type { Hull } from './hull';
 import { createWallet } from './wallet';
 import { createFishBookStore } from './fishbook';
 import { BATTERY_CAPACITY, createBattery } from './battery';
@@ -23,6 +24,7 @@ import { TRIM_TIER_MAX, createTrimStore } from './trim';
 import { MOONGLASS_TIER_MAX, createMoonglassStore } from './moonglass';
 import { ARC_LAMP_TIER_MAX, createArcLampStore } from './arclamp';
 import { GOVERNOR_TIER_MAX, createGovernorStore } from './governor';
+import { HULL_MIN, createHull } from './hull';
 
 /**
  * save.ts — localStorage, versioned, and tolerant of anything it finds there.
@@ -95,6 +97,9 @@ export const EMPTY_SAVE: SaveData = Object.freeze({
   moonglassTier: 0,
   arcLampTier: 0,
   governorTier: 0,
+  hull: 100,
+  knownHarbours: Object.freeze([]),
+  harbourStock: Object.freeze({}),
 });
 
 /* ------------------------------------------------------------------ */
@@ -149,6 +154,11 @@ function toCapped(value: unknown, max: number): number | null {
 /** True for a plain object — not null, not an array, not a primitive. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** True for one of the four durable ladders a harbour may carry. */
+function isUpgradeLine(value: unknown): value is UpgradeLine {
+  return value === 'trim' || value === 'moonglass' || value === 'arclamp' || value === 'governor';
 }
 
 /**
@@ -213,6 +223,94 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
   const arcLampTier = readCapped('arcLampTier', ARC_LAMP_TIER_MAX);
   const governorTier = readCapped('governorTier', GOVERNOR_TIER_MAX);
 
+  /**
+   * Hull durability. A whole percent in [HULL_MIN, 100].
+   *
+   * Not read through `readCapped`: absent means a FULL hull rather than the
+   * zero every count above defaults to, and a zero would be a scuttled ship
+   * on a save written before the hull existed. The floor matters as much as
+   * the ceiling here, which is the other reason this one is spelled out.
+   */
+  let hull: number | null = 100;
+  const rawHull = record.hull;
+  if (rawHull !== undefined) {
+    if (typeof rawHull !== 'number' || !Number.isFinite(rawHull)) {
+      hull = null;
+      notes.push(`hull ${JSON.stringify(rawHull)}`);
+    } else {
+      hull = Math.min(100, Math.max(HULL_MIN, Math.round(rawHull)));
+    }
+  }
+
+  /**
+   * Harbours moored at. Unknown names are KEPT, on the same terms the fish
+   * book keeps unknown species ids: a save from a build with a longer name
+   * table must survive a round trip through this one.
+   */
+  const knownHarbours: string[] = [];
+  const rawKnown = record.knownHarbours;
+  if (rawKnown !== undefined) {
+    if (!Array.isArray(rawKnown)) {
+      notes.push('knownHarbours is not an array');
+    } else {
+      let rejectedNames = 0;
+      const seen = new Set<string>();
+      for (const entry of rawKnown) {
+        if (typeof entry !== 'string' || entry.length === 0) {
+          rejectedNames++;
+          continue;
+        }
+        // First-visit order is the file's order; a duplicate is damage that
+        // costs nothing to drop, because the store is a set either way.
+        if (seen.has(entry)) continue;
+        seen.add(entry);
+        knownHarbours.push(entry);
+      }
+      if (rejectedNames > 0) {
+        notes.push(`${rejectedNames} unreadable knownHarbours ${rejectedNames === 1 ? 'entry' : 'entries'}`);
+      }
+    }
+  }
+
+  /**
+   * Per-harbour upgrade stock. A harbour whose list is unreadable is dropped
+   * entirely rather than left with a partial one — `harbourstock.ts` re-rolls
+   * the WHOLE table when any name is missing, because the coverage guarantee
+   * (every ladder sold somewhere) cannot be made one harbour at a time.
+   */
+  const harbourStock: Record<string, UpgradeLine[]> = {};
+  const rawStock = record.harbourStock;
+  if (rawStock !== undefined) {
+    if (!isRecord(rawStock)) {
+      notes.push('harbourStock is not an object');
+    } else {
+      let rejectedStock = 0;
+      for (const [name, value] of Object.entries(rawStock)) {
+        if (!Array.isArray(value)) {
+          rejectedStock++;
+          continue;
+        }
+        const lines: UpgradeLine[] = [];
+        let bad = false;
+        for (const line of value) {
+          if (!isUpgradeLine(line)) {
+            bad = true;
+            break;
+          }
+          if (!lines.includes(line)) lines.push(line);
+        }
+        if (bad) {
+          rejectedStock++;
+          continue;
+        }
+        harbourStock[name] = lines;
+      }
+      if (rejectedStock > 0) {
+        notes.push(`${rejectedStock} unreadable harbourStock ${rejectedStock === 1 ? 'entry' : 'entries'}`);
+      }
+    }
+  }
+
   const fishBook: Record<string, number> = {};
   const raw = parsed.fishBook;
   if (!isRecord(raw)) {
@@ -252,6 +350,9 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
     moonglassTier: moonglassTier ?? 0,
     arcLampTier: arcLampTier ?? 0,
     governorTier: governorTier ?? 0,
+    hull: hull ?? 100,
+    knownHarbours,
+    harbourStock,
   };
 }
 
@@ -395,6 +496,7 @@ export function createRecords(): {
   moonglass: MoonglassStore;
   arcLamp: ArcLampStore;
   governor: GovernorStore;
+  hull: Hull;
 } {
   const save = loadSave();
   const wallet = createWallet(save.gold);
@@ -413,6 +515,19 @@ export function createRecords(): {
   const moonglass = createMoonglassStore(save.moonglassTier);
   const arcLamp = createArcLampStore(save.arcLampTier);
   const governor = createGovernorStore(save.governorTier);
+  const hull = createHull(save.hull);
+
+  /*
+   * The two fields Stream D owns, carried through untouched.
+   *
+   * Nothing in this build writes them yet, and a passthrough is what stops
+   * the first save written after Step 0 erasing a file that already has
+   * them. `harbourstock.ts` and `knownharbours.ts` replace both with real
+   * stores; until then the rule is the one the whole file runs on — repair,
+   * never reset.
+   */
+  const knownHarbours = save.knownHarbours;
+  const harbourStock = save.harbourStock;
 
   function persist(): void {
     writeSave({
@@ -429,6 +544,9 @@ export function createRecords(): {
       moonglassTier: moonglass.tier,
       arcLampTier: arcLamp.tier,
       governorTier: governor.tier,
+      hull: hull.state.percent,
+      knownHarbours,
+      harbourStock,
     });
   }
 
@@ -454,6 +572,10 @@ export function createRecords(): {
   moonglass.onChange(persist);
   arcLamp.onChange(persist);
   governor.onChange(persist);
+  // The hull is the second of the two that move continuously rather than on
+  // an event, and it notifies on its PERSISTED whole percent for the same
+  // reason the cell does -- see the note above.
+  hull.onChange(persist);
 
   return {
     wallet,
@@ -468,5 +590,6 @@ export function createRecords(): {
     moonglass,
     arcLamp,
     governor,
+    hull,
   };
 }

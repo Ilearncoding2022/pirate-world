@@ -3,6 +3,7 @@ import type { Dock, Town, Towns } from './types';
 import type { HeightMap } from './heightmap';
 import type { WaterBodies } from './waterbodies';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
+import { HARBOUR_NAMES } from './harbournames';
 
 /* ------------------------------------------------------------------ */
 /* Tuning                                                              */
@@ -215,8 +216,9 @@ export function createTowns(
   heightMap: HeightMap,
   waterBodies: WaterBodies,
   seaLevel: number,
+  seed: number = TOWN_SEED,
 ): Towns {
-  const rng = mulberry32(TOWN_SEED);
+  const rng = mulberry32(seed);
 
   const _dir = new Vector3();
   const _north = new Vector3();
@@ -381,7 +383,15 @@ export function createTowns(
     const berth = findBerth(_dir);
     if (berth === null) continue;
 
-    const town: MutableTown = { dir: _dir.clone(), height: h, coast, dock: null };
+    // Names are dealt by PLACEMENT ORDER, which is a function of the seed, so
+    // `Rustwharf` is a different island in every world. Step 0 deals from the
+    // front of the table; Stream A reserves indices 0 and 1 for the two poles
+    // and deals 2..35 here. A world with more candidates than names would run
+    // off the end, so the empty string is the honest answer until the count is
+    // pinned to HARBOUR_COUNT.
+    const index = towns.length;
+    const name = HARBOUR_NAMES[index] ?? '';
+    const town: MutableTown = { dir: _dir.clone(), height: h, coast, dock: null, name, index };
     const dock: Dock = { dir: berth, radius: DOCK_RADIUS, town };
     town.dock = dock;
     towns.push(town);
@@ -397,9 +407,20 @@ export function createTowns(
   const berths = Float64Array.from(berthXyz);
   const insideDot = Math.cos(DOCK_RADIUS * ARC);
 
+  // Built once. `byName` is asked for on a menu open and on a scope repaint,
+  // never in the hot path, but a linear walk of 36 strings per icon per frame
+  // would still be the kind of thing that turns up in a profile later.
+  const byName = new Map<string, Town>();
+  for (const town of towns) {
+    if (town.name.length > 0) byName.set(town.name, town);
+  }
+
   return {
     all: towns,
     docks,
+    byName(name: string): Town | null {
+      return byName.get(name) ?? null;
+    },
     dockAt(dir: Vector3): Dock | null {
       const x = dir.x;
       const y = dir.y;

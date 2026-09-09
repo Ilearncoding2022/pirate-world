@@ -68,8 +68,27 @@ export interface Town {
   readonly height: number;
   /** Fraction of a probe ring around the centre that is open water, in [0, 1]. */
   readonly coast: number;
-  /** Null for a landlocked town, or one whose only water the ship cannot reach. */
+  /**
+   * The berth. Never null once Stream A has landed — a candidate that cannot
+   * find water is not founded — but kept nullable through Step 0 so
+   * `radar.ts`'s existing `if (town.dock)` keeps compiling.
+   */
   readonly dock: Dock | null;
+  /**
+   * Display name, from `HARBOUR_NAMES`. Unique across `Towns.all`.
+   *
+   * This is the harbour's IDENTITY: the world is redrawn on every load, so
+   * the ground under a harbour is not durable and the save keys on this
+   * string. See `harbournames.ts`.
+   */
+  readonly name: string;
+  /**
+   * Position in `HARBOUR_NAMES`. 0 is the North Pole and 1 the South Pole.
+   *
+   * How names are DEALT OUT, never what a harbour is: nothing persists an
+   * index, because index 7 is a different island in every world.
+   */
+  readonly index: number;
 }
 
 /** A charging berth on reachable water beside a town. */
@@ -92,6 +111,14 @@ export interface Towns {
    * first hit is the only hit.
    */
   dockAt(dir: Vector3): Dock | null;
+  /**
+   * The town called `name`, or null.
+   *
+   * The lookup the save file needs: `knownHarbours` holds names, and the
+   * scope and the menu have to turn one back into a position in whatever
+   * world is currently up.
+   */
+  byName(name: string): Town | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -573,6 +600,72 @@ export interface PropulsionState {
   readonly anchored: boolean;
 }
 
+/* ------------------------------------------------------------------ */
+/* Hull durability                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the hull is doing, for the HUD to label.
+ *
+ * A CAUSE, not a severity: the severity is the percent, and `hud.ts` colours
+ * on that. The same split the power panel makes between its `pwr--*` modifier
+ * and its ten tags, and for the same reason — a worn hull being repaired and
+ * a worn hull wearing further are the same colour and different situations.
+ */
+export type HullMode = 'full' | 'wearing' | 'weathering' | 'repairing';
+
+/**
+ * The hull as everything downstream sees it, produced by `hull.ts`.
+ *
+ * Every field but `percent` is DERIVED from it on read and never stored, so
+ * there is exactly one number in the sim and no way for the cap, the fishing
+ * gate and the battle threshold to disagree about it.
+ */
+export interface HullState {
+  /**
+   * Durability in WHOLE percent, [1, 100].
+   *
+   * Whole, on the same terms as `SaveData.reserve`: the sim keeps a float and
+   * rounds here, so a hull wearing at 0.25 %/min writes the save every four
+   * minutes rather than every frame.
+   */
+  readonly percent: number;
+  /**
+   * Top speed the hull allows, world units per second — the same unit
+   * `MAX_FORWARD` and `PropulsionState.maxForward` are in.
+   *
+   * `Infinity` at 50% and above, which is what lets `ship.ts` write a plain
+   * `Math.min(propulsion.maxForward, speedCap)` and have a sound hull change
+   * nothing at all. A finite value up there would silently cap Trim and
+   * Overdrive.
+   */
+  readonly speedCap: number;
+  /** False below 25%: the fishing screen's START and AGAIN are dead. */
+  readonly canFish: boolean;
+  /**
+   * Broadsides this hull can take in a fight before it loses: 3, 2 or 1.
+   *
+   * Read once at the moment a fight starts and frozen for its length — a hull
+   * does not wear inside the arena, so this cannot move mid-battle.
+   */
+  readonly hitsToLose: number;
+  readonly mode: HullMode;
+  /** Signed, percent per SECOND. `hud.ts` prints wear per minute and repair per second. */
+  readonly rate: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* The chandlery's four durable ladders                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One of the four upgrade ladders, as a harbour's stock list names it.
+ *
+ * Consumables are sold everywhere and are not in this union; only the four
+ * durables vary from harbour to harbour. See `harbourstock.ts`.
+ */
+export type UpgradeLine = 'trim' | 'moonglass' | 'arclamp' | 'governor';
+
 /** Read-only view of the ship, produced by ship.ts, consumed by camera.ts and hud.ts. */
 export interface ShipState {
   /** Unit vector from globe center to the ship. World position = position * GLOBE_RADIUS. */
@@ -809,6 +902,29 @@ export interface SaveData {
   readonly arcLampTier: number;
   /** Efficiency Governor tier bought, 0-`GOVERNOR_TIER_MAX`. Absent means Mk 0. */
   readonly governorTier: number;
+  /**
+   * Hull durability in whole percent, [1, 100]. Absent or unreadable means
+   * 100 — a save written before the hull existed is a ship that has never
+   * worn, which is the truth about it.
+   */
+  readonly hull: number;
+  /**
+   * Harbour names the ship has moored at, in first-visit order.
+   *
+   * The one thing that survives a world being redrawn. Unknown names are
+   * KEPT rather than dropped, on exactly the terms `fishBook` keeps unknown
+   * species ids: a save from a later build with a longer name table must
+   * survive a round trip through this one.
+   */
+  readonly knownHarbours: readonly string[];
+  /**
+   * Name → the upgrade ladders that harbour sells.
+   *
+   * Rolled once for all 36 and written here, so a remembered harbour keeps
+   * the stock it had. Absent means the whole table is re-rolled at boot —
+   * see `harbourstock.ts`.
+   */
+  readonly harbourStock: Readonly<Record<string, readonly UpgradeLine[]>>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -876,8 +992,17 @@ export interface Combatant {
   readonly z: number;
   /** Radians, direction of travel, on the same convention as ShipState.heading. */
   readonly heading: number;
-  /** Hits taken, 0 up to HITS_TO_LOSE. */
+  /** Hits taken, 0 up to this side's own `hitsToLose`. */
   readonly hits: number;
+  /**
+   * Hits this side can take before it loses.
+   *
+   * Per COMBATANT rather than the one shared `HITS_TO_LOSE` it used to be:
+   * the AI is always 3, and the player is 3, 2 or 1 off the hull at the
+   * moment the fight starts. `docs/SHOP_PLAN.md` lists this split as its open
+   * prerequisite; `docs/HARBOURS_PLAN.md` closes it.
+   */
+  readonly hitsToLose: number;
   /** Seconds until this side may fire again. */
   readonly cooldown: number;
   /**

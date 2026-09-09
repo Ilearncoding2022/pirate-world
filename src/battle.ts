@@ -116,6 +116,7 @@ export interface BattleSim {
 
 interface MutableCombatant extends Combatant {
   angle: number;
+  hitsToLose: number;
   x: number;
   z: number;
   heading: number;
@@ -149,9 +150,10 @@ interface MutableBattleState extends BattleState {
   fuse: number | null;
 }
 
-function combatant(angle: number): MutableCombatant {
+function combatant(angle: number, hitsToLose: number): MutableCombatant {
   return {
     angle,
+    hitsToLose,
     x: 0,
     z: 0,
     heading: 0,
@@ -173,6 +175,7 @@ function combatant(angle: number): MutableCombatant {
 export function createBattleSim(
   rng: () => number = Math.random,
   options: BattleOptions = ROUGH,
+  playerHitsToLose: number = HITS_TO_LOSE,
 ): BattleSim {
   // Two streams off the one source, drawn in a FIXED order before either
   // module exists and before `options` has been looked at.
@@ -195,8 +198,8 @@ export function createBattleSim(
     radius: ARENA_R0,
     // The player on the near side, at the bottom of the frame the arena
     // camera is parked in, and the enemy across the circle from it.
-    player: combatant(Math.PI),
-    ai: combatant(0),
+    player: combatant(Math.PI, playerHitsToLose),
+    ai: combatant(0, HITS_TO_LOSE),
     balls: [],
     elapsed: 0,
     outcome: null,
@@ -310,14 +313,17 @@ export function createBattleSim(
   /** The outcome rules, in the order the plan states them: first match wins. */
   function settle(): void {
     if (state.outcome !== null) return;
-    const playerOut = state.player.hits >= HITS_TO_LOSE;
-    const aiOut = state.ai.hits >= HITS_TO_LOSE;
+    // Each side against its OWN threshold. `HITS_TO_LOSE` is the AI's number
+    // now; the player's comes off the hull at the moment the fight starts and
+    // is 3, 2 or 1. See docs/HARBOURS_PLAN.md, Trap 2.
+    const playerOut = state.player.hits >= state.player.hitsToLose;
+    const aiOut = state.ai.hits >= state.ai.hitsToLose;
     if (playerOut && aiOut) state.outcome = 'draw';
     else if (aiOut) state.outcome = 'win';
     else if (playerOut) state.outcome = 'loss';
     // The fourth rule is gone with the locker it read: a fight can no longer
-    // end because both sides ran out of ammunition, only because someone was
-    // hit three times or because the clock ran out.
+    // end because both sides ran out of ammunition, only because someone has
+    // taken their own last hit or because the clock ran out.
     else if (state.elapsed >= BATTLE_TIMEOUT) state.outcome = 'draw';
   }
 
