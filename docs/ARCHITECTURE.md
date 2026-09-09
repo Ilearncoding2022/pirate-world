@@ -1034,6 +1034,8 @@ constant over the patch of water reflecting them, and a bank is metres away.
 ## Frame loop
 ```
 energy.update(dt, shipState, env, ..., weather.state)   // burn / solar / dock, on last frame's speed and last frame's sky
+hull.update(dt, energy.mode === 'docked', weathered)    // straight after the plant: a second reserve, on this frame's docked verdict. THIS BRANCH ONLY -- that is the whole of "the hull does not wear in a fight, a session, the shop or the menu"
+known.add(towns.dockAt(ship.position).town.name)        // while docked. Idempotent; the frame loop is the caller
 weatherCells.update(dt, shipState, energyState)         // BEFORE the wind: a storm cell floors the wind, so the wind needs this frame's sample
 wind.update(dt, shipState, energyState, cells.stormAtShip)  // needs this frame's docked verdict
 weather.update(dt, wind.state, cells.state)             // after the wind (this frame's phase), before the hazards (this frame's odds)
@@ -1046,13 +1048,22 @@ globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)
 rain.update(dt, shipState, wind.state, weather.state, view.camera)  // after globe: the box hangs on the hull the camera has just been framed against, and is SIZED off that camera
 lightning.update(dt, shipState, weather.state)  // alongside the rain, for the same reason; rebuilds its geometry only when flashSeed changes
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
-docks.update(dt, env, shipState, energyState)
+docks.update(dt, env, shipState, energyState, view.camera)  // the camera is what the harbour labels fade against; omit it and NONE is ever drawn, because they ship `visible = false`
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
 hud.update(shipState, energyState, windState, weather.state)
 radar.update(dt, shipState, windState, hazards.state, aiBoats.state, weather.state, cells.state, chart)
 postFx.render(dt, scene, camera)
 controls.endFrame()
 ```
+
+`hull.update`'s position in that list is load-bearing and not a matter of
+taste. It is in the sailing branch and in neither of the two below, so the
+frozen branch (menu, shop, fishing cover, fishing session, battle card) and
+the arena branch simply never reach it. Decision 12 of
+`docs/HARBOURS_PLAN.md` is therefore enforced by WHERE the call sits, not by
+a flag inside `hull.ts` — which means there is no mode the sim can be left
+stuck in and no caller that has to remember to switch one off. Moving this
+line into a shared helper would quietly undo that.
 
 `suppressed()` is `main.ts`'s own one-line verdict, `energy.mode === 'docked'
 || blackout.active || hazards.state.phase !== 'free'`, and it is computed
