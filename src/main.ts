@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import './style.css';
-import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
-import { createGlobe } from './globe';
+import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
+import { buildWorldMeshes } from './globe';
 import { createShip } from './ship';
 import { createWake } from './wake';
 import { createWaterWakePlugin } from './waterwake';
@@ -29,6 +29,7 @@ import { createFishCover } from './fishcover';
 import { createShop } from './shop';
 import { createLoading } from './loading';
 import { createQuality } from './quality';
+import { WORLD_ATTEMPTS, generateWorld } from './worldgen';
 import { createReflection } from './reflection';
 import { createWaterReflectPlugin } from './waterreflect';
 import { createHazards } from './hazards';
@@ -44,7 +45,8 @@ import { createBattleCover } from './battlecover';
 import { createMenu } from './menu';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
 import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, PropulsionState, ShipState } from './types';
-import { GLOBE_RADIUS } from './geo';
+import { GLOBE_RADIUS, tangentFrame } from './geo';
+import { HARBOUR_NAMES } from './harbournames';
 import { OVERDRIVE_MAX_FORWARD } from './overdrive';
 
 /*
@@ -87,6 +89,55 @@ if (probeQuery === 'wave' || probeQuery === 'hazard') {
  * and everything else is trimming. Only the hull reports real progress; see
  * `createShip`'s `onHullProgress`.
  */
+/**
+ * How deep the weather has to be before it doubles the hull's wear.
+ *
+ * Lives here rather than in `hull.ts` because it is a statement about
+ * `WeatherState`, and `hull.ts` is handed the answer rather than the sky. Half
+ * of any ONE envelope -- storm, rain or fog -- and never a sum of them: three
+ * multiplying envelopes would put a ship at 8x in the one condition it already
+ * cannot see out of. One threshold, one factor, and the panel says `x2`.
+ */
+const HULL_WEATHER_THRESHOLD = 0.5;
+
+/* Scratch for `bearingTo`, module-scope so the menu's 36 rows allocate nothing. */
+const _bearingNorth = new THREE.Vector3();
+const _bearingEast = new THREE.Vector3();
+
+/**
+ * Great-circle bearing from the ship to `target`, radians, 0 = north and
+ * clockwise positive -- `ShipState.heading`'s convention exactly.
+ *
+ * The frame is raised at the SHIP, not at the target, because a bearing is a
+ * statement about which way to point the bow from here. It is the same
+ * `atan2(east, north)` `ship.ts` and `wind.ts` already use to read a heading
+ * off a vector, and it is derived on demand rather than stored for the reason
+ * docs/ARCHITECTURE.md gives: an angle in a tangent frame is degenerate at the
+ * poles, and two of the 36 harbours are AT the poles.
+ */
+function bearingTo(ship: ShipState, target: THREE.Vector3): number {
+  tangentFrame(ship.position, _bearingNorth, _bearingEast);
+  return Math.atan2(target.dot(_bearingEast), target.dot(_bearingNorth));
+}
+
+/**
+ * What a fight and a funnel cost the hull, in whole percent.
+ *
+ * Five for a win or a draw and fifteen for a loss, and the maelstrom takes the
+ * loss's figure. Against a free repair at any berth these are cheap; against a
+ * quarter of a percent a minute of ordinary wear, one lost fight is an hour of
+ * sailing. That is the intended shape -- the clock is what makes a harbour
+ * worth calling at eventually, and a fight is what makes one worth running for
+ * now.
+ *
+ * A draw pays the win's price rather than splitting the difference: a fight
+ * that ended level still had three broadsides in it, and a third number here
+ * would be a distinction no player could feel.
+ */
+const HULL_BATTLE_WIN = 5;
+const HULL_BATTLE_LOSS = 15;
+const HULL_MAELSTROM = HULL_BATTLE_LOSS;
+
 async function startGame(): Promise<void> {
   const loading = createLoading();
 
@@ -145,7 +196,6 @@ async function startGame(): Promise<void> {
     }
   }
 
-  const terrain = createTerrain(DEFAULT_SEED);
 
   // The two things that add themselves to the water shader. Both are built
   // here rather than inside `globe.ts` because both need something that module
@@ -171,15 +221,88 @@ async function startGame(): Promise<void> {
   const waterPlugins = [createWaterWakePlugin(wake), waterHazard];
   if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
 
-  // The long synchronous stage: the height map is rasterised, the islets are
-  // culled, the land mask is installed and the towns are placed, all on the
-  // main thread. Nothing paints from here until it returns, which is exactly
-  // why the bar was moved and painted first.
-  await loading.step(0.20, 'RAISING THE LAND');
+  /*
+   * The long synchronous stage, and now a LOOP around it.
+   *
+   * `generateWorld` rasterises a height map, culls the islets, floods the sea
+   * and places the harbours, then measures the result; a world that fails is
+   * thrown away and another seed is drawn. All of it is on the main thread and
+   * nothing paints from here until it returns, which is why the bar was moved
+   * and painted first -- and why `onAttempt` awaits a repaint before each try,
+   * so a rejection is something the player watches happen rather than a freeze.
+   *
+   * The land MESH is deliberately outside the loop. It is the expensive half --
+   * two million vertices on the high tier -- and a rejected world must never
+   * pay for one. That is the whole reason `globe.ts` is split in two; see
+   * docs/HARBOURS_PLAN.md, Trap 1.
+   *
+   * `?seed=` pins the world for the tests and the screenshot stations, and a
+   * pinned seed that fails THROWS rather than quietly falling back, so a
+   * fixture that has stopped being buildable is loud. That throw is caught
+   * here: a player who pastes someone else's bad seed gets the ordinary random
+   * world and a console warning, not a boot that stops at the splash.
+   */
+  const seedQuery = new URLSearchParams(window.location.search).get('seed');
+  const seedHint = seedQuery !== null && /^\d+$/.test(seedQuery) ? Number(seedQuery) >>> 0 : null;
 
-  const globe = createGlobe(terrain, quality, waterPlugins);
+  await loading.step(0.20, 'CHARTING A NEW SEA');
+
+  async function announce(n: number, seed: number): Promise<void> {
+    // A tenth of the bar spread over the attempt budget, so a world that takes
+    // three goes visibly creeps rather than sitting still. The label carries
+    // the attempt number only after the first, because "(1)" on a world that
+    // passes first time -- which is every world measured so far -- would
+    // advertise a retry that never happened.
+    const fraction = 0.20 + Math.min(n - 1, WORLD_ATTEMPTS) * (0.08 / WORLD_ATTEMPTS);
+    void seed;
+    await loading.step(fraction, n === 1 ? 'CHARTING A NEW SEA' : `CHARTING A NEW SEA (${n})`);
+  }
+
+  let world;
+  try {
+    world = await generateWorld(seedHint, quality, announce);
+  } catch (error) {
+    if (seedHint === null) throw error;
+    console.warn(`main.ts: ${String(error)}; drawing a world at random instead.`);
+    world = await generateWorld(null, quality, announce);
+  }
+  const { terrain, data: worldData, seed: worldSeed } = world;
+
+  await loading.step(0.30, 'RAISING THE LAND');
+
+  const globe = buildWorldMeshes(worldData, terrain, quality, waterPlugins);
   scene.add(globe.group);
   scene.add(wake.object);
+
+  // Everything the player keeps across reloads, in one call. `createRecords` is
+  // the single entry point for persistence precisely so that no caller can wire
+  // half of it and end up with a wallet that saves and a fish book that does not.
+  //
+  // It comes before the power plant, because the plant is built around the
+  // backup cell and the cell's charge is one of the things that survives a
+  // reload -- and now before the SHIP as well, because the hull's durability
+  // caps the ship's top speed and is loaded from the same file. It reads
+  // nothing but `localStorage`, so it is free to sit this early.
+  const records = createRecords();
+
+  /*
+   * `?hull=<1..100>` -- start with a worn hull, for the screenshot stations.
+   *
+   * Through `override` rather than `damage`, which is the whole reason that
+   * method exists: `damage` notifies, and a notify writes the save, so a dev
+   * query would permanently scuttle a real player's file the one time they
+   * pasted it. This sets the number and tells nobody. Read through
+   * URLSearchParams on exactly the terms `?quality=`, `?clock=` and `?hazard=`
+   * are read on -- `vite preview` serves a genuine production build and this is
+   * meant to be pointed at one.
+   */
+  const hullQuery = new URLSearchParams(window.location.search).get('hull');
+  if (hullQuery !== null) {
+    const percent = Number(hullQuery);
+    if (Number.isFinite(percent) && percent >= 1 && percent <= 100) {
+      records.hull.override(percent);
+    }
+  }
 
   await loading.step(0.5, 'LAUNCHING THE HULL');
 
@@ -202,17 +325,9 @@ async function startGame(): Promise<void> {
     },
     renderer.capabilities.getMaxAnisotropy(),
     (fraction) => loading.set(HULL_FROM + (HULL_TO - HULL_FROM) * fraction),
+    records.hull,
   );
   scene.add(ship.object);
-
-  // Everything the player keeps across reloads, in one call. `createRecords` is
-  // the single entry point for persistence precisely so that no caller can wire
-  // half of it and end up with a wallet that saves and a fish book that does not.
-  //
-  // It comes before the power plant now, because the plant is built around the
-  // backup cell and the cell's charge is one of the things that survives a
-  // reload.
-  const records = createRecords();
 
   // Power plant. Built from the world's berths and the bought backup cell,
   // read by the ship (thrust gate), the HUD, the model's neon and the dock
@@ -262,7 +377,12 @@ async function startGame(): Promise<void> {
   // drawn at random -- integration replaces this with the seed that world was
   // actually built from. It is passed rather than defaulted because a chart is
   // now keyed on its world; see `chart.ts` on why version 2 has a header.
-  const chart = createChart(DEFAULT_SEED, loadChart());
+  /*
+   * The chart is keyed to the world it charted. A saved bitmap whose seed is
+   * not this one is discarded and the scope starts blank, which is correct
+   * rather than a loss: it recorded a coastline that no longer exists.
+   */
+  const chart = createChart(worldSeed, loadChart());
   chart.onChange(() => writeChart(chart.encode()));
   window.addEventListener('pagehide', () => writeChart(chart.encode()));
 
@@ -331,6 +451,11 @@ async function startGame(): Promise<void> {
    * while the hull was still at the bottom of a hole.
    */
   function onSunk(): void {
+    // The same fifteen points a lost fight costs, and deliberately the same:
+    // going down a funnel and losing a battle are the two ways the sea takes a
+    // real bite out of the boat, and a player should not have to learn two
+    // numbers for it.
+    records.hull.damage(HULL_MAELSTROM);
     energy.wreck();
     blackout.run(() => {
       // The heading is cosmetic -- the ship is stopped and the player will
@@ -381,8 +506,15 @@ async function startGame(): Promise<void> {
   const lightning = createLightning();
   scene.add(lightning.object);
 
-  const hud = createHud(records.wallet, records.seaAnchor, records.overdrive);
-  const radar = createRadar(globe.heightMap, globe.waterBodies, terrain.seaLevel, globe.towns);
+  const hud = createHud(records.wallet, records.seaAnchor, records.overdrive, records.hull, globe.towns);
+  const radar = createRadar(
+    globe.heightMap,
+    globe.waterBodies,
+    terrain.seaLevel,
+    globe.towns,
+    records.known.names,
+    records.hull,
+  );
   const timeDialCanvas = document.getElementById('hud-timedial');
   const timeDial =
     timeDialCanvas instanceof HTMLCanvasElement ? createTimeDial(timeDialCanvas) : null;
@@ -448,6 +580,31 @@ async function startGame(): Promise<void> {
     // The halt every overlay makes, for the fishing card's reason: it is what
     // makes "the world resumes from rest" true of this screen too.
     onOpen: () => ship.halt(),
+    /*
+     * The HARBOURS page, filled on every open.
+     *
+     * Built here rather than in `menu.ts` because it is the one place that can
+     * see all three of the towns, the ship and the save. The menu is handed
+     * finished rows and never learns what a `Towns` or a `ShipState` is.
+     *
+     * Every one of the 36 names is listed, known or not, and the unknown ones
+     * read UNCHARTED. That is the point of the page: a harbour remembered from
+     * a previous world is a navigation target in this one from the first
+     * frame, and the scope only reaches 50 units, so without this a remembered
+     * name would be findable only by sailing over it.
+     */
+    harbours: () =>
+      HARBOUR_NAMES.map((name) => {
+        const town = globe.towns.byName(name);
+        const known = records.known.names.has(name);
+        if (town === null || !known) return { name, known: false, bearing: 0, distance: 0 };
+        return {
+          name,
+          known: true,
+          bearing: bearingTo(ship.state, town.dir),
+          distance: Math.acos(Math.min(1, ship.state.position.dot(town.dir))) * GLOBE_RADIUS,
+        };
+      }),
   });
 
   /*
@@ -624,7 +781,18 @@ async function startGame(): Promise<void> {
   function onContact(boat: AiBoat): void {
     ship.halt();
     contactBoat = boat;
-    battleCover.open(boat.kind);
+    /*
+     * The player's threshold is read HERE, at the ram, and carried unchanged
+     * through the card and into the sim.
+     *
+     * It has to be one reading rather than three lookups. The card promises a
+     * number in words -- "two hits lose it" -- and the strip draws that many
+     * pips, so if either re-read the hull they could disagree with the sim
+     * that is actually counting. The hull cannot move during a fight in any
+     * case (the arena branch never ticks it), which is what makes freezing it
+     * at the ram honest rather than merely convenient.
+     */
+    battleCover.open(boat.kind, records.hull.state.hitsToLose);
   }
 
   /**
@@ -648,9 +816,13 @@ async function startGame(): Promise<void> {
       battleCover.close();
       return;
     }
-    battleSim = createBattleSim(undefined, battleSeaFor());
+    // The same reading the card was opened with three seconds ago, not a
+    // fresh one: nothing has ticked the hull in between, and taking it twice
+    // would be two chances to disagree for no gain.
+    const playerHits = records.hull.state.hitsToLose;
+    battleSim = createBattleSim(undefined, battleSeaFor(), playerHits);
     outcomeSettled = false;
-    battleUi.open(boat.kind);
+    battleUi.open(boat.kind, playerHits);
     blackout.run(() => {
       // The card comes down HERE, on a screen that is already opaque, for the
       // reason the instruments below it do: taking it away the instant the
@@ -684,6 +856,19 @@ async function startGame(): Promise<void> {
    * and what a fight happened to be worth does not.
    */
   function settleOutcome(outcome: BattleOutcome): void {
+    /*
+     * The hull first, before the gold and before the plant, so the card reads
+     * a hull that has already moved -- the same ordering rule the rest of this
+     * function already keeps for the purse.
+     *
+     * A loss costs three times a win, and a win costs anything at all, which
+     * is the point: there is no free fight. Winning is cheaper than running,
+     * losing is dear, and both are paid in the one currency a berth gives
+     * back for nothing.
+     */
+    const hullCost = outcome === 'loss' ? HULL_BATTLE_LOSS : HULL_BATTLE_WIN;
+    records.hull.damage(hullCost);
+
     let gold = 0;
     if (outcome === 'win') {
       gold = rollWinGold(Math.random);
@@ -702,7 +887,7 @@ async function startGame(): Promise<void> {
       }
     }
     // Last, so the card reads a wallet and a plant that have already moved.
-    battleUi.result({ outcome, gold, reserve: energy.state.reserve });
+    battleUi.result({ outcome, gold, reserve: energy.state.reserve, hull: hullCost });
   }
 
   /**
@@ -788,6 +973,7 @@ async function startGame(): Promise<void> {
     barbedHeads: records.barbedHeads,
     onStart: (useChumDrum, useBarbedHeads) => fishing.open(useChumDrum, useBarbedHeads),
     onRecord: () => fishBook.open(),
+    hull: records.hull,
     // Same halt, and the same reason, as the fishing card's own: the hull
     // stops before the first frozen frame runs, so the world resumes from
     // rest rather than leaping forward on the frame the screen closes.
@@ -807,6 +993,14 @@ async function startGame(): Promise<void> {
     moonglass: records.moonglass,
     arcLamp: records.arcLamp,
     governor: records.governor,
+    hull: records.hull,
+    stock: records.stock,
+    known: records.known,
+    // Where the panel is, asked on every open. A callback rather than a value
+    // for the pause contract's reason: a berth read once at construction would
+    // be a lie by the second frame, and the whole point of the harbour name in
+    // the head is that it names the one you are actually tied up at.
+    harbour: () => globe.towns.dockAt(ship.state.position)?.town ?? null,
   });
 
   // hud.ts owns whether [FISH] looks pressable; this owns what pressing it does.
@@ -1261,6 +1455,40 @@ async function startGame(): Promise<void> {
     // turns out not to have. `globe.update` is what writes `env`, so the sun the
     // solar panels see is also one frame old -- 16 ms of a 10-minute day.
     energy.update(dt, ship.state, env, overdriveActive, moonNightFraction, weather.state);
+
+    /*
+     * The hull, immediately after the plant and for the same reason: it is a
+     * reserve that moves with time and the weather, and it reads this frame's
+     * docked verdict.
+     *
+     * This line is in the SAILING branch and nowhere else, which is the whole
+     * of decision 12 in docs/HARBOURS_PLAN.md. The frozen branch above (the
+     * menu, the shop, the fishing cover, a fishing session, the battle card)
+     * and the arena branch both return before they reach it, so the hull
+     * cannot wear while any of those own the screen. It is a property of where
+     * the call sits rather than a flag `hull.ts` could be left stuck in.
+     */
+    const wx = weather.state;
+    const weathered =
+      wx.storm >= HULL_WEATHER_THRESHOLD ||
+      wx.rain >= HULL_WEATHER_THRESHOLD ||
+      wx.fog >= HULL_WEATHER_THRESHOLD;
+    records.hull.update(dt, energy.state.mode === 'docked', weathered);
+
+    /*
+     * A harbour is remembered the moment the plant says the ship is alongside.
+     *
+     * `energy.state.mode === 'docked'` is this project's single definition of
+     * moored -- `main.ts` already leans on it for the pause contract -- so
+     * reading it here means the scope, the menu and the save can never
+     * disagree with the power panel about whether a berth was reached.
+     * `add` is idempotent and this runs every frame the ship sits still.
+     */
+    if (energy.state.mode === 'docked') {
+      const berth = globe.towns.dockAt(ship.state.position);
+      if (berth) records.known.add(berth.town.name);
+    }
+
     // Wind sits between the two: it needs this frame's docked verdict to know
     // whether the ship is in shelter, and the ship needs this frame's push.
     /*
@@ -1428,7 +1656,12 @@ async function startGame(): Promise<void> {
     // must restore the renderer's target before the visible frame draws, or
     // the game renders into its own reflection cube and the canvas goes black.
     reflection.update(dt, ship.state.position, renderer, scene);
-    docks.update(dt, env, ship.state, energy.state);
+    // The camera, because the harbour labels fade from the LENS and not from
+    // the boat: the chase camera runs 23 to 211 units back, so a fade
+    // measured at the hull would switch a name off while it was still a
+    // legible mark on screen. Labels ship invisible, so omitting this would
+    // silently draw none of them at all.
+    docks.update(dt, env, ship.state, energy.state, view.camera);
     wake.update(dt, ship.state, env, renderer);
     hud.update(ship.state, energy.state, wind.state, weather.state);
     radar.update(
