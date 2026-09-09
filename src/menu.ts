@@ -101,27 +101,34 @@ export interface MenuDeps {
 const RAD_TO_DEG = 180 / Math.PI;
 
 /**
- * "N 042°" — a true bearing, as the HARBOURS page prints it.
+ * "042°" — a true bearing, as the HARBOURS page prints it.
  *
- * `N` is the reference and not a rose point: this is a bearing measured from
- * north, clockwise, exactly as the HDG readout above the scope is, and the
- * letter is there so a player reading a column of them knows what the number
- * is measured from without a header. Naming the nearest of eight compass
- * points instead was considered and dropped — it would put NE beside 042 and
- * SW beside 214, which is a second, coarser answer to a question the number
- * has already answered exactly.
+ * No letter in front of it, and that is the second answer to this question.
+ * The first was `N 042°`, where the `N` was a REFERENCE — "measured from
+ * north" — rather than a rose point, on the argument that a column of them
+ * reads better with the datum stated and that naming the nearest of eight
+ * compass points would put a coarse `NE` beside an exact `042`.
  *
- * Three digits, zero-padded, sharing `formatHeading`'s shape in `hud.ts` on
- * purpose: the bearing the player reads here is the heading they are about to
- * steer, and the two figures should be the same figure. Wrapped into [0, 360)
- * after rounding, so a bearing a hair under a full turn reads `N 000°` rather
- * than the impossible `N 360°`.
+ * The argument was sound and the output was not: a harbour due south came out
+ * as `N 184°`, which every reader parses as a northerly bearing and then has
+ * to un-parse. A navigation readout that has to be un-parsed is worse than one
+ * with no datum on it at all.
+ *
+ * So the datum is dropped rather than corrected, because the same comment
+ * already gave the reason to: this figure is meant to be the same FIGURE as
+ * the heading the player is about to steer, and `hud.ts` prints that as
+ * `090°` with nothing in front of it. Now the two are the same shape as well
+ * as the same number, which is what the claim was always worth.
+ *
+ * Three digits, zero-padded. Wrapped into [0, 360) after rounding, so a
+ * bearing a hair under a full turn reads `000°` rather than the impossible
+ * `360°`.
  *
  * Exported for `tests/unit/hull-hud.test.ts`.
  */
 export function formatBearing(bearingRad: number): string {
   const deg = ((Math.round(bearingRad * RAD_TO_DEG) % 360) + 360) % 360;
-  return `N ${String(deg).padStart(3, '0')}°`;
+  return `${String(deg).padStart(3, '0')}°`;
 }
 
 /**

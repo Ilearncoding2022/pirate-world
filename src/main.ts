@@ -316,11 +316,37 @@ async function startGame(): Promise<void> {
    */
   const HULL_FROM = 0.56;
   const HULL_TO = 0.88;
+  /*
+   * `?spawn=<lat>,<lon>` -- start the ship somewhere other than the spawn.
+   *
+   * A dev query on exactly the terms `?quality=`, `?clock=` and `?hazard=` are
+   * read on, and it exists because two of the 36 harbours are AT THE POLES and
+   * there is otherwise no way to look at either without sailing 312 units to
+   * get there. It is also the only way to photograph a harbour's name label,
+   * whose fade is 140 units and whose nearest instance to the spawn is 95.
+   *
+   * No validation beyond the range and a comma: an unreachable spot is a
+   * beached ship, which is a thing the game already handles and a thing the
+   * person who typed the query can see for themselves.
+   */
+  const spawnQuery = new URLSearchParams(window.location.search).get('spawn');
+  let spawnLat = SPAWN_LAT_DEG;
+  let spawnLon = SPAWN_LON_DEG;
+  if (spawnQuery !== null) {
+    const [rawLat, rawLon] = spawnQuery.split(',');
+    const lat = Number(rawLat);
+    const lon = Number(rawLon);
+    if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90) {
+      spawnLat = lat;
+      spawnLon = lon;
+    }
+  }
+
   const ship = createShip(
     terrain,
     {
-      latDeg: SPAWN_LAT_DEG,
-      lonDeg: SPAWN_LON_DEG,
+      latDeg: spawnLat,
+      lonDeg: spawnLon,
       headingDeg: 90,
     },
     renderer.capabilities.getMaxAnisotropy(),

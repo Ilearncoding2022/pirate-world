@@ -214,31 +214,31 @@ describe('the HARBOURS page fix', () => {
    * heading the player is about to steer.
    */
   it('prints a true bearing zero-padded to three digits', () => {
-    expect(formatBearing(0)).toBe('N 000°');
-    expect(formatBearing(Math.PI / 4)).toBe('N 045°');
-    expect(formatBearing(Math.PI / 2)).toBe('N 090°');
-    expect(formatBearing(Math.PI)).toBe('N 180°');
-    expect(formatBearing((3 * Math.PI) / 2)).toBe('N 270°');
+    expect(formatBearing(0)).toBe('000°');
+    expect(formatBearing(Math.PI / 4)).toBe('045°');
+    expect(formatBearing(Math.PI / 2)).toBe('090°');
+    expect(formatBearing(Math.PI)).toBe('180°');
+    expect(formatBearing((3 * Math.PI) / 2)).toBe('270°');
   });
 
-  /* A bearing a hair under a full turn must read N 000, never the impossible
-     N 360: the wrap is taken AFTER the rounding for exactly that reason. */
+  /* A bearing a hair under a full turn must read 000, never the impossible
+     360: the wrap is taken AFTER the rounding for exactly that reason. */
   it('wraps a full turn back to north rather than printing 360', () => {
-    expect(formatBearing(Math.PI * 2)).toBe('N 000°');
-    expect(formatBearing(Math.PI * 2 - 1e-6)).toBe('N 000°');
+    expect(formatBearing(Math.PI * 2)).toBe('000°');
+    expect(formatBearing(Math.PI * 2 - 1e-6)).toBe('000°');
   });
 
   /* `tangentFrame` hands out signed angles and nothing in this project
      normalises one before it is printed, so a westerly bearing arrives
      negative. */
   it('turns a negative bearing into the same compass direction', () => {
-    expect(formatBearing(-Math.PI / 2)).toBe('N 270°');
-    expect(formatBearing(-Math.PI)).toBe('N 180°');
+    expect(formatBearing(-Math.PI / 2)).toBe('270°');
+    expect(formatBearing(-Math.PI)).toBe('180°');
   });
 
   it('rounds to the nearest whole degree', () => {
-    expect(formatBearing((41.6 * Math.PI) / 180)).toBe('N 042°');
-    expect(formatBearing((42.4 * Math.PI) / 180)).toBe('N 042°');
+    expect(formatBearing((41.6 * Math.PI) / 180)).toBe('042°');
+    expect(formatBearing((42.4 * Math.PI) / 180)).toBe('042°');
   });
 
   /* Units, not knots. Everything else the HUD prints off a world-unit figure

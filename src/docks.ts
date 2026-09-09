@@ -681,6 +681,21 @@ export function createDocks(towns: Towns): Docks {
     const material = new THREE.SpriteMaterial({
       map: drawn.texture,
       transparent: true,
+      /*
+       * OFF, and it has to be set rather than described.
+       *
+       * This file carried two comments saying it was off and never passed it;
+       * the default is TRUE, so every label was 0.034 WORLD units tall -- a
+       * sixth of a millimetre against a 3-unit hull -- and all 36 rendered
+       * correctly, in the scene, at full opacity, far below one pixel. The
+       * build was green and both test tiers passed, because nothing here
+       * asserts on appearance and an invisible sprite throws nothing.
+       *
+       * With it off, `scale` is very nearly the fraction of the viewport the
+       * sprite covers, which is what LABEL_SCREEN_HEIGHT is authored as and
+       * what makes the two fade constants the whole of the range logic.
+       */
+      sizeAttenuation: false,
       // Not written into the depth buffer, exactly as the ring is not: a
       // label is an annotation on the world and must not carve the sea, the
       // spray or another harbour's label out of itself.
