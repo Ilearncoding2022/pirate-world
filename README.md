@@ -453,6 +453,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 
 ## Structure
 
+See [docs/ROADMAP.md](docs/ROADMAP.md) for where the project stands, what the
+last release changed, and what is worth building next — it is the handoff
+document, and it names the check behind every claim in it.
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for module ownership, the
 coordinate conventions, the pinned units, and the frame-loop contract. Read it
 before changing anything that crosses a module boundary — and read **World
