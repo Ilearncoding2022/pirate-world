@@ -16,13 +16,45 @@ import { createDayNight } from './daynight';
 import { createClouds } from './clouds';
 import { createCityLights } from './citylights';
 import { createTowns } from './towns';
-import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
+import { DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import { latLonToDir } from './geo';
 import { updateFog } from './fog';
 import { createFogBank } from './fogbank';
 import { createWeatherMap } from './weathermap';
 import { createWaterPatch } from './waterpatch';
 import type { Quality } from './quality';
+
+/**
+ * Everything about a world that is decided before a single triangle exists.
+ *
+ * This is the half of `createGlobe` that `worldgen.ts` runs in a loop, and the
+ * split is the whole reason the loop is affordable. `docs/HARBOURS_PLAN.md`,
+ * Trap 1: the expensive half of building a world is the land mesh -- 2.2
+ * million vertices on the high tier -- and it comes LAST, after the height map,
+ * the islet cull, the flood fill and the town search have already decided
+ * whether the world is any good. A rejection loop around the whole call would
+ * have paid for a land mesh per rejected world, twelve times over in the worst
+ * case, for meshes nobody ever sees.
+ *
+ * So: no THREE objects in here, nothing added to a scene, nothing that touches
+ * a renderer. About a second on the owner's machine, on the main thread, behind
+ * the loading bar. `buildWorldMeshes` turns an accepted one into a `Globe`.
+ */
+export interface WorldData {
+  /**
+   * The world seed this was built from. Carried because `citylights.ts` derives
+   * its scatter from it and `buildWorldMeshes` is the only thing that calls
+   * that -- by the time the meshes are built, the `Terrain` that knew the seed
+   * is three modules away and does not report it.
+   */
+  readonly seed: number;
+  /** Rasterised, islets already culled, installed as the terrain's land mask. */
+  readonly heightMap: HeightMap;
+  /** Flooded from the spawn point: which water the ship can reach. */
+  readonly waterBodies: WaterBodies;
+  /** Settlements and their berths. Short of HARBOUR_COUNT means a bad world. */
+  readonly towns: Towns;
+}
 
 export interface Globe {
   group: THREE.Group;
@@ -56,25 +88,29 @@ export interface Globe {
 }
 
 /**
- * Assembles the world.
+ * The data half of the world: height map, islet cull, flood fill, towns.
  *
- * Ordering matters: the day/night rig writes the environment, then every other
- * module reads it, so all shaders agree on sun direction within a frame.
+ * Pure in the sense that matters here -- it constructs no THREE object and
+ * adds nothing to a scene -- with the one documented exception that it installs
+ * the culled map as the terrain's land mask, which it must, because collision
+ * reads the terrain and not the map. See the note at the call below.
  *
- * @param waterPlugins Everything that adds to the water shader, built by
- *   `main.ts` and handed in already constructed. Each one needs something this
- *   module never sees -- the wake needs the ribbon it is drawn from, the
- *   reflection cube needs the renderer and the top-level scene -- and each
- *   one's per-frame work is driven from the frame loop, not from here.
+ * `worldgen.ts` calls this once per attempt and throws most of them away.
+ * Nothing else may: `main.ts` calls it through `generateWorld` and everything
+ * else goes through `createGlobe`.
+ *
+ * @param quality Unused today and taken anyway, because the one thing that
+ *   would plausibly want it -- the height map's resolution -- is the number
+ *   every fixture, every berth walk and every shader lookup is calibrated
+ *   against, and the day someone tiers it this signature should not have to
+ *   change. Named with the leading underscore the compiler wants for an
+ *   unused parameter rather than dropped, so the call sites read the same.
  */
-export function createGlobe(
+export function buildWorldData(
   terrain: Terrain,
-  quality: Quality,
-  waterPlugins: WaterPlugin[] = [],
-): Globe {
-  const group = new THREE.Group();
-  group.name = 'world';
-
+  _quality: Quality,
+  seed: number = DEFAULT_SEED,
+): WorldData {
   const heightMap = createHeightMap(terrain);
 
   // Sink the specks before anything reads the map. Everything downstream --
@@ -95,8 +131,40 @@ export function createGlobe(
   );
 
   // Placed before anything that draws them: the lights, the berths, the scope
-  // and the charging test all read this one list.
+  // and the charging test all read this one list. A world whose coast cannot
+  // hold HARBOUR_COUNT of them comes back short and `worldgen.ts` redraws;
+  // that judgement is not made here.
   const towns = createTowns(heightMap, waterBodies, terrain.seaLevel);
+
+  return { seed, heightMap, waterBodies, towns };
+}
+
+/**
+ * The mesh half: everything that draws.
+ *
+ * Ordering matters: the day/night rig writes the environment, then every other
+ * module reads it, so all shaders agree on sun direction within a frame.
+ *
+ * Called exactly once per session, on the world that passed its checks. It is
+ * the expensive half (the land mesh alone is 2.2 million vertices on the high
+ * tier), which is precisely why it is not inside the rejection loop.
+ *
+ * @param waterPlugins Everything that adds to the water shader, built by
+ *   `main.ts` and handed in already constructed. Each one needs something this
+ *   module never sees -- the wake needs the ribbon it is drawn from, the
+ *   reflection cube needs the renderer and the top-level scene -- and each
+ *   one's per-frame work is driven from the frame loop, not from here.
+ */
+export function buildWorldMeshes(
+  data: WorldData,
+  terrain: Terrain,
+  quality: Quality,
+  waterPlugins: WaterPlugin[] = [],
+): Globe {
+  const group = new THREE.Group();
+  group.name = 'world';
+
+  const { heightMap, waterBodies, towns } = data;
 
   const dayNight = createDayNight();
   // Every water plugin is built by `main.ts` and handed in, because each one
@@ -112,7 +180,7 @@ export function createGlobe(
   // waterpatch.ts.
   const waterPatch = createWaterPatch(water, quality);
   const land = createLand(terrain, heightMap, quality);
-  const cityLights = createCityLights(terrain, heightMap, towns);
+  const cityLights = createCityLights(terrain, heightMap, towns, data.seed);
   const clouds = createClouds();
   /*
    * The fog you sail into, as opposed to the haze `updateFog` writes into
@@ -191,4 +259,21 @@ export function createGlobe(
       celestial.update(dt, env);
     },
   };
+}
+
+/**
+ * Both halves, in order. The shape `createGlobe` always had.
+ *
+ * Kept because most callers -- the fixture generator, anything headless --
+ * want a world and do not care that building one is two steps. `main.ts` is
+ * the exception and calls the halves itself, with the rejection loop between
+ * them.
+ */
+export function createGlobe(
+  terrain: Terrain,
+  quality: Quality,
+  waterPlugins: WaterPlugin[] = [],
+  seed: number = DEFAULT_SEED,
+): Globe {
+  return buildWorldMeshes(buildWorldData(terrain, quality, seed), terrain, quality, waterPlugins);
 }

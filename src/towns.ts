@@ -2,8 +2,13 @@ import { Vector3 } from 'three';
 import type { Dock, Town, Towns } from './types';
 import type { HeightMap } from './heightmap';
 import type { WaterBodies } from './waterbodies';
-import { GLOBE_RADIUS, tangentFrame } from './geo';
-import { HARBOUR_NAMES } from './harbournames';
+import { GLOBE_RADIUS, latLonToDir, tangentFrame } from './geo';
+import {
+  HARBOUR_COUNT,
+  HARBOUR_NAMES,
+  NORTH_POLE_INDEX,
+  SOUTH_POLE_INDEX,
+} from './harbournames';
 
 /* ------------------------------------------------------------------ */
 /* Tuning                                                              */
@@ -18,34 +23,39 @@ import { HARBOUR_NAMES } from './harbournames';
 export const TOWN_SEED = 0x5eed17;
 
 /**
- * How many settlements to try to place, and how hard to try.
+ * How many settlements the world must have, and how hard to try for them.
  *
- * Every settlement is now a port -- a candidate that cannot find a berth is not
- * founded at all -- so this number is the size of the fleet's worth of charging
- * stations as well as the size of the world's population. It came down a
- * quarter, from 76, when that rule came in: 76 towns used to yield 48 berths,
- * and leaving the target alone would have handed the player half again as many
- * places to charge as the world was balanced around.
+ * This is a COUNT, not a target, and that is the whole difference between it
+ * and the `CLUSTER_TARGET` (40) it replaced. Every settlement is a port and
+ * every port has a name, so the world is exactly `HARBOUR_COUNT` harbours or
+ * it is not a world: `worldgen.ts` reads a short return as a rejection and
+ * draws another seed. Everything downstream -- the name table, the menu page,
+ * the per-harbour upgrade roll -- may therefore assume 36 without checking.
  *
- * 57 to 40 (2026-09-07, owner's call). It is a TARGET rather than a count --
- * `CLUSTER_TRIES` attempts are made and a candidate that cannot find lowland,
- * open coast, room from its neighbours or reachable water is simply not
- * founded -- so the world ends up with at most this many and usually fewer.
- * What the player feels is a longer run between charges: the reserve, the
- * solar rate and the 2%/s shore rate are all untouched, so a thinner coast is
- * the same tank across a wider gap. `CLUSTER_MIN_ARC` is deliberately NOT
- * relaxed to spread 40 towns over the same coastline: the spacing is what
- * every berth-overlap argument below leans on, and a world with fewer ports
- * should read as emptier rather than as evenly thinned.
+ * CLUSTER_TRIES is the budget that makes the failure finite. 20000 rejection
+ * samples over the sphere is far more than a healthy world needs (36 harbours
+ * land in the first few thousand) and is spent in full only by a world that
+ * genuinely cannot hold them -- a mostly-ocean draw, or one whose coast is all
+ * cliff. Running out is not an error here; it is how a bad seed is detected.
  */
-const CLUSTER_TARGET = 40;
 const CLUSTER_TRIES = 20000;
 /**
  * Minimum arc, in radians, between two settlement centres. At GLOBE_RADIUS 200
- * that is 19 world units, which is the spacing every berth-overlap argument
- * below leans on.
+ * that is 15 world units.
+ *
+ * Relaxed from 0.095 (19 units) to make room for 36 harbours where 40 used to
+ * be a ceiling nobody reached. The consequence is stated plainly in
+ * `docs/HARBOURS_PLAN.md`, decision 2: the world reads as more evenly settled.
+ *
+ * The cost is subtler and matters more. At 0.095 two rings of DOCK_RADIUS 8
+ * could not touch by arithmetic alone -- 16 units of ring inside 19 of spacing
+ * -- and every argument about `dockAt` returning THE dock rather than A dock
+ * leaned on that. At 0.075 the arithmetic no longer says it: 16 units of ring
+ * do not fit inside 15 of spacing. So the overlap test on `berthXyz` below is
+ * now the sole authority on the no-overlap promise, and it must stay. It
+ * always ran; it was merely redundant before.
  */
-const CLUSTER_MIN_ARC = 0.095;
+const CLUSTER_MIN_ARC = 0.075;
 
 /**
  * Habitable band, as height above sea level. Exported because the individual
@@ -76,52 +86,109 @@ const DOCK_MIN_COAST = 0.25;
 /**
  * Radius of a charging zone, as a great-circle distance in world units.
  *
- * Settlements are at least CLUSTER_MIN_ARC apart -- 0.095 rad x 200 = 19 world
- * units -- so two zones of radius 8 cannot reach each other as long as a berth
- * stays near its own town, which BERTH_REACH + BERTH_MARGIN below keeps it
- * doing. Where the geometry conspires anyway (two towns either side of the same
- * strait, both berthing toward the middle) the placement loop rejects the
- * second outright -- and with it the town, which is no longer founded at all --
- * so the no-overlap promise on `Towns.dockAt` holds without relying on the
- * arithmetic. It is also many times the 3.12-unit hull, so holding station
- * inside one is steering rather than parking.
+ * Settlements are at least CLUSTER_MIN_ARC apart -- 0.075 rad x 200 = 15 world
+ * units -- which is LESS than the 16 units two zones of this radius span, so
+ * unlike the world before 36 harbours the spacing no longer rules an overlap
+ * out on its own. The placement loop rejects a candidate whose berth would
+ * reach another's outright -- and with it the town, which is then not founded
+ * at all -- so the no-overlap promise on `Towns.dockAt` rests entirely on that
+ * test now. See CLUSTER_MIN_ARC above.
+ *
+ * It is many times the 3.12-unit hull either way, so holding station inside one
+ * is steering rather than parking.
  */
 const DOCK_RADIUS = 8;
 
 /**
- * Berth search, authored in world units and converted to arc below.
+ * Berth search, authored in radians because every distance in it is an arc.
  *
- * REACH is how far out from a town centre a shoreline may lie and still count
- * as that town's water: a little over COAST_PROBE_ARC * GLOBE_RADIUS (11
- * units), so anything the coast score noticed is inside the walk. STEP is the
- * sampling interval along a bearing, well under a zone radius so a waterline is
- * never stepped clean over. MARGIN is how far past the first water the berth is
- * pushed so the ring sits on the sea rather than straddling the beach -- just
- * under DOCK_RADIUS, because pushing a full radius out fails in every inlet
- * narrower than the zone.
+ * The berth used to be pushed as far out to sea as it could get -- up to 21
+ * units from the town, at the end of a fourteen-unit reach plus a seven-unit
+ * margin -- which put a good many of them in the middle of a cove with the
+ * town a swim away. `docs/HARBOURS_PLAN.md`, decision 3: the berth belongs at
+ * the town's OWN shoreline. So the walk stops at the first water it finds and
+ * takes one short step past it instead of running for open sea.
+ *
+ * SHORE_MARGIN is that step: 0.012 rad, 2.4 units, enough that the zone ring's
+ * inner edge clears the surf band rather than straddling the beach. If a ring
+ * is ever seen with land showing through it, this is the number that goes up
+ * -- before `docks.ts`'s RING_LIFT, which would only hide the symptom.
+ *
+ * MAX_ARC is how far from its centre a berth may end up at all: 0.04 rad, 8
+ * units, a hull and a half. A candidate that cannot find water that close is
+ * not on a shoreline, whatever its coast score said, and is not founded.
+ *
+ * STEP is the sampling interval along a bearing. 0.002 rad is 0.4 units, finer
+ * than the 2048x1024 height map's own 0.003 rad texel, so the walk cannot step
+ * clean over a waterline the map can actually resolve.
  */
-const BERTH_REACH = 14;
-const BERTH_STEP = 1.0;
-const BERTH_MARGIN = 7;
+const BERTH_SHORE_MARGIN = 0.012;
+/**
+ * Exported because it is a promise the module makes to its callers rather than
+ * a private tuning number: every berth in `Towns.docks` is within this arc of
+ * its own town's centre, which is what "the berth is at the town" means to
+ * `docks.ts`'s label, to the scope, and to `towns.test.ts`.
+ */
+export const BERTH_MAX_ARC = 0.04;
+const BERTH_STEP_ARC = 0.002;
 
-/** Bearings tried around a town centre: one every 15 degrees. */
-const BERTH_BEARINGS = 24;
+/**
+ * Bearings tried around a town centre: one every 30 degrees.
+ *
+ * Twelve rather than the old 24, and deliberately the same twelve the coast
+ * score already sweeps -- these ARE the coastal bearings. The old search
+ * scored a whole fourteen-unit ray per bearing and needed the finer spread to
+ * tell a sea from a pond at that range; this one only has to find the nearest
+ * water inside eight units, and at that range 24 bearings answer the same
+ * question twice.
+ */
+const BERTH_BEARINGS = 12;
+
+/* ---- The two fixed harbours ---------------------------------------- */
+
+/**
+ * How far down lon 0 from a pole the polar town's centre sits, and its berth.
+ *
+ * Not ON the pole, and that is the trap `docs/HARBOURS_PLAN.md` calls Trap 3:
+ * `tangentFrame` has no north at a pole and falls back to an arbitrary one, so
+ * anything placed exactly there would carry a direction nothing else agrees
+ * on. 0.01 rad is 2 units off it -- inside `terrain.ts`'s POLE_LAND_RAD islet,
+ * so still on the rock -- and every frame raised there is ordinary.
+ *
+ * The berth is at 0.05 rad, 10 units, the middle of the moat (`terrain.ts`,
+ * POLE_MOAT_RAD 0.08). That puts it exactly BERTH_MAX_ARC from its centre: the
+ * polar pair are placed by fiat rather than searched for, so they are allowed
+ * to sit on the limit the search would have stopped at.
+ */
+export const POLE_OFFSET_RAD = 0.01;
+const POLE_BERTH_RAD = 0.05;
 
 /**
  * How much of a zone's own rim has to be over reachable water, sampled at how
  * many points.
  *
- * The margin walk only promises water directly outward from the town, which a
+ * The bearing walk only promises water directly outward from the town, which a
  * berth at the head of a creek or in a pocket cove satisfies while its ring
  * still lies mostly on the bank. Sampling a ring at DOCK_RADIUS asks the
- * question the drawn zone actually asks. Three quarters rather than all of it,
- * because a berth inside a harbour SHOULD have land behind it -- that is what a
- * harbour is. What gets turned away is the town with a puddle beside it.
+ * question the drawn zone actually asks, and what gets turned away is the town
+ * with a puddle beside it.
  *
- * That used to cost such a town only its dock. Now that every settlement is a
- * port, it costs the town itself, which makes this constant the sharpest edge
- * in the file: raise it and the map empties out, lower it and the fleet starts
- * finding berths in ponds.
+ * Three quarters MEANS MORE NOW THAN IT USED TO, and the number was left alone
+ * anyway. The berth used to be shoved up to 21 units offshore, where three
+ * quarters of an eight-unit ring is open water almost by default. It now sits
+ * 2.4 units off the beach, where a ring that size over a straight coast is
+ * only about three fifths water -- so this no longer reads as "mostly clear",
+ * it reads as "on a point, a spit or a narrow shore, with the sea round most
+ * of it". The berths that survive are the convex parts of the coastline, and
+ * that is a deliberate keep rather than an oversight: at 0.75 the pinned seed
+ * founds all 36 harbours and so did all 50 random seeds measured, so nothing
+ * is being paid for it. Lower it if a shot ever shows the fleet tied up in the
+ * open rather than at a shore.
+ *
+ * It is still the sharpest edge in the file. It used to cost a town only its
+ * dock; now that every settlement is a port it costs the town itself, and 36
+ * of them is a hard count -- so raising it does not thin the map, it starts
+ * throwing whole worlds away.
  */
 const BERTH_CLEAR = 0.75;
 const BERTH_CLEAR_SAMPLES = 12;
@@ -190,14 +257,29 @@ type MutableTown = { -readonly [K in keyof Town]: Town[K] };
 /* ------------------------------------------------------------------ */
 
 /**
- * Where the world's settlements are. Every one of them is a port.
+ * Where the world's settlements are. Every one of them is a port, and there
+ * are exactly HARBOUR_COUNT of them or the world is thrown away.
  *
- * A candidate is rejection-sampled over the sphere and scored by how coastal
- * and how low its spot is, so shorelines are far more likely than highlands and
- * no two centres land on top of each other. It then has to find a berth --
- * water the ship can actually get to, close enough to tie up at -- and a
- * candidate that cannot is not founded. That is what makes `Town.dock`
- * non-null for every town in `all`.
+ * Two are PLACED and thirty-four are FOUND. The two polar harbours go down
+ * first, at fixed points on lon 0 either side of the globe, and they draw
+ * nothing at all from the PRNG -- which is the whole reason they go first
+ * rather than last. The random stream that finds the other thirty-four is
+ * therefore bit-identical to what it would be if the poles did not exist, so
+ * adding them moved no other harbour in any world, and removing them would
+ * move none either.
+ *
+ * The thirty-four are rejection-sampled over the sphere and scored by how
+ * coastal and how low the spot is, so shorelines are far more likely than
+ * highlands and no two centres land on top of each other. Each then has to
+ * find a berth -- water the ship can actually get to, close enough to tie up
+ * at -- and a candidate that cannot is not founded. That is what makes
+ * `Town.dock` non-null for every town in `all`.
+ *
+ * Coming up short is not an error and is not repaired here: `createTowns`
+ * returns however many it managed, and `worldgen.ts` reads anything under
+ * HARBOUR_COUNT as a rejected world and draws a new seed. A pole that cannot
+ * reach the sea takes its own slot with it, so a world with a continent on the
+ * pole comes back at 35 and is redrawn for that reason alone.
  *
  * The berth search draws nothing from the PRNG, only from the height map, so
  * retuning it moves which candidates survive but never which candidates are
@@ -276,85 +358,161 @@ export function createTowns(
 
   // Zones may not overlap: `dockAt` returns the first hit and its callers are
   // promised it is the only one. A candidate therefore has to clear every berth
-  // already placed by two radii.
+  // already placed by two radii. With CLUSTER_MIN_ARC relaxed to 15 units this
+  // is no longer a formality -- it is the only thing enforcing the promise.
   const berthMinDot = Math.cos(2 * DOCK_RADIUS * ARC);
-  const steps = Math.round(BERTH_REACH / BERTH_STEP);
-  const marginSteps = Math.round(BERTH_MARGIN / BERTH_STEP);
+  const berthMaxSteps = Math.round(BERTH_MAX_ARC / BERTH_STEP_ARC);
+  const marginSteps = Math.round(BERTH_SHORE_MARGIN / BERTH_STEP_ARC);
+
+  /** True if `berth` reaches a berth already placed. */
+  function overlapsAPlacedBerth(berth: Vector3): boolean {
+    for (let i = 0; i < berthXyz.length; i += 3) {
+      const d = berthXyz[i] * berth.x + berthXyz[i + 1] * berth.y + berthXyz[i + 2] * berth.z;
+      if (d > berthMinDot) return true;
+    }
+    return false;
+  }
 
   /**
-   * The berth for a town at `centre`, or null if it has no water to tie up in.
+   * The berth for a town at `centre`, or null if it has no shoreline to tie up
+   * at.
    *
-   * Null is now fatal to the town, not merely to its dock, so this is the gate
-   * that decides most of what the world looks like: everything it turns away is
-   * a settlement that never existed.
+   * Null is fatal to the town, not merely to its dock, so this is the gate that
+   * decides most of what the world looks like: everything it turns away is a
+   * settlement that never existed. It is also, now, the gate that decides
+   * whether a whole SEED survives -- turn away four candidates too many and the
+   * count comes up short and the world is redrawn.
+   *
+   * The shape changed with `docs/HARBOURS_PLAN.md`, decision 3. The old search
+   * picked one seaward bearing by scoring a long ray along each, then ran as
+   * far out to sea as the water held. This one walks every coastal bearing out
+   * to the FIRST reachable sea texel, steps BERTH_SHORE_MARGIN past it, and
+   * keeps whichever of those landings has the most open water around it. Same
+   * two questions -- where is the sea, and is it sea rather than a puddle --
+   * asked at the town's own doorstep instead of a fifth of the way to the
+   * horizon.
+   *
+   * It still draws nothing from the PRNG, only from the height map, so retuning
+   * it moves which candidates survive but never which candidates are offered.
+   * Keep it that way. A berth test that rolled a die would make every town
+   * downstream of it move whenever the search changed.
+   *
+   * Reachability is the whole point. The height map alone cannot answer it: a
+   * crater lake is under sea level and reads as water, but `ship.ts` will never
+   * carry the player over the rim to reach it, so a berth there would be a
+   * charging station nobody can dock at. `waterBodies` flood-filled the sea
+   * from the ship's own spawn point, so its mask is the authority -- reachable
+   * means below sea level AND not flagged inland.
    */
   function findBerth(centre: Vector3): Vector3 | null {
     tangentFrame(centre, _north, _east);
 
-    // The seaward bearing: the one with the most reachable water along it.
-    // Scoring the whole ray rather than a single sample is what keeps a berth
-    // out of the pond in the next valley -- an open-sea bearing scores most of
-    // its length, a pond scores two or three steps and loses. Only this one
-    // bearing is ever tried. Falling back to the next best when it fails was
-    // tried and abandoned: with 24 bearings to choose from nearly every coastal
-    // town finds water somewhere, which in the world of the day took the fleet
-    // from 48 berths to 66 -- and every one of those extra eighteen sat on a
-    // bearing with strictly less water than the town's own best, which is one
-    // way of describing the wrong side of the headland. Ties go to the lower
-    // bearing index -- arbitrary, but fixed, so the world does not reshuffle
-    // between runs.
-    let bearing = 0;
-    let bestScore = 0;
+    let best: Vector3 | null = null;
+    let bestScore = -1;
+
     for (let b = 0; b < BERTH_BEARINGS; b++) {
       const a = (b / BERTH_BEARINGS) * Math.PI * 2;
-      let open = 0;
-      for (let st = 1; st <= steps; st++) {
-        stepOut(centre, _north, _east, a, st * BERTH_STEP * ARC, _probe);
-        if (reachableWater(_probe)) open++;
+
+      // Out to the first reachable sea texel, and no further: this bearing's
+      // shoreline is where the town's own water begins.
+      let shore = -1;
+      for (let st = 1; st <= berthMaxSteps; st++) {
+        stepOut(centre, _north, _east, a, st * BERTH_STEP_ARC, _probe);
+        if (reachableWater(_probe)) {
+          shore = st;
+          break;
+        }
       }
-      if (open > bestScore) {
-        bestScore = open;
-        bearing = a;
+      if (shore < 0) continue;
+
+      // One fixed step past it, so the ring's inner edge clears the surf. Fixed
+      // rather than "as far as the water holds" on purpose: the old walk's
+      // greed is exactly what put berths in the middle of coves.
+      const berthStep = shore + marginSteps;
+      if (berthStep > berthMaxSteps) continue;
+      stepOut(centre, _north, _east, a, berthStep * BERTH_STEP_ARC, _probe);
+      if (!reachableWater(_probe)) continue;
+
+      // Which of the landings to keep. `oceanFraction` is the same ring probe
+      // `Town.coast` is scored with, so a harbour and its berth cannot end up
+      // disagreeing about what counts as open water -- and reading it AT THE
+      // BERTH rather than at the town is what still separates a real anchorage
+      // from a pond two hundred metres inland.
+      const score = oceanFraction(heightMap, seaLevel, _probe);
+      if (score > bestScore) {
+        bestScore = score;
+        best = (best ?? new Vector3()).copy(_probe);
       }
     }
-    if (bestScore === 0) return null;
 
-    // Walk out to the waterline, then keep going while the water holds, up to
-    // MARGIN. Taking the last wet step rather than a fixed push past the first
-    // one is what stops the berth crossing onto the far bank of anything
-    // narrower than MARGIN.
-    let found = -1;
-    for (let st = 1; st <= steps; st++) {
-      stepOut(centre, _north, _east, bearing, st * BERTH_STEP * ARC, _probe);
-      if (reachableWater(_probe)) {
-        found = st;
-        break;
-      }
-    }
-    if (found < 0) return null;
-
-    let last = found;
-    for (let st = found + 1; st <= found + marginSteps; st++) {
-      stepOut(centre, _north, _east, bearing, st * BERTH_STEP * ARC, _probe);
-      if (!reachableWater(_probe)) break;
-      last = st;
-    }
-    stepOut(centre, _north, _east, bearing, last * BERTH_STEP * ARC, _probe);
-    if (rimClearance(_probe) < BERTH_CLEAR) return null;
-
-    for (let i = 0; i < berthXyz.length; i += 3) {
-      const d = berthXyz[i] * _probe.x + berthXyz[i + 1] * _probe.y + berthXyz[i + 2] * _probe.z;
-      if (d > berthMinDot) return null;
-    }
-
-    return _probe.clone();
+    if (best === null) return null;
+    if (rimClearance(best) < BERTH_CLEAR) return null;
+    if (overlapsAPlacedBerth(best)) return null;
+    return best;
   }
+
+  /* ---- 1b. The two poles, placed rather than found ------------------ */
+
+  /**
+   * Founds the harbour at `sign * +Y`, or returns false if the moat there is
+   * not sea the ship can reach.
+   *
+   * Placed, not searched: `terrain.ts` has already guaranteed rock at the pole
+   * and water around it, so there is nothing to score and nothing to choose.
+   * The one thing terrain CANNOT guarantee is that the moat joins the ocean --
+   * a continent may be sitting on the pole with the dimple punched into the
+   * middle of it -- and that is the single question asked here. A false answer
+   * costs the world its 36th harbour and `worldgen.ts` redraws.
+   *
+   * `rimClearance` is deliberately not consulted. A ring of DOCK_RADIUS around
+   * a berth in a sixteen-unit moat crosses the islet on the inside and the fade
+   * band on the outside, so it would fail a test written for an open coast, and
+   * failing it would mean no polar harbour in any world at all. The moat is a
+   * harbour by construction; the test exists to catch a puddle nobody designed.
+   */
+  function foundPole(sign: number, index: number): boolean {
+    const centre = latLonToDir(
+      sign * (90 - (POLE_OFFSET_RAD * 180) / Math.PI),
+      0,
+      new Vector3(),
+    );
+    const berth = latLonToDir(sign * (90 - (POLE_BERTH_RAD * 180) / Math.PI), 0, new Vector3());
+    if (!reachableWater(berth)) return false;
+    if (overlapsAPlacedBerth(berth)) return false;
+
+    const town: MutableTown = {
+      dir: centre,
+      height: heightMap.sample(centre),
+      coast: oceanFraction(heightMap, seaLevel, centre),
+      dock: null,
+      name: HARBOUR_NAMES[index],
+      index,
+    };
+    const dock: Dock = { dir: berth, radius: DOCK_RADIUS, town };
+    town.dock = dock;
+    towns.push(town);
+    docks.push(dock);
+    berthXyz.push(berth.x, berth.y, berth.z);
+    return true;
+  }
+
+  // Before the random loop, and the return value deliberately dropped: a pole
+  // that could not be founded is not an error to handle here, it is a harbour
+  // missing from the count, which `worldgen.ts` reads as a rejected world.
+  foundPole(1, NORTH_POLE_INDEX);
+  foundPole(-1, SOUTH_POLE_INDEX);
 
   /* ---- 2. Settlement centres, each with its berth ------------------ */
 
   const minDot = Math.cos(CLUSTER_MIN_ARC);
 
-  for (let attempt = 0; attempt < CLUSTER_TRIES && towns.length < CLUSTER_TARGET; attempt++) {
+  // Names are dealt by index, and the poles have already taken 0 and 1 --
+  // whether or not they were founded. A world that lost a pole therefore runs
+  // out of names at 35 towns rather than quietly promoting a found harbour into
+  // Marine Stronghold's slot, and comes back short, which is the rejection.
+  let nextIndex = SOUTH_POLE_INDEX + 1;
+
+  for (let attempt = 0; attempt < CLUSTER_TRIES && nextIndex < HARBOUR_COUNT; attempt++) {
     randomDirection(rng, _dir);
     const h = heightMap.sample(_dir);
     if (h <= seaLevel + SHORE_MARGIN || h > seaLevel + CENTRE_CEILING) continue;
@@ -384,14 +542,17 @@ export function createTowns(
     if (berth === null) continue;
 
     // Names are dealt by PLACEMENT ORDER, which is a function of the seed, so
-    // `Rustwharf` is a different island in every world. Step 0 deals from the
-    // front of the table; Stream A reserves indices 0 and 1 for the two poles
-    // and deals 2..35 here. A world with more candidates than names would run
-    // off the end, so the empty string is the honest answer until the count is
-    // pinned to HARBOUR_COUNT.
-    const index = towns.length;
-    const name = HARBOUR_NAMES[index] ?? '';
-    const town: MutableTown = { dir: _dir.clone(), height: h, coast, dock: null, name, index };
+    // `Rustwharf` is a different island in every world. That is intended: the
+    // name is the identity a save keys on, the ground under it is not.
+    const index = nextIndex++;
+    const town: MutableTown = {
+      dir: _dir.clone(),
+      height: h,
+      coast,
+      dock: null,
+      name: HARBOUR_NAMES[index],
+      index,
+    };
     const dock: Dock = { dir: berth, radius: DOCK_RADIUS, town };
     town.dock = dock;
     towns.push(town);
@@ -411,9 +572,7 @@ export function createTowns(
   // never in the hot path, but a linear walk of 36 strings per icon per frame
   // would still be the kind of thing that turns up in a profile later.
   const byName = new Map<string, Town>();
-  for (const town of towns) {
-    if (town.name.length > 0) byName.set(town.name, town);
-  }
+  for (const town of towns) byName.set(town.name, town);
 
   return {
     all: towns,

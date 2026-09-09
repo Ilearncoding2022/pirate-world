@@ -66,6 +66,56 @@ export const SPAWN_LON_DEG = 0;
 const SPAWN_CLEAR_RADIANS = 0.16;
 const SPAWN_FADE_RADIANS = 0.34;
 
+/* ---- The two polar harbours' ground ------------------------------- */
+
+/**
+ * A rock at each pole, a moat of water around it, and a fade back to whatever
+ * the noise wanted.
+ *
+ * `docs/HARBOURS_PLAN.md` puts Marine Stronghold at +Y and No Man's Land at -Y
+ * in EVERY world, which means the noise field cannot be allowed a vote on
+ * whether there is land there. So the field is overwritten in three bands
+ * measured as the angle `p` from the nearer pole -- world-scale and angular,
+ * the same family as every other settlement constant, so the dimple grows with
+ * GLOBE_RADIUS instead of shrinking to a pinprick if the world does.
+ *
+ *   p < LAND     an islet, forced at least ISLET_RISE above sea level
+ *   p < MOAT     water, forced at least as deep as MOAT_FLOOR
+ *   p < FADE     a smoothstep from the moat floor back to the natural height
+ *
+ * At GLOBE_RADIUS 200 that is four units of rock inside sixteen of water,
+ * inside a forty-unit dimple. The berth sits at 0.05 rad (`POLE_BERTH_RAD` in
+ * `towns.ts`), which is the middle of the moat.
+ *
+ * The moat being WATER is not the same as the moat being SEA. Whether it joins
+ * the ocean is a fact about the whole world -- a continent may simply be
+ * sitting on the pole -- and no local edit can promise it. `worldgen.ts`
+ * rejects such a world and redraws, which is the only honest answer short of
+ * carving a channel to the nearest ocean, and carving one is a pathfinding job
+ * over the height map for the sake of two harbours.
+ *
+ * FADE_BIAS is the knob that decides how often that rejection fires. Blending
+ * straight back to the natural height leaves the moat ringed by whatever was
+ * already there -- often a coastal shelf a hair above the waterline, which
+ * seals it. A downward push that is full at the moat's outer edge and gone at
+ * the fade's opens the ring far more often than not, at the cost of a shallow
+ * annulus of sea the noise did not ask for. It is measured, not guessed: over
+ * 50 random seeds neither pole was ever sealed, with the bias in or out, so at
+ * 25% land it is insurance rather than a load-bearing part. It stays because
+ * the land fraction is a constant somebody will raise one day, and the first
+ * thing a wetter world's rejection rate would come from is a continent sitting
+ * on a pole.
+ */
+const POLE_LAND_RAD = 0.02;
+const POLE_MOAT_RAD = 0.08;
+const POLE_FADE_RAD = 0.2;
+/** How far above sea level the islet is forced. Well past `land.ts`'s beach band. */
+const POLE_ISLET_RISE = 0.16;
+/** Moat depth. The same floor the spawn clearing digs, and for the same reason. */
+const POLE_MOAT_FLOOR = -0.32;
+/** Downward push at the moat's outer edge, fading to nothing at the fade's. */
+const POLE_FADE_BIAS = 0.12;
+
 const _spawn = latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG, new Vector3());
 const _probe = new Vector3();
 
@@ -134,6 +184,26 @@ export function createTerrain(seed: number = DEFAULT_SEED): Terrain {
       const smooth = t * t * (3 - 2 * t);
       const floor = -0.32;
       h = floor + (h - floor) * smooth;
+    }
+
+    // The poles, after the spawn clearing and before the clamp. `Math.abs` is
+    // what lets one term serve both: the fade band is 0.20 rad and the poles
+    // are PI apart, so the two dimples can never see each other and the angle
+    // to the NEARER pole is the only one either band cares about. The spawn
+    // clearing is on the equator, PI/2 away, so the two edits never meet
+    // either -- but the ordering is fixed anyway, because a clearing that ever
+    // grew that far should not be allowed to flood the fortress.
+    const polar = Math.acos(Math.min(1, Math.abs(y)));
+    if (polar < POLE_LAND_RAD) {
+      // Never below the islet: a pole that drew ocean still gets its rock.
+      h = Math.max(h, SEA_LEVEL + POLE_ISLET_RISE);
+    } else if (polar < POLE_MOAT_RAD) {
+      // Never above the moat: a pole that drew a continent still gets its water.
+      h = Math.min(h, POLE_MOAT_FLOOR);
+    } else if (polar < POLE_FADE_RAD) {
+      const t = (polar - POLE_MOAT_RAD) / (POLE_FADE_RAD - POLE_MOAT_RAD);
+      const smooth = t * t * (3 - 2 * t);
+      h = POLE_MOAT_FLOOR + (h - POLE_MOAT_FLOOR) * smooth - (1 - t) * POLE_FADE_BIAS;
     }
 
     return Math.max(-1, Math.min(1, h));

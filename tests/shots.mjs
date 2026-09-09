@@ -12,6 +12,12 @@
  *   ...change something, npm run build...
  *   npm run shots -- --label after
  *
+ * The world is drawn from a random seed on every page load, so every run is
+ * pinned to `?seed=1337` unless `--seed` says otherwise. Two shots of two
+ * different planets are not a comparison. `--seed ''` turns the pin off and
+ * takes whatever the loop draws, which is only ever worth doing to look at a
+ * new world rather than to compare one.
+ *
  * Then compare tests/out/before against tests/out/after by eye. See
  * docs/TESTING.md for where this sits relative to the two test tiers.
  */
@@ -38,6 +44,20 @@ const LABEL = arg('label', 'shots');
 const SHOT_TIMEOUT = Number(arg('shot-timeout', '30000'));
 const HAZARD_TIMEOUT = Number(arg('hazard-timeout', '240000'));
 const BASE = arg('url', 'http://localhost:4173/');
+/*
+ * Every shot is taken in the SAME world.
+ *
+ * The world is redrawn from a random seed on every page load now
+ * (`worldgen.ts`), so without this a "before" and an "after" are two different
+ * planets and comparing them by eye says nothing at all -- the same trap
+ * `?clock=` already exists for, one order of magnitude worse. `?seed=` makes
+ * exactly one attempt and throws if it fails, which is what makes the pin a
+ * pin rather than a suggestion.
+ *
+ * Prepended rather than appended so a `--query` the caller passes still reads
+ * as it always did, `?`-first, and so its own settings win any duplicate.
+ */
+const SEED_QUERY = arg('seed', '1337');
 const QUERY = arg('query', '');
 const OUT_DIR = join('tests', 'out', LABEL);
 
@@ -80,7 +100,9 @@ function resolveChromium() {
 
 const executablePath = resolveChromium();
 
-const url = BASE.replace(/\/$/, '/') + QUERY;
+const pinned = SEED_QUERY.length > 0 ? `?seed=${SEED_QUERY}` : '';
+const url =
+  BASE.replace(/\/$/, '/') + pinned + (QUERY.startsWith('?') && pinned ? '&' + QUERY.slice(1) : QUERY);
 
 // Fail fast and usefully if nothing is serving. Starting a server here would
 // mean building, which is the cost this script exists to avoid.

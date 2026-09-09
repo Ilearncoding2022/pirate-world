@@ -5,7 +5,7 @@ import type { HeightMap } from './heightmap';
 import { landRadius } from './land';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
 import { LAYER_REFLECTED } from './layers';
-import { SHORE_MARGIN, TOWN_SEED, mulberry32, oceanFraction, randomDirection } from './towns';
+import { SHORE_MARGIN, TOWN_SEED, mulberry32 } from './towns';
 
 export interface CityLights {
   object: THREE.Object3D;
@@ -17,23 +17,41 @@ export interface CityLights {
 /* ------------------------------------------------------------------ */
 
 /**
- * Scatter seed, derived from the town seed rather than shared with it.
+ * Scatter seed, derived from the WORLD seed rather than shared with anything.
  *
- * The settlement search moved to `towns.ts` and kept 0x5eed17 for itself. This
- * scatter no longer draws its centres from that stream, so it no longer sees
- * the same numbers in the same order; passing the seed straight through would
- * only pretend otherwise. Deriving it says the split out loud. The consequence
- * is that the world's lamps moved once, on this refactor, and are fixed forever
- * after: the seed is a constant and nothing below is time or frame dependent.
+ * The world is redrawn on every page load now (`worldgen.ts`), so a constant
+ * here would light every world's towns in the same order -- which does not
+ * show, but does mean the lamps are the one thing about the world that is not
+ * a function of the seed, and the next person to go looking for why two worlds
+ * look alike would have to find that out the hard way.
+ *
+ * Derived rather than passed straight through, on the same terms as before:
+ * this scatter does not draw its centres from `towns.ts`'s stream, so it does
+ * not see the same numbers in the same order, and sharing the integer would
+ * only pretend otherwise. Golden-ratio xor, which is the cheapest thing that
+ * decorrelates two streams from one integer.
  */
-const SEED = (TOWN_SEED ^ 0x9e3779b9) >>> 0;
-
-/** Lone lights (lighthouses, outposts) sprinkled outside the settlements. */
-const OUTPOST_TARGET = 440;
-const OUTPOST_TRIES = 34000;
+function scatterSeed(worldSeed: number): number {
+  return (worldSeed ^ 0x9e3779b9) >>> 0;
+}
 
 /** Individual lights may creep a little further up the hillsides than a centre. */
 const MEMBER_CEILING = 0.42;
+
+/**
+ * Lamps per town, before the ones that land in the sea or up a cliff are
+ * dropped.
+ *
+ * Up by half from 14..67, and the reason is subtraction rather than ambition:
+ * `docs/HARBOURS_PLAN.md`, decision 1, deleted the 440 lone outposts that used
+ * to fill the space between settlements, and 36 towns replaced 40. Without a
+ * compensating rise the night side of the globe simply had a third fewer
+ * lights on it. Half is what puts roughly the same number of lamps back
+ * WITHIN the towns, where every one of them is now something the player can
+ * sail to, rather than spread over a coast that sells nothing.
+ */
+const MEMBER_MIN = 21;
+const MEMBER_SPREAD = 81;
 
 /**
  * Lift above the land surface, in world units.
@@ -168,25 +186,33 @@ function buildMaterial(pixelRatio: number, options: LayerOptions): THREE.ShaderM
  * Night-side settlements.
  *
  * Where the towns are is `towns.ts`'s answer, not this module's: it needs the
- * same list the berths, the scope and the charging test work from, and an
- * independent scatter here would light houses that no port serves. What is
+ * same list the berths, the scope and the charging test work from. What is
  * left is the second stage, which is all this file ever really was -- each
  * centre grows an elongated blob of lamps along its own axis, which is what
- * makes a harbour read as a strip rather than a dot, and a thin scatter of
- * lone outposts fills the space between.
+ * makes a harbour read as a strip rather than a dot.
+ *
+ * There is nothing else. The thin scatter of lone outposts that used to fill
+ * the space between settlements is gone (`docs/HARBOURS_PLAN.md`, decision 1):
+ * every light on this globe now belongs to a harbour the player can moor at,
+ * and a lit shore that sells nothing and charges nothing was a promise the
+ * world could not keep. The towns carry half again as many lamps each to pay
+ * for it -- see MEMBER_MIN.
  *
  * Two draw calls: the lights themselves, and one soft glow per settlement so
  * a city reads as a smudge of light from orbit rather than a cloud of pixels.
+ *
+ * @param seed The WORLD seed, not a scatter seed. Defaulted to TOWN_SEED so a
+ *   headless caller that has no world of its own still gets a lit globe.
  */
 export function createCityLights(
   terrain: Terrain,
   heightMap: HeightMap,
   towns: Towns,
+  seed: number = TOWN_SEED,
 ): CityLights {
-  const rng = mulberry32(SEED);
+  const rng = mulberry32(scatterSeed(seed));
   const sea = terrain.seaLevel;
 
-  const _dir = new THREE.Vector3();
   const _probe = new THREE.Vector3();
   const _north = new THREE.Vector3();
   const _east = new THREE.Vector3();
@@ -247,7 +273,7 @@ export function createCityLights(
     const sa = Math.sin(orient);
     const major = 0.013 + rng() * 0.030;
     const minor = major * (0.32 + rng() * 0.5);
-    const population = 14 + Math.floor(rng() * 54);
+    const population = MEMBER_MIN + Math.floor(rng() * MEMBER_SPREAD);
 
     let placed = 0;
     for (let i = 0; i < population; i++) {
@@ -283,22 +309,7 @@ export function createCityLights(
     glowTwinkles.push(rng() * Math.PI * 2, 0.12 + rng() * 0.3);
   }
 
-  /* ---- 2. Lone outposts ------------------------------------------- */
-
-  let outposts = 0;
-  for (let attempt = 0; attempt < OUTPOST_TRIES && outposts < OUTPOST_TARGET; attempt++) {
-    randomDirection(rng, _dir);
-    const h = heightMap.sample(_dir);
-    if (h <= sea + SHORE_MARGIN || h > sea + MEMBER_CEILING) continue;
-    // Strongly coastal: these are lighthouses and jetty lamps.
-    if (rng() > 0.05 + 0.9 * oceanFraction(heightMap, sea, _dir)) continue;
-
-    const boost = pickColour(0.12, _colour);
-    pushLight(_dir, h, _colour, (0.45 + rng() * 0.5) * boost);
-    outposts++;
-  }
-
-  /* ---- 3. Geometry and objects ------------------------------------ */
+  /* ---- 2. Geometry and objects ------------------------------------ */
 
   const pixelRatio =
     typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 1, 2) : 1;
