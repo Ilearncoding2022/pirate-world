@@ -16,8 +16,8 @@ Measured on the owner's machine, at the sizes and settings checked in:
 
 | Command | What it is | Cost |
 |---|---|---|
-| `npm test` | Unit tier. Node, no WebGL. | ~2 s, 129 tests |
-| `npm run test:all` | Build, unit tier, browser tier. | ~51 s |
+| `npm test` | Unit tier. Node, no WebGL. | ~4 s, 405 tests |
+| `npm run test:all` | Build, unit tier, browser tier. | ~2.3 min |
 | `npm run shots` | Screenshots only, no assertions. | ~29 s |
 | `npm run build` | Alone. | ~2 s |
 
@@ -110,14 +110,17 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
   against. Tuning the gunner against a hull that is also being shoved, fouled
   and blocked is tuning it against noise.
 
-**The chandlery cannot be reached from the browser tier at all.** `#btn-shop`
-ships `disabled`, only a berth enables it, and `main.ts` re-tests the berth on
-the click rather than trusting the button -- so there is no query that opens
-it and nothing on `__pirateWorld` to call. At a tenth of wall clock no
-container will sail to a berth. Check its markup against `shop.ts` instead,
-remembering that offers are addressed by template literal
-(`` `shop-${prefix}-price` ``), so grepping a literal id finds nothing and
-proves nothing. The panel itself is owner-eye-only.
+**The chandlery is reachable now, and it was not before.** `#btn-shop` ships
+`disabled`, only a berth enables it, and `main.ts` re-tests the berth on the
+click rather than trusting the button -- so for as long as the only way to a
+berth was to sail there, no container could open it at a tenth of wall clock.
+`?spawn=<lat>,<lon>` puts the ship in a berth ring on the first frame, and
+`?seed=1337&spawn=26.31,-12.52` moors at Scrapmoor with the panel one click
+away. That is how the repair block and the per-harbour stock were checked.
+
+It is still worth remembering, when reading the markup rather than driving it,
+that offers are addressed by template literal (`` `shop-${prefix}-price` ``),
+so grepping a literal id finds nothing and proves nothing.
 
 ## Rules
 
@@ -166,3 +169,29 @@ error list. Both were found by putting a screenshot next to an earlier one.
 
 So: a green suite means nothing is broken in a way a machine can see. It does
 not mean the change is right. Look at `tests/out/` before believing it.
+
+## The world is random now, so every test pins it
+
+`worldgen.ts` draws a fresh seed on every page load. Two screenshots of two
+different planets are not a comparison, and a browser test that asserted
+against whatever it drew would be asserting against noise.
+
+So **every URL the suites open carries `?seed=1337`** — `tests/shots.mjs`
+prepends it unless `--seed` says otherwise, and `tests/smoke/game.spec.ts`
+passes it explicitly. 1337 is `DEFAULT_SEED`: the seed `world-golden.json`
+pins and the one `generateWorld` falls back to after twelve failed draws. A
+pinned seed makes exactly one attempt and THROWS if it fails, which is what
+makes it a pin; if that ever fires, the unit tier said so first.
+
+Four dev queries are worth knowing when you need to look at something:
+
+| Query | What it is for |
+|---|---|
+| `?seed=<uint32>` | Pin the world. Always on in both suites. |
+| `?reject=<n>` | Force the first n world attempts to fail. The only way to exercise the retry and the fallback, because no failing seed is known. |
+| `?hull=<1..100>` | Start worn. Goes through `Hull.override`, which does not write the save. |
+| `?spawn=<lat>,<lon>` | Start somewhere else. The only way to reach either polar harbour, or to get close enough to a harbour to see its name label, or to open the chandlery in a browser at all. |
+
+`?spawn=` is what retires this file's old note that the chandlery is
+unreachable from the browser tier. It is reachable now:
+`?seed=1337&spawn=26.31,-12.52` moors at Scrapmoor.

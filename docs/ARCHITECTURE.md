@@ -47,6 +47,9 @@ These have bitten us once. Do not reinterpret them in a consumer.
   against `ShipState.heading`.
 - `WeatherState.storm`, `.rain`, `.fog`, `.cover` and `.flash` are **dimensionless [0, 1] envelopes**, and **zero means the game as it shipped**: at all-zero the sky, the sea, the lights and the scope are what they were before any of it existed. That is a hard contract — see **Weather**.
 - `WeatherState.visibility` is **world units**, in `[VIS_MIN, RADAR_RANGE]`, and is the one number the weather and the chart meet at: the scope masks itself beyond it and the chart is stamped with exactly the disc the scope could see. Clear weather is `RADAR_RANGE` exactly.
+- `HullState.percent` is a **whole number in [1, 100]**, produced with `Math.floor` — the same downward rounding `battery.ts` uses on its own persisted percent, and for a stricter version of the same reason. Every band (`speedCap`, `canFish`, `hitsToLose`, `mode`) is derived from this PUBLISHED number and never from the float behind it, so the instrument and the behaviour cannot disagree: "under 50%" is true of exactly the readings that print 49 and below. Deriving from the float instead was tried, and it left a hull reading 50% while already capped at 10 knots.
+- `HullState.speedCap` is **world units per second** — ship-scale, the family `MAX_FORWARD` belongs to — and is `Infinity` at 50% and above. That is what lets `ship.ts` write a plain `Math.min(propulsion.maxForward, speedCap)` and have a sound hull change nothing; a finite value up there would silently cap Trim and Overdrive.
+- The world **seed** is a **uint32**, as `mulberry32` takes one. `WorldData.seed` carries it because `Terrain` does not report its own, and `citylights.ts` needs it.
 - `WeatherCell.radius` is **ship-scale world units**; its `centre` and `north` are **unit vectors**, transported, never held as a bearing — the same rule as `WindState.direction` and for the same reason.
 - `weathermap.ts`'s texture is **data, not colour**, in exactly the sense `wakemap.ts`'s is: R is storm, G is fog, B is a lightning flag, and its `colorSpace` is `NoColorSpace`.
 - `Water.offsets` (and the `WaveOffsets` that `wavefield.ts` and `ship.ts`
@@ -251,7 +254,7 @@ shader.
 | File | Exports | Notes |
 |---|---|---|
 | `geo.ts` | `GLOBE_RADIUS`, `latLonToDir`, `dirToLatLon`, `tangentFrame`, `headingToForward`, `normalizeHeadingDeg` | conventions |
-| `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode`, `WindState` | interfaces only |
+| `types.ts` | `InputState`, `Terrain`, `ShipState`, `Town`, `Dock`, `Towns`, `EnergyState`, `EnergyMode`, `WindState`, `HullState`, `HullMode`, `UpgradeLine` | interfaces only |
 | `quality.ts` | `QualityTier`, `QualitySettings`, `Quality`, `createQuality(search?)`, `QUALITY_STORAGE_KEY` | resolved once at startup (`?quality=` beats `localStorage` beats `'high'`); frozen, read-only table everything built after it treats as fixed; `reflectionSize`/`reflectionFacesPerFrame` of 0 means the reflection pass is absent, not idle, and `rainDrops` of 0 means the same for `rain.ts` |
 | `layers.ts` | `LAYER_DEFAULT`, `LAYER_REFLECTED` | the two `Object3D.layers` bit indices every rendering stream shares; wiring constants, not world- or ship-scale |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
@@ -278,9 +281,9 @@ shader.
 | `daynight.ts` | `createDayNight()`, `DAY_LENGTH`, `MOON_MONTH_DAYS`, `START_ELAPSED` | lights, writes `WorldEnv`; places BOTH bodies from elapsed time. `update(dt, env, weather?)`: a storm dims the key light by 0.7 and the hemisphere bounce by only 0.35 — that split is the look, since killing both equally is just night — and a flash is ADDED to each so it reads after dark. It stays the sole writer of `WorldEnv`; the weather reaches the lights and never `env`, because the fog, the sky and the water all mix by `sunColor` and `dayFactor` and a grey sun would double the gloom in every one of them |
 | `celestial.ts` | `createCelestial()` | the sun disc, the moon, the moon's halo and its rim aurora as things you can see; draws only what `daynight.ts` already decided and writes nothing |
 | `clouds.ts` | `createClouds()` | cloud deck, `SHELL_COUNT` stacked slices. `update(dt, env, weather?)`: `uCover`/`uGloom` are the at-ship envelopes and `weatherAt(uWeatherMap, nWorld)` is the map, maxed together per pixel, so a cell forty units away fills in and blackens its own patch of sky. `COVER_GAIN` lowers `uThreshold`, and it is applied to `thrBase` — i.e. BEFORE the two-octave early-out — so a storm genuinely makes cloud rather than merely darkening what was there. `uFlashLocal` decides whether a strike lights the whole deck (a squall, which has no place) or only the cell that threw it (`wx.b`) |
-| `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel)` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once |
-| `citylights.ts` | `createCityLights(terrain, heightMap, towns)` | night-side settlements, lit from the shared list |
-| `docks.ts` | `createDocks(towns)` | charging zones on the water + daylight beacons |
+| `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel, seed?)`, `BERTH_MAX_ARC`, `POLE_OFFSET_RAD` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once. Exactly `HARBOUR_COUNT` (36) of them or the world is REJECTED — the count is no longer a target. The two polar harbours are placed first and outside the random stream, so the other 34 draw the same numbers whether or not a pole was founded. The berth sits at the town's own shoreline, within `BERTH_MAX_ARC`, and the `berthXyz` overlap test is the sole authority for zones not touching — the arc between centres no longer implies it. See **Harbours** |
+| `citylights.ts` | `createCityLights(terrain, heightMap, towns, seed?)` | night-side settlements, lit from the shared list. The lone-outpost scatter is GONE: every cluster of lights on the globe is one of the 36 harbours, which is what makes a light on the night side something you can always tie up at. Per-town lamp counts went up by half to fill the space the 440 outposts left |
+| `docks.ts` | `createDocks(towns)`, `LABEL_FADE_NEAR/FAR` | charging zones on the water + daylight beacons + one name sprite per harbour. `update(dt, env, ship, energy, camera?)` — the camera is what the labels fade against, and WITHOUT it none is ever drawn, because they ship `visible = false`. The sprites set `sizeAttenuation: false` so `LABEL_SCREEN_HEIGHT` is a fraction of the viewport; leave it at its `true` default and all 36 render correctly at a sixth of a millimetre, which is exactly what happened once |
 | `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | `update`'s optional sixth argument is the weather: a full storm leaves 5% of the panels and a full fog bank half, moonlight cut by the same factor, and a berth untouched — which is what makes a berth worth running for. burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` and the eleven-rung `EnergyMode` ladder that names what the plant is doing (`overcast` is the weather's own rung); `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED`, `CELL_WIND_LIFT` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast. Also publishes the phase reading `weather.ts` rolls on — `phase`, `phaseTime`, `phaseDuration`, `phaseIndex`, `envelope` — all of which were already locals. `update`'s optional fourth argument is `CellsState.stormAtShip`, a FLOOR on the speed (never the bearing) so a storm always blows: the one coupling from the weather back into the wind, and the reason `weatherCells.update` runs first in the loop |
 | `weathercells.ts` | `createWeatherCells(terrain, heightMap, seed?)`, `cellProfile`, `CELL_CORE` | the drifting weather: a population of `CELL_TARGET` storm and fog cells in a bubble around the ship, each a centre and a travel tangent carried by parallel transport exactly as a hazard's is. Owns `CellsState`, mutated in place; DOM-free, scene-free and seeded, like `wind.ts` and `hazards.ts`. Publishes the winning cell itself as `stormCellAtShip`, not just its numbers, so `weather.ts` can hang a bolt on a centre this sample already agreed on rather than re-deriving one and breaking the tie the other way. Its own PRNG, never the wind's — see **Weather** |
@@ -341,7 +344,12 @@ shader.
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `blackout.ts` | `createBlackout()` | the fade a wreck happens behind, and both of a battle's; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
 | `loading.ts` | `createLoading()` | drives the splash `index.html` ships visible; the only UI a module does not build |
-| `main.ts` | — | staged bootstrap and frame loop |
+| `main.ts` | — | staged bootstrap and frame loop; owns `HULL_WEATHER_THRESHOLD`, the battle/maelstrom hull costs, and the world-generation loop |
+| `harbournames.ts` | `HARBOUR_NAMES`, `HARBOUR_COUNT`, `NORTH_POLE_INDEX`, `SOUTH_POLE_INDEX`, `HARBOUR_NAME_MAX_LENGTH` | the 36 names, and the only part of the world that never moves. A harbour's IDENTITY is its name, not its position — the world is redrawn every load — so `save.ts` keys on the string. Indices 0 and 1 are the poles and are read from here rather than counted from the front of the list |
+| `worldgen.ts` | `generateWorld(seedHint, quality, onAttempt?, forcedRejections?)`, `checkWorld`, `worldPasses`, `WORLD_ATTEMPTS`, `LAND_MIN`, `LAND_MAX` | draws a seed, builds a world's DATA, measures it, and throws a bad one away. `?seed=` makes exactly one attempt and THROWS; without a hint it draws from the CSPRNG up to `WORLD_ATTEMPTS` and then falls back to `DEFAULT_SEED`, which passes by construction. `?reject=<n>` forces the first n attempts to fail, and exists because no failing seed is known — see **Harbours** |
+| `hull.ts` | `Hull`, `createHull(percent?)`, `createStubHull()`, `HULL_MIN/MAX`, `HULL_WEAR`, `HULL_WEATHER_GAIN`, `HULL_REPAIR_RATE`, `HULL_WORN_BELOW`, `HULL_FAILING_BELOW`, `HULL_CAP_WORN/FAILING/CRITICAL` | durability: a float in [1, 100] published as a whole percent, with `speedCap`, `canFish`, `hitsToLose` and `mode` all DERIVED from that published number. `update(dt, docked, weathered)` is called only from the sailing branch, which is what keeps the clock off during fishing, a fight, the shop and the menu. `hud.ts` and `shop.ts` import the band edges rather than copying them |
+| `knownharbours.ts` | `KnownHarbours`, `createKnownHarbours(saved?)` | the names the ship has moored at, in first-visit order. `add` is idempotent because the caller is a frame loop |
+| `harbourstock.ts` | `HarbourStock`, `createHarbourStock(saved?, names?, random?)`, `LINE_MIN_HARBOURS` | which of the four durable ladders each harbour sells. Rolled for ALL 36 at once and saved, because the coverage guarantee — every ladder carried by at least six harbours — cannot be made one harbour at a time, and because a remembered harbour must keep the stock it had |
 
 ## Land / water split
 The world is **25% land, 75% water**, and that is one constant: `HEIGHT_BIAS`
@@ -763,6 +771,128 @@ worth photographing is the half seen from outside it. The two combine.
 lightning can wait for a STRIKE instead of for a clock, which it would
 otherwise miss almost every time — every cell, and `encounters`, which is the
 measurement `CELL_TARGET` was chosen against.
+
+Four more arrived with the harbours, all read through `URLSearchParams` and
+never through `import.meta.env.MODE`, for the reason the rest of them are:
+`vite preview` serves a genuine production build and these are meant to be
+pointed at one.
+
+`?seed=<uint32>` pins the world. It makes exactly ONE attempt and throws if
+that seed fails, which is what makes it a pin rather than a suggestion —
+`main.ts` catches the throw and falls back to a random world so a player
+pasting someone else's bad seed is not left at the splash. Every test and
+every screenshot station passes it; two shots of two different planets are
+not a comparison.
+
+`?reject=<n>` forces the first n world attempts to fail. It exists because
+**no failing seed is known** — 0 rejections in 270 seeds measured — so the
+whole recovery path (the retry, the bar's attempt counter, the fall back to
+`DEFAULT_SEED`) is otherwise code nothing ever runs.
+
+`?hull=<1..100>` starts with a worn hull. It goes through `Hull.override`,
+which is the only reason that method exists: `damage` and `repair` both
+notify, and a notify writes the save, so a dev query taking the ordinary road
+would permanently scuttle a real player's file.
+
+`?spawn=<lat>,<lon>` starts the ship somewhere else. Two of the 36 harbours
+are AT THE POLES and there is otherwise no way to look at either without
+sailing 312 units; the name labels fade at 140 units and the nearest harbour
+to the spawn is 95. It is also the first thing that ever made the chandlery
+reachable in a browser.
+
+## Harbours, the world loop, and the hull
+
+Three systems that arrived together (`docs/HARBOURS_PLAN.md`) and meet at the
+save file. Read this before touching `worldgen.ts`, `towns.ts`'s count, or
+anything that reads `HullState`.
+
+### One entity, thirty-six of them, and the name is the identity
+
+A settlement, its lights and its berth are one thing now. There is no berth
+without a town and no town without a berth, and the lone-outpost scatter that
+used to put 440 unmoorable lights on the night side is gone — so a cluster of
+lights is always somewhere you can tie up. `HARBOUR_COUNT` is 36 and it is a
+**count, not a target**: `createTowns` returning fewer is what `worldgen.ts`
+reads as a bad world.
+
+The world is redrawn from a fresh seed on every page load, so a harbour's
+POSITION is not durable and cannot be its identity. Its NAME is.
+`knownHarbours` and `harbourStock` key on the string, which means renaming an
+entry in `HARBOUR_NAMES` reads as a new place — the right failure, since a
+rename is a new place. Indices are only how names are dealt out, and nothing
+persists one: index 7 is a different island in every world.
+
+Two harbours are placed rather than found. `terrain.ts` raises an islet inside
+`POLE_LAND_RAD` of each pole with a moat around it, and `towns.ts` puts
+**Marine Stronghold** at the north and **No Man's Land** at the south before
+the random search runs — outside the PRNG stream, so the other 34 draw the
+same numbers whether or not a pole was founded. Whether a moat actually opens
+to the sea is not guaranteed by the terrain; that is what the rejection loop
+is for.
+
+### The three traps
+
+**Trap 1 — the expensive half must stay outside the loop.** `globe.ts` is
+split into `buildWorldData` (height map, islet cull, flood fill, towns — no
+THREE objects) and `buildWorldMeshes` (the land mesh, two million vertices on
+the high tier). `worldgen.ts` calls only the first. A rejection loop around
+the whole of `createGlobe` would build and throw away a land mesh per bad
+seed. Keep it that way.
+
+**Trap 2 — `HITS_TO_LOSE` is the AI's number now.** It used to be one
+constant both sides were settled against. The player's threshold varies with
+the hull (3, 2 or 1) and lives on `Combatant`; `battle.ts` compares each side
+to its own. `main.ts` reads it ONCE at the ram and carries that one reading
+through the cover card and into the sim, because the card promises a number in
+words and the strip draws that many pips — three separate lookups would be
+three chances to disagree with the sim that is actually counting. The hull
+cannot move inside a fight, which is what makes freezing it honest.
+
+**Trap 3 — the poles are where `tangentFrame` breaks.** A centre exactly on a
+pole has no north. Both polar towns sit `POLE_OFFSET_RAD` off theirs and their
+berths further down the same meridian. Nothing here stores a bearing at either
+harbour; every direction is a unit vector, as **Frames, and where they stop
+working** requires.
+
+### Calibration, measured
+
+Seed 1337's land fraction is **0.2449**, and `LAND_MIN`/`LAND_MAX` are ±40% of
+it (0.147 / 0.343). Over 50 random seeds, **0 were rejected**; over the 270
+checked in total, none failed any check. The polar fade bias is therefore
+insurance rather than load-bearing — a control run with it at zero sealed no
+poles in 20 seeds. If a future terrain change pushes the rejection rate past
+about one in three, widen the fade band before raising `WORLD_ATTEMPTS`.
+
+### The hull's clock is a property of where it is called
+
+`hull.update` sits in the **sailing branch** of the frame loop and nowhere
+else. The frozen branch (menu, shop, fishing cover, fishing session, battle
+card) and the arena branch both return before reaching it, so fishing, a
+fight, the shop and the menu cannot wear the hull. That is the whole of the
+rule, enforced by position rather than by a flag — there is no mode `hull.ts`
+can be left stuck in, and no caller has to remember to switch one off.
+
+`HULL_WEATHER_THRESHOLD` lives in `main.ts` beside the `WeatherState` it
+tests, not in `hull.ts`, which is handed a boolean. Half of any ONE envelope
+doubles the wear and it never stacks: three multiplying envelopes would put a
+ship at 8x in the one condition it already cannot see out of.
+
+Repair is derived, not typed. `HULL_REPAIR_RATE` is `DOCK_NET_RATE * 100`,
+because the claim is that the hull and the tank fill at the same speed — fifty
+seconds alongside for both — and two independent numbers would let that stop
+being true the first time either was retuned. Note that `energy.ts`'s
+`DOCK_RATE` is GROSS (it carries the hotel load); `DOCK_NET_RATE` is the 2%/s
+the README actually claims.
+
+### What running it caught that neither test tier did
+
+`docks.ts` described `sizeAttenuation` as off in two comments and never passed
+it. All 36 labels were built, in the scene, visible, at full opacity, with a
+texture — and 0.034 **world** units tall, far below a pixel. Nothing threw,
+nothing failed to compile, both tiers were green, and the labels had never
+once been seen. `docs/TESTING.md`'s rule that no test asserts on appearance is
+what makes the owner's eye the only thing that can catch this class of bug;
+budget for it.
 
 ## The cloud deck
 `clouds.ts` is not one sphere but `SHELL_COUNT` concentric ones spanning

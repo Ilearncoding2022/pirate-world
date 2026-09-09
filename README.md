@@ -119,7 +119,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   not be a sky in front of it. The sea fades into whatever colour the sky above
   it currently is, so the horizon has no seam at sunrise.
 - **Settlements** light up on the night side, clustered along coasts and
-  lowlands, and fade out through dawn.
+  lowlands, and fade out through dawn. Every cluster of lights is one of the
+  thirty-six harbours — the lone outposts that used to be sprinkled between
+  them are gone, because a light you cannot tie up at is a light that lies.
 - **Weather.** A cloud deck that forms and dissipates over time, covering about
   a quarter of the sky and crawling past at a fifth of the ship's top speed. It
   is a stack of slices through one 3D field rather than a painted sphere, so
@@ -324,16 +326,52 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   `NO THRUST - RESTARTING`. The helm comes back at three percent, a few seconds
   later. It used to say EMPTY for both, which read as a plant that had failed
   rather than one already coming back.
-- **Ports.** Every one of the world's 40 settlements is a port — a town that
-  could not find water the ship can reach is never founded — so a settlement on
-  the scope is always somewhere you can charge. Each has a lit ring on the
+- **Harbours.** There are **thirty-six**, exactly, and each one is a single
+  place: a town, its lights, its beacon and its berth, under **a name**.
+  Nothing is anonymous any more. The name is over the harbour in the world, on
+  the scope beside its mark, in the power panel while you are alongside, and
+  at the head of the chandlery. Two of the thirty-six never move: **Marine
+  Stronghold** stands on an islet at the North Pole and **No Man's Land** at
+  the South, in every world there will ever be. The berth is at the town's own
+  shoreline now rather than out in a cove, so the ring and the lights read as
+  one harbour instead of two things near each other. Each has a lit ring on the
   water under a beacon mast. Stay inside the ring for two seconds and you are
   moored; drive through it and you are not, which is the whole rule. Shore
   power runs at two percent of the reserve a second, so fifty seconds alongside
-  fills the tank from empty — four times the best the sun ever manages. Berths
+  fills the tank from empty — four times the best the sun ever manages, and it
+  mends the hull at the same rate for nothing. Berths
   are plotted on the radar, so the scope is also the fuel map.
-- **The chandlery.** Alongside a berth, `[SHOP]` opens a two-tab panel — NAVIGATION
-  and FISHING. A **backup cell** at 1000 gold holds half a tank and is only ever
+- **A new sea every time you open it.** The world is drawn from a fresh seed
+  on every load: new coastlines, new islands, thirty-six harbours in new
+  places. What survives is your gold, your fish book, your stock, your hull —
+  and **the harbours you have moored at**, remembered by name. A harbour you
+  have used once is named and plotted on the scope from the first frame of
+  every later world, wherever it has ended up, and `Esc` → HARBOURS lists all
+  thirty-six with a bearing and a distance to the ones you know and UNCHARTED
+  beside the ones you do not. The chart of explored water does not survive,
+  because it charted a coastline that no longer exists. A world that cannot
+  fit thirty-six harbours, or that opens on land, is thrown away and another
+  is drawn before you ever see it.
+- **The hull wears out.** A second reserve beside the power one, on the same
+  panel and in brass. It falls a quarter of a percent a minute, twice that in
+  a storm, a squall or a fog bank — the panel says `x2` when it is happening.
+  A fight costs 5% won or drawn and **15% lost**, and a maelstrom costs the
+  same 15%. Below **50%** the ship will not make more than 10 knots whatever
+  you have bought — Trim and the Overdrive Coil are both simply overridden —
+  below **25%** it is 5 knots and the fishing screen will not open, and at the
+  1% floor it is 1 knot. It never sinks you and there is no game over: the
+  hull is a cost, not a threat. A fight is dearer than the speed, though —
+  three broadsides lose a battle at a sound hull, **two** below 50% and
+  **one** below 25%, and the card tells you which before the guns start.
+  Any berth mends it free at two percent a second; the chandlery will sell you
+  ten percent for 100 gold when there is no berth to be had.
+- **The chandlery.** Alongside a berth, `[SHOP]` opens a panel headed with the
+  harbour's name, a REPAIR block, and two tabs — NAVIGATION
+  and FISHING. **Not every harbour sells everything**: the consumables and the
+  backup cell are on every counter, but which of the four upgrade ladders a
+  harbour carries is its own, fixed the first time you tie up there and
+  remembered with the name. A ladder it does not stock says so and names the
+  harbours you already know that do. A **backup cell** at 1000 gold holds half a tank and is only ever
   drawn on once the main reserve is flat — no berth and no sunrise will put it
   back, so it is a consumable wearing a battery's clothes. The ship stows **two**
   of them, bought one at a time at the same price, so a full backup is a whole
