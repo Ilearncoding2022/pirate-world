@@ -3669,3 +3669,156 @@ body.in-battle .dbtn--right {
 }
 
 /* END BLACKOUT */
+
+/* =====================================================================
+   HARBOUR CHANDLERY — the name in the head, the repair block, and the
+   line that stands in for an upgrade this harbour does not carry.
+
+   Appended as its own section per docs/HARBOURS_PLAN.md's work split:
+   Stream C appends one of these too, and the two must not share a
+   selector. Everything here is either a new class (`.repair*`,
+   `.shop__harbour`, `.offer__absent`) or a `[hidden]` guard on a class
+   this stream is the first to hide — no rule above is edited.
+   ===================================================================== */
+
+/* HARBOURS SHOP */
+
+/*
+ * The harbour's name, beside CHANDLERY in the head.
+ *
+ * Brass rather than cyan, and it is the only warm thing in the head: the name
+ * is not an instrument reading, it is where you are, and the panel already
+ * spends cyan on every label in it. The same family the purse in the foot
+ * uses, dimmed a step so it does not compete with the money.
+ *
+ * `min-width: 0` alongside the ellipsis is what actually holds the layout:
+ * the head is a flex row, and a 17-character name in a 520 px panel would
+ * otherwise push the close button off the end rather than truncate.
+ */
+.shop__harbour {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--gold-dim);
+}
+
+/* ---- the repair block ------------------------------------------------ */
+
+/*
+ * Gold for hull, above the tabs.
+ *
+ * Shaped like an `.offer` on purpose — the same left rule, the same two
+ * halves, the same buttons — because it IS an offer in every way that matters
+ * to a player. It is not one in the markup because it sits outside both
+ * `.shop__panel-group`s, and reusing `.offer` would have meant either moving
+ * that class out of the tab groups or teaching the tab code about an
+ * exception. A dozen lines of its own is the cheaper of the two.
+ *
+ * Amber, the hull's own family in the telemetry panel, so the block that
+ * repairs the hull and the bar that reports it read as one system.
+ */
+.repair {
+  --repair: #ffb445;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  background: rgba(255, 180, 69, 0.04);
+  border-left: 2px solid var(--repair);
+}
+
+.repair__text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.repair__name {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  color: var(--repair);
+}
+
+.repair__detail {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.repair__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+/* Tabular, like every other figure in the panel, so a hull ticking 99 → 100
+   does not shuffle the digits beside it. */
+.repair__hull {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+  color: var(--repair);
+  white-space: nowrap;
+}
+
+/* Two buttons where every offer has one. Stacked rather than side by side: at
+   520 px a row of two `.fbtn`s each wide enough to hold a price leaves the
+   detail line no room to be read. */
+.repair__buys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.repair__buy {
+  flex: 0 0 auto;
+  min-width: 132px;
+  text-align: center;
+}
+
+/* ---- an upgrade this harbour does not carry --------------------------- */
+
+/*
+ * The UA's `[hidden]` is `display: none`, and `.offer` sets `display: flex`,
+ * which beats it — the same trap `.shop[hidden]` and
+ * `.shop__panel-group[hidden]` already guard against in this file, and the
+ * whole reason those two rules exist. Without this, hiding an upgrade row
+ * would set the attribute and change nothing on screen: the panel would show
+ * the offer AND the line saying it is not sold, which is worse than either on
+ * its own. Stream D is the first thing to hide an `.offer`, so this is a new
+ * rule and not an edit to one.
+ */
+.offer[hidden] {
+  display: none;
+}
+
+/*
+ * The dim line that stands in for it.
+ *
+ * Deliberately quiet — the small-print colour, no background, and a grey rule
+ * where an offer has a coloured one — because it is an absence and should
+ * read as one. It carries real information all the same (where the ladder IS
+ * sold, among the harbours the player has moored at), so it is a line of text
+ * rather than a gap.
+ */
+.offer__absent {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  color: var(--ink-mute);
+  border-left: 2px solid rgba(111, 147, 166, 0.28);
+}
+
+/* END HARBOURS SHOP */

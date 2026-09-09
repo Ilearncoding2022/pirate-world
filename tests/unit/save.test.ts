@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { loadSave, writeSave, createRecords, SAVE_KEY, EMPTY_SAVE } from '../../src/save';
 import type { SaveData } from '../../src/types';
+import { HARBOUR_NAMES, HARBOUR_COUNT } from '../../src/harbournames';
 
 /**
  * A minimal in-memory `Storage`, since vitest's `node` environment has no
@@ -217,6 +218,133 @@ describe('save', () => {
     expect(persisted.harpoons).toBe(5);
     expect(persisted.seaAnchors).toBe(1);
     expect(persisted.trimTier).toBe(1);
+  });
+
+  /*
+   * The three fields docs/HARBOURS_PLAN.md added, on exactly the terms the
+   * shop's eight were added on: version 1, per-field repair, absent means the
+   * default rather than damage. The round trip is in the first case in this
+   * file; what follows is the repair half, one bad shape at a time.
+   */
+  it('treats a save written before the hull existed as a sound ship', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, gold: 40, fishBook: { cod: 2 } }));
+    const loaded = loadSave();
+    // 100 and not 0, which is the whole reason `hull` is not read through
+    // `readCapped`: a zero here would be a scuttled ship on a file whose
+    // owner has never seen a hull reading in their life.
+    expect(loaded.hull).toBe(100);
+    expect(loaded.knownHarbours).toEqual([]);
+    expect(loaded.harbourStock).toEqual({});
+    expect(loaded.gold).toBe(40);
+  });
+
+  it('repairs a hull that is not a number, and clamps one that is out of range', () => {
+    function hullOf(value: unknown): number {
+      fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, gold: 0, fishBook: {}, hull: value }));
+      return loadSave().hull;
+    }
+    expect(hullOf('sound')).toBe(100);
+    expect(hullOf(null)).toBe(100);
+    // The floor matters as much as the ceiling: there is no sinking, so 0 and
+    // -40 are both 1 rather than both nothing.
+    expect(hullOf(0)).toBe(1);
+    expect(hullOf(-40)).toBe(1);
+    expect(hullOf(900)).toBe(100);
+    expect(hullOf(63.4)).toBe(63);
+  });
+
+  it('drops the unreadable names out of knownHarbours and keeps the rest', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        version: 1,
+        gold: 5,
+        fishBook: {},
+        knownHarbours: ['Rustwharf', 7, '', null, 'Ionport', 'Rustwharf'],
+      }),
+    );
+    const loaded = loadSave();
+    // Order is first-visit order, the duplicate is dropped because the store
+    // is a set either way, and the two good names survive their neighbours.
+    expect(loaded.knownHarbours).toEqual(['Rustwharf', 'Ionport']);
+    expect(loaded.gold).toBe(5);
+  });
+
+  it('repairs a knownHarbours that is not an array at all', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ version: 1, gold: 5, fishBook: {}, knownHarbours: 'Rustwharf' }),
+    );
+    expect(loadSave().knownHarbours).toEqual([]);
+  });
+
+  it('drops a harbour whose stock list is unreadable, and keeps the good ones', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        version: 1,
+        gold: 5,
+        fishBook: {},
+        harbourStock: {
+          Rustwharf: ['trim', 'governor'],
+          Ionport: ['trim', 'not-a-line'],
+          'Lumen Bay': 'trim',
+          'Neon Reach': [],
+        },
+      }),
+    );
+    const loaded = loadSave();
+    expect(loaded.harbourStock.Rustwharf).toEqual(['trim', 'governor']);
+    // A harbour with a bad entry is dropped WHOLE rather than left with a
+    // partial list -- `harbourstock.ts` re-rolls the entire table when any
+    // name is missing, so a hole is a signal and a half-list would not be.
+    expect(loaded.harbourStock.Ionport).toBeUndefined();
+    expect(loaded.harbourStock['Lumen Bay']).toBeUndefined();
+    // An empty list is a real answer: a harbour that sells no upgrades.
+    expect(loaded.harbourStock['Neon Reach']).toEqual([]);
+  });
+
+  it('repairs a harbourStock that is not an object at all', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ version: 1, gold: 5, fishBook: {}, harbourStock: ['trim'] }),
+    );
+    expect(loadSave().harbourStock).toEqual({});
+  });
+
+  it('createRecords persists a new mooring by name', () => {
+    const records = createRecords();
+    records.known.add('Rustwharf');
+    expect(JSON.parse(fake.getItem(SAVE_KEY)!).knownHarbours).toEqual(['Rustwharf']);
+
+    // The frame loop's own case: the ship sits alongside and `add` runs every
+    // frame. One name in the file, and no second write.
+    for (let i = 0; i < 30; i++) records.known.add('Rustwharf');
+    expect(JSON.parse(fake.getItem(SAVE_KEY)!).knownHarbours).toEqual(['Rustwharf']);
+  });
+
+  it('createRecords rolls the upgrade table at boot and writes it', () => {
+    const records = createRecords();
+    const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
+    // All thirty-six, on disk, before the player has done anything at all --
+    // which is what makes the table survive into the next world.
+    expect(Object.keys(persisted.harbourStock)).toHaveLength(HARBOUR_COUNT);
+    expect(records.stock.linesFor(HARBOUR_NAMES[0]).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('createRecords keeps a saved upgrade table rather than re-rolling it', () => {
+    const table: Record<string, string[]> = {};
+    for (const name of HARBOUR_NAMES) table[name] = ['trim'];
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ version: 1, gold: 0, fishBook: {}, harbourStock: table }),
+    );
+
+    const records = createRecords();
+    // Verbatim: a harbour the player remembers keeps the upgrades it had, and
+    // that promise is the whole reason the roll is saved at all.
+    expect(records.stock.linesFor(HARBOUR_NAMES[5])).toEqual(['trim']);
+    expect(JSON.parse(fake.getItem(SAVE_KEY)!).harbourStock).toEqual(table);
   });
 
   it('createRecords persists a Sea Anchor deploy as one fewer in stock', () => {

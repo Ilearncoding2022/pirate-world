@@ -25,6 +25,10 @@ import { MOONGLASS_TIER_MAX, createMoonglassStore } from './moonglass';
 import { ARC_LAMP_TIER_MAX, createArcLampStore } from './arclamp';
 import { GOVERNOR_TIER_MAX, createGovernorStore } from './governor';
 import { HULL_MIN, createHull } from './hull';
+import type { KnownHarbours } from './knownharbours';
+import type { HarbourStock } from './harbourstock';
+import { createKnownHarbours } from './knownharbours';
+import { createHarbourStock } from './harbourstock';
 
 /**
  * save.ts — localStorage, versioned, and tolerant of anything it finds there.
@@ -497,6 +501,8 @@ export function createRecords(): {
   arcLamp: ArcLampStore;
   governor: GovernorStore;
   hull: Hull;
+  known: KnownHarbours;
+  stock: HarbourStock;
 } {
   const save = loadSave();
   const wallet = createWallet(save.gold);
@@ -518,16 +524,21 @@ export function createRecords(): {
   const hull = createHull(save.hull);
 
   /*
-   * The two fields Stream D owns, carried through untouched.
+   * The two harbour records, and they are not symmetrical.
    *
-   * Nothing in this build writes them yet, and a passthrough is what stops
-   * the first save written after Step 0 erasing a file that already has
-   * them. `harbourstock.ts` and `knownharbours.ts` replace both with real
-   * stores; until then the rule is the one the whole file runs on — repair,
-   * never reset.
+   * `known` grows while the ship sails — one name the first time it ties up
+   * at a place — so it notifies like every other store here and `persist`
+   * reads it back out.
+   *
+   * `stock` is drawn ONCE and then never changes for the life of the save.
+   * Its `onChange` therefore fires at most once, at construction, and only
+   * when this boot actually rolled the table; see `harbourstock.ts` on why
+   * the roll covers all thirty-six harbours at once rather than one harbour
+   * per visit. Subscribing it here is what lands that roll on disk, so the
+   * next load reads the same chandleries back rather than rolling new ones.
    */
-  const knownHarbours = save.knownHarbours;
-  const harbourStock = save.harbourStock;
+  const known = createKnownHarbours(save.knownHarbours);
+  const stock = createHarbourStock(save.harbourStock);
 
   function persist(): void {
     writeSave({
@@ -545,8 +556,12 @@ export function createRecords(): {
       arcLampTier: arcLamp.tier,
       governorTier: governor.tier,
       hull: hull.state.percent,
-      knownHarbours,
-      harbourStock,
+      // Iteration order is first-visit order, which is the order the file is
+      // written in and the order the loader reads back -- see
+      // `knownharbours.ts` on why a Set is the right shape for a record a
+      // frame loop writes to.
+      knownHarbours: Array.from(known.names),
+      harbourStock: stock.snapshot(),
     });
   }
 
@@ -576,6 +591,11 @@ export function createRecords(): {
   // an event, and it notifies on its PERSISTED whole percent for the same
   // reason the cell does -- see the note above.
   hull.onChange(persist);
+  // A new mooring, and the one roll of the upgrade table. Neither moves more
+  // than a few dozen times in the life of a save, so both write straight
+  // through rather than being throttled the way the cell and the hull are.
+  known.onChange(persist);
+  stock.onChange(persist);
 
   return {
     wallet,
@@ -591,5 +611,7 @@ export function createRecords(): {
     arcLamp,
     governor,
     hull,
+    known,
+    stock,
   };
 }

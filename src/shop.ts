@@ -9,6 +9,13 @@ import type { TrimStore } from './trim';
 import type { MoonglassStore } from './moonglass';
 import type { ArcLampStore } from './arclamp';
 import type { GovernorStore } from './governor';
+import type { Hull } from './hull';
+import type { HarbourStock } from './harbourstock';
+import type { KnownHarbours } from './knownharbours';
+import type { Town, UpgradeLine } from './types';
+import { createStubHull } from './hull';
+import { createHarbourStock } from './harbourstock';
+import { createKnownHarbours } from './knownharbours';
 import { BATTERY_CAPACITY, BATTERY_CELL, BATTERY_CELLS_MAX } from './battery';
 import { HARPOON_BUNDLE, HARPOON_PER_SESSION_MAX, HARPOON_STORE_MAX } from './harpoons';
 import { SEA_ANCHOR_STORE_MAX } from './seaanchor';
@@ -109,6 +116,49 @@ export const ARC_LAMP_PRICES: readonly number[] = [2000, 4000, 8000];
  * keeping expensive.
  */
 export const GOVERNOR_PRICES: readonly number[] = [2500, 5000, 9000];
+
+/**
+ * Whole percent of hull one paid step buys.
+ *
+ * Ten, matching the ten notches the HUD's hull bar is drawn in, so a step is
+ * one visible notch rather than an amount the player has to read off a number.
+ */
+export const HULL_REPAIR_STEP = 10;
+
+/**
+ * Gold for one `HULL_REPAIR_STEP`.
+ *
+ * A hundred, which is deliberately cheap against a purse that battles fill by
+ * the thousand -- and it has to be, because repair is FREE at any berth and
+ * this is only ever the mid-ocean convenience. Priced to be an afterthought
+ * for a player who does not want to sail back; priced high enough that a full
+ * hull from one percent is a thousand, which is a backup cell's worth and
+ * therefore still a decision. See docs/HARBOURS_PLAN.md, decision 16.
+ */
+export const HULL_REPAIR_PRICE = 100;
+
+/**
+ * Gold to take a hull from `percent` all the way to 100.
+ *
+ * Rounded UP to the next whole step, which is decision 16's rounding and is
+ * the same arithmetic the `+10%` button gets by accident: a hull at 95 pays
+ * one step and lands at 100, because `hull.repair` caps there. So the player
+ * is never charged for a fraction of a step they cannot buy, and never gets
+ * one free.
+ *
+ * Exported as a pure function, and that is not incidental. `docs/TESTING.md`
+ * records that the chandlery is unreachable from the browser tier -- the
+ * button that opens it ships disabled and only a berth arms it, and no
+ * container will sail to a berth at a tenth of wall clock. So the panel's DOM
+ * cannot be exercised by any test in this project, and anything in here worth
+ * pinning has to be liftable out of the DOM to be pinned at all. This is the
+ * one piece of arithmetic in the file that a retune could get wrong silently.
+ */
+export function fixAllPrice(percent: number): number {
+  const missing = 100 - percent;
+  if (missing <= 0) return 0;
+  return Math.ceil(missing / HULL_REPAIR_STEP) * HULL_REPAIR_PRICE;
+}
 
 /**
  * Gold the dev button mints per click.
@@ -214,6 +264,27 @@ export interface ShopDeps {
   readonly moonglass: MoonglassStore;
   readonly arcLamp: ArcLampStore;
   readonly governor: GovernorStore;
+  /**
+   * The ship's durability, for the REPAIR block. Defaulted to the stub so this
+   * panel compiles and photographs before Stream B lands.
+   */
+  readonly hull?: Hull;
+  /**
+   * WHICH harbour this is, read on `open()` and not before.
+   *
+   * A callback rather than a `Town`, because the panel outlives any one
+   * mooring: one controller is built at boot and opened at every berth the
+   * ship ever ties up to. Reading it on open is what makes the header and the
+   * upgrade rows describe the place the player is actually standing in.
+   */
+  readonly harbour?: () => Town | null;
+  /** Which upgrade ladders each harbour carries. */
+  readonly stock?: HarbourStock;
+  /**
+   * The harbours the ship has moored at, for the `Known at:` line under an
+   * upgrade this harbour does not sell.
+   */
+  readonly known?: KnownHarbours;
 }
 
 /** A store shaped like a plain stock counter — every consumable in the panel. */
@@ -249,6 +320,11 @@ export function createShop(deps: ShopDeps, search: string = window.location.sear
   const harpoonBuy = document.getElementById('shop-harpoon-buy');
   const devRow = document.getElementById('shop-dev');
   const devGold = document.getElementById('shop-dev-gold');
+  const harbourName = document.getElementById('shop-harbour');
+  const repairHull = document.getElementById('shop-repair-hull');
+  const repairDetail = document.getElementById('shop-repair-detail');
+  const repairStep = document.getElementById('shop-repair-step');
+  const repairAll = document.getElementById('shop-repair-all');
   const tabNavigation = document.getElementById('shop-tab-navigation');
   const tabFishing = document.getElementById('shop-tab-fishing');
   const panelNavigation = document.getElementById('shop-panel-navigation');
@@ -270,6 +346,24 @@ export function createShop(deps: ShopDeps, search: string = window.location.sear
   const overlay: HTMLElement = root;
   const buyBattery: HTMLButtonElement = batteryBuy;
   const buyHarpoons: HTMLButtonElement = harpoonBuy;
+
+  /*
+   * The four harbour-and-hull deps, resolved once.
+   *
+   * Defaulted rather than required so `main.ts` can be wired in one commit at
+   * integration instead of four, and so this panel can be opened and
+   * photographed against a sound hull at a harbour that sells everything. The
+   * defaults are the honest no-op of each: a hull nothing can move, an empty
+   * stock table, and no harbour at all -- which is exactly what a shop with no
+   * berth behind it is.
+   */
+  const hull: Hull = deps.hull ?? createStubHull();
+  const stock: HarbourStock = deps.stock ?? createHarbourStock();
+  const known: KnownHarbours = deps.known ?? createKnownHarbours();
+  const harbourOf: () => Town | null = deps.harbour ?? ((): Town | null => null);
+
+  /** The harbour the panel is currently describing. Re-read on every open. */
+  let harbour: Town | null = null;
 
   /**
    * One purchase: test the goods, take the gold, hand the goods over.
@@ -479,6 +573,157 @@ export function createShop(deps: ShopDeps, search: string = window.location.sear
     `One session at ${Math.round(BARBED_HEADS_DRAIN_SCALE * 100)}% tension drain · stows ${BARBED_HEADS_STORE_MAX}`,
   );
 
+  /* ---------------------------------------------------------------- */
+  /* Which upgrades this harbour carries                                */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * One upgrade row, and the dim line that stands in for it where the harbour
+   * does not carry that ladder.
+   *
+   * The row is HIDDEN rather than disabled, and that is the whole design: a
+   * greyed-out Governor at every harbour in the world would teach a player
+   * that the Governor is never available, when the truth is that it is
+   * available at six of them and this is not one. What replaces it says where
+   * to look instead, and it can only name harbours the player has actually
+   * been to -- `knownHarbours` is the one thing that survives a world, and
+   * naming a place the ship has never seen would be the panel knowing
+   * something the player does not.
+   */
+  interface UpgradeRow {
+    readonly line: UpgradeLine;
+    readonly row: HTMLElement;
+    readonly absent: HTMLElement;
+  }
+
+  const upgradeRows: UpgradeRow[] = [];
+
+  function wireUpgradeRow(prefix: string, line: UpgradeLine): void {
+    const row = document.getElementById(`shop-${prefix}-offer`);
+    const absent = document.getElementById(`shop-${prefix}-absent`);
+    if (row === null || absent === null) return;
+    upgradeRows.push({ line, row, absent });
+  }
+
+  wireUpgradeRow('trim', 'trim');
+  wireUpgradeRow('moonglass', 'moonglass');
+  wireUpgradeRow('arclamp', 'arclamp');
+  wireUpgradeRow('governor', 'governor');
+
+  const writeAbsent = new Map<UpgradeLine, (value: string) => void>();
+  for (const { line, absent } of upgradeRows) writeAbsent.set(line, textWriter(absent));
+
+  /** `Not sold here. Known at: A, B`, or `Not sold here.` when none is known. */
+  function absentText(line: UpgradeLine): string {
+    const elsewhere: string[] = [];
+    for (const name of known.names) {
+      if (stock.linesFor(name).includes(line)) elsewhere.push(name);
+    }
+    if (elsewhere.length === 0) return 'Not sold here.';
+    return `Not sold here. Known at: ${elsewhere.join(', ')}`;
+  }
+
+  function refreshUpgradeRows(): void {
+    // No harbour at all -- the panel opened without a berth behind it, which
+    // `main.ts` does not allow but the defaults above do -- shows everything.
+    // A shop with nothing in it would read as broken rather than as remote.
+    const lines = harbour === null ? null : stock.linesFor(harbour.name);
+    for (const { line, row, absent } of upgradeRows) {
+      const carried = lines === null || lines.includes(line);
+      row.hidden = !carried;
+      absent.hidden = carried;
+      if (!carried) writeAbsent.get(line)?.(absentText(line));
+    }
+  }
+  refreshers.push(refreshUpgradeRows);
+
+  /* ---------------------------------------------------------------- */
+  /* Repair                                                             */
+  /* ---------------------------------------------------------------- */
+
+  /*
+   * The one offer that is not goods: gold for hull.
+   *
+   * Above the tabs rather than inside one, because it belongs to neither
+   * category and because it is the thing a player limping into a harbour is
+   * looking for. It is always shown, at every harbour, which is decision 16 --
+   * the four upgrade ladders are the only stock that varies.
+   *
+   * Nothing here subscribes to the hull, and it does not need to: the hull's
+   * clock does not tick while this panel is up (docs/HARBOURS_PLAN.md,
+   * decision 12 -- `main.ts` calls `hull.update` only from the sailing branch),
+   * so the only thing that can move the percent while the shop is open is a
+   * purchase made in here. Every purchase spends gold, the wallet notifies,
+   * and `refresh` runs. One less subscription, and no risk of clobbering the
+   * save's own listener on a store whose `onChange` returns no unsubscribe.
+   */
+  const writeRepairHull = textWriter(repairHull);
+  const writeRepairDetail = textWriter(repairDetail);
+  const buyRepairStep = repairStep instanceof HTMLButtonElement ? repairStep : null;
+  const buyRepairAll = repairAll instanceof HTMLButtonElement ? repairAll : null;
+  const writeStepPrice = textWriter(document.getElementById('shop-repair-step-price'));
+  const writeAllPrice = textWriter(document.getElementById('shop-repair-all-price'));
+  const writeStepLabel = textWriter(document.getElementById('shop-repair-step-label'));
+  const writeStepOffer = offerWriter(buyRepairStep);
+  const writeAllOffer = offerWriter(buyRepairAll);
+
+  writeStepLabel(`+${HULL_REPAIR_STEP}%`);
+  writeRepairDetail(
+    `${formatGold(HULL_REPAIR_PRICE)} G per ${HULL_REPAIR_STEP}% · free alongside any berth`,
+  );
+
+  function refreshRepair(): void {
+    const percent = hull.state.percent;
+    const sound = percent >= 100;
+    writeRepairHull(`HULL ${percent}%`);
+    writeStepPrice(`${formatGold(HULL_REPAIR_PRICE)} G`);
+    // Zero at a sound hull rather than blank: the button is disabled and its
+    // title says why, and a price that vanishes would read as an offer that
+    // vanished.
+    writeAllPrice(`${formatGold(fixAllPrice(percent))} G`);
+
+    if (sound) {
+      writeStepOffer(false, 'Hull is sound');
+      writeAllOffer(false, 'Hull is sound');
+      return;
+    }
+    writeStepOffer(deps.wallet.gold >= HULL_REPAIR_PRICE, `Needs ${HULL_REPAIR_PRICE} gold`);
+    const all = fixAllPrice(percent);
+    writeAllOffer(deps.wallet.gold >= all, `Needs ${all} gold`);
+  }
+  refreshers.push(refreshRepair);
+
+  function onBuyRepairStep(): void {
+    buy(
+      HULL_REPAIR_PRICE,
+      () => hull.state.percent < 100,
+      () => {
+        hull.repair(HULL_REPAIR_STEP);
+        return true;
+      },
+    );
+  }
+
+  function onBuyRepairAll(): void {
+    // The price is read BEFORE the wallet is touched and the repair is the
+    // whole shortfall, so the two cannot disagree: `buy` takes exactly the
+    // gold this percent was quoted at, and nothing between the quote and the
+    // spend can move the hull -- see the block comment above on why the
+    // clock is stopped while this panel is up.
+    const percent = hull.state.percent;
+    buy(
+      fixAllPrice(percent),
+      () => percent < 100,
+      () => {
+        hull.repair(100 - percent);
+        return true;
+      },
+    );
+  }
+
+  buyRepairStep?.addEventListener('click', onBuyRepairStep);
+  buyRepairAll?.addEventListener('click', onBuyRepairAll);
+
   /*
    * The dev row: unhidden, labelled and wired ONLY behind `?dev`.
    *
@@ -502,7 +747,13 @@ export function createShop(deps: ShopDeps, search: string = window.location.sear
    * visits — and a shop that only refreshed on its own clicks would open
    * showing the balance the player had last time.
    */
+  const writeHarbour = textWriter(harbourName);
+
   function refresh(): void {
+    // Upper-cased here rather than in CSS, so the header reads the same in a
+    // screenshot as it does to a screen reader -- the same call `hud.ts`'s
+    // berth tag makes about the name it prints.
+    writeHarbour(harbour === null ? '' : harbour.name.toUpperCase());
     writePurse(formatGold(deps.wallet.gold));
     for (const r of refreshers) r();
   }
@@ -566,6 +817,20 @@ export function createShop(deps: ShopDeps, search: string = window.location.sear
 
   function setOpen(next: boolean): void {
     if (next === open) return;
+    /*
+     * WHERE this is, re-read on the way in and only on the way in.
+     *
+     * Not per frame and not on a subscription: the world is frozen while this
+     * panel is up, so the berth under the ship cannot change between the
+     * click that opened it and the click that closes it. Reading once on open
+     * is therefore both cheaper and more correct than watching -- a panel
+     * that re-read the berth would be describing a harbour the ship had
+     * drifted out of, halfway through a purchase.
+     */
+    if (next) {
+      harbour = harbourOf();
+      refresh();
+    }
     open = next;
     overlay.hidden = !next;
     overlay.setAttribute('aria-hidden', next ? 'false' : 'true');
@@ -609,6 +874,8 @@ export function createShop(deps: ShopDeps, search: string = window.location.sear
       backdrop?.removeEventListener('click', onClose);
       buyBattery.removeEventListener('click', onBuyBattery);
       buyHarpoons.removeEventListener('click', onBuyHarpoons);
+      buyRepairStep?.removeEventListener('click', onBuyRepairStep);
+      buyRepairAll?.removeEventListener('click', onBuyRepairAll);
       buyDevGold?.removeEventListener('click', onDevGold);
       tabNavigation?.removeEventListener('click', onTabNavigation);
       tabFishing?.removeEventListener('click', onTabFishing);
