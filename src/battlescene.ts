@@ -33,6 +33,7 @@ import {
 } from './battlewave';
 import { CREST_MAX, FLOTSAM_COUNT_MAX } from './battlesea';
 import { GLOBE_RADIUS } from './geo';
+import { SUN_APPEARS_SIN } from './horizon';
 import { HULL_OFFSET } from './ship';
 
 /**
@@ -862,15 +863,25 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
       scene.add(player);
       if (ai !== null) scene.add(ai);
 
-      // The sine of the sun's elevation at the ship, graded exactly as
-      // `daynight.ts` grades its own rig: the day term over the terminator
-      // band, the key dimmed as the sun drops toward thicker air.
+      /*
+       * The sine of the sun's elevation at the ship, graded exactly as
+       * `daynight.ts` grades its own rig: the day term over the terminator
+       * band, the key dimmed as the sun drops toward thicker air.
+       *
+       * Every ramp starts at `SUN_APPEARS_SIN` rather than at zero, and the
+       * arena has to copy that even though it is a flat sea with a horizon of
+       * its own. The elevation handed in is the WORLD's, measured against the
+       * world's drawn horizon, and a fight entered at daybreak has to be lit
+       * like the daybreak it interrupted. Grading it from eye level here would
+       * put the arena a quarter of a sky earlier in the day than the sea the
+       * player was just looking at.
+       */
       const elevation = Math.min(1, Math.max(-1, sunElevation));
-      const dayFactor = smoothstep(-0.2, 0.22, elevation);
-      const height = smoothstep(0, 0.42, elevation);
+      const dayFactor = smoothstep(SUN_APPEARS_SIN, 0.22, elevation);
+      const height = smoothstep(SUN_APPEARS_SIN, 0.42, elevation);
 
       const sunColor = HORIZON_TINT.clone()
-        .lerp(GOLDEN_TINT, smoothstep(-0.02, 0.16, elevation))
+        .lerp(GOLDEN_TINT, smoothstep(SUN_APPEARS_SIN, 0.0, elevation))
         .lerp(NOON_TINT, smoothstep(0.16, 0.46, elevation));
 
       // Elevation off the world, bearing off the arena. `KEY_AZIMUTH` is

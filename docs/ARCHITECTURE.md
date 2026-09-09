@@ -317,7 +317,8 @@ shader.
 | `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
 | `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?, weather?, cells?, chart?)`. The scope's GEOMETRY never changes with the weather — `RADAR_RANGE`, the projection tables and the range rings are fixed — what changes is how much of it has anything in it: beyond `WeatherState.visibility` a pixel is `SCOPE_FOG` if uncharted and the coast dimmed toward it if charted. Cells draw as discs of `radius * strength`, culled on `visibility + radius` so a bank whose centre is off the scope still shows. It is also where the chart is STAMPED, because this is the one place that knows both the visibility and when it last looked; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
-| `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `formatLocalTime`, `SolarPhase` | where the ship stands in its own solar day; DOM-free, so the geometry is testable without a canvas |
+| `horizon.ts` | `limbSin(cameraRadius)`, `sunAppearsSin(cameraRadius)`, `SUN_APPEARS_SIN` | where the DRAWN horizon is, and the elevation the sun's disc clears it at; derived from `GLOBE_RADIUS`, the chase camera's opening framing and `SUN_DISC_RADIANS`, so nothing downstream writes the number down |
+| `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `SolarPhase` | where the ship stands in its own day or night, and how far through it; DOM-free, so the geometry is testable without a canvas |
 | `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
 | `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
 | `fishsim.ts` | `createFishingSim(rng?, extraShots?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
@@ -1136,7 +1137,10 @@ east into the sunrise and dawn arrives sooner, sail west and you hold the
 sunset. Nothing models this; deleting it would take work.
 
 The numbers are worth knowing before retuning `DAY_LENGTH`, which is now
-**1200 s — ten minutes of day and ten of night** at the equator. The
+**1200 s for one full turn of the sun**. That is not ten minutes of day and ten
+of night: the day is measured from the drawn horizon rather than from eye level
+(see **Where the day starts** below), so at the equator the sun's disc is
+visible for about 13 of those 20 minutes. The
 terminator sweeps the ground at `2*PI*GLOBE_RADIUS / DAY_LENGTH` — 1.05 world
 units a second — while the ship does 10. About ten to one, still the reverse of
 Earth, where the ground beats a ship roughly forty to one, but no longer the
@@ -1148,27 +1152,94 @@ stopping the sun the way it used to. Only a shorter day, a slower ship or a
 larger `GLOBE_RADIUS` moves that ratio — the last because it slows the ship in
 degrees without slowing the sun.
 
-### Where the day starts
-The world opens at **06:00 local** on the spawn meridian, not at 0 on the world
-clock: `createEnv` seeds `elapsed` from `START_ELAPSED`. The ship spawns on
-heading 090, so a dawn opening puts the sun dead ahead and low, which is the
-only arrangement that shows off the sky the moment the game loads — at the noon
-this used to open on, the sun was overhead and behind the chase camera.
+### Where the day starts, and where the horizon is
+The horizon is **not eye level**, and on a globe this small the difference runs
+the whole day. At the chase camera's opening framing the drawn limb sits **25°
+below horizontal** (`horizon.ts`), so a sun at elevation zero — the angle every
+sunrise equation in the world is written against — is already a quarter of the
+sky clear of the water and has been for a third of the morning.
 
-`START_ELAPSED` is **derived**, by inverting `solartime.ts`'s
-`time = fract(0.5 + tod + lon / 2PI)`, rather than written down as a number.
-Local time is the angle between two meridians and never a clock the world
-carries, so the elapsed seconds that land on dawn depend on `DAY_LENGTH` and
-`SPAWN_LON_DEG` — both documented as retunable. Deriving it means changing
-either one moves the opening with it instead of silently landing on the wrong
-hour.
+That gap used to be nobody's business, and it showed. The sun's disc hung
+plainly over the sea while every shader lit the world as midnight, and the dial
+said 04:00. `horizon.ts` now names the gap once: `limbSin(cameraRadius)` is the
+same `-sqrt(1 - R²/d²)` the sky dome recomputes per pixel, and
+`SUN_APPEARS_SIN` is that minus the sun's own disc radius — the elevation the
+centre stands at as the top edge touches the sea. **One threshold serves both
+ends of the day**, because the top edge is the last part to go under as well as
+the first to come up, so daybreak and nightfall cannot drift apart.
 
-One consequence worth knowing: `MOON_PHASE_OFFSET` is tuned against this hour
-and had to be retuned when it moved. A noon opening can only manage a thin
-crescent low in the east, because at noon anything far enough from the sun to
-be well lit is also below the horizon. A dawn opening frees the whole western
-sky, so the moon now opens nearly opposite the sun — a bright gibbous setting
-astern as the sun rises ahead.
+The horizon really does drop further as the camera climbs, and both CPU-side
+consumers pin themselves to the opening framing anyway, for different reasons:
+
+- **`solartime.ts`**, because the phase of the day must not move when the
+  player zooms — otherwise pulling the wheel back would set the sun on the dial
+  without moving it in the sky.
+- **`daynight.ts`**, because `env.dayFactor` reaches the water, the land and
+  the fog as a single global scalar. Tracking the live camera there would
+  brighten the whole sea as a player zoomed out at dusk, which is a worse lie
+  than a fixed offset and a far more visible one.
+
+`sky.ts` is the one that does follow it, per pixel, because the dome is the
+surface actually being drawn against the horizon.
+
+The world opens on **daybreak** at the spawn: the first frame is the moment the
+disc touches the water. The ship spawns on heading 090, so that puts a rising
+sun dead ahead — at the noon this used to open on, the sun was overhead and
+behind the chase camera. `START_ELAPSED` is **solved**, not written down, and
+solved as a fixed point rather than inverted, because the moment of daybreak
+depends on the sun's declination and the declination depends on the elapsed
+seconds being solved for. With `AXIAL_TILT` at zero the second dependency
+vanishes and the first pass is exact; restore the tilt and the solve still
+lands, where a closed-form inversion would quietly sit minutes off.
+
+`MOON_PHASE_OFFSET` is tuned against this opening and has been retuned every
+time it moved. A noon opening can only manage a thin crescent low in the east,
+because at noon anything far enough from the sun to be well lit is also below
+the horizon. A daybreak opening frees the whole western sky, so the moon opens
+nearly opposite the sun — a bright gibbous setting astern as the sun rises
+ahead.
+
+### The day, the night, and the dial
+`solartime.ts` reports a **phase and a progress**, not an hour. There used to be
+an `HH:MM` readout and it could not be made honest: pinning 06:00 to the sun a
+player can actually see would have meant squeezing about 15.6 hours of visible
+sun into 12 clock hours, so a daylight hour would have run nearly twice as long
+as a night one. The hour was the part that had to go. What a player wants off
+that dial is not the time; it is how much light is left.
+
+So the day runs from the disc appearing to the disc vanishing, the night runs
+from one to the other, and `progress` runs 0 → 1 across whichever one the ship
+is in. Both phases change length with latitude, and normalising that away is
+the whole point. The consequences, all falling out of the threshold rather than
+being arranged:
+
+- The day is **longer than the night**, about 65% of the turn at the equator,
+  because the sea is below eye level. The dial's lit arc is honestly that size.
+- Above about **63° of latitude the sun never sets at all**. With the tilt at
+  zero that is permanent, so the dial says `NO SUNSET` rather than showing a
+  percentage of a phase that has no ends.
+- A **night that never breaks** is now unreachable in play: it needs the sun
+  more than 116.7° from the zenith all day and this globe tops out at 113.5°.
+  The branch stays, and is still pinned by a test, because restoring the tilt
+  brings it back.
+
+### Why the sun does not lean
+`AXIAL_TILT` is **0**, and the season machinery is left standing around it. The
+tilt bought variety: a terminator at an angle, a sunrise that was not always
+due east, a day whose length moved through the year. What it cost was that no
+two days at a latitude were alike — and at `SEASON_DAYS = 6`, a year inside six
+game days, they were nowhere near alike. At latitude 40 the visible day ran
+16.8 hours one day and 21.3 the next. A player cannot learn a sky that changes
+that fast, and with the dial now measuring progress rather than naming an hour,
+a learnable day is worth more than a varied one.
+
+Raising `AXIAL_TILT` back toward 0.41 undoes it; everything downstream is
+written in the general form and follows without further edits, including
+`solartime.ts`'s day-length solve, which uses the full
+`cos H = (sin h₀ − sin φ sin δ) / (cos φ cos δ)` rather than the textbook
+`−tan φ tan δ` — that shortcut is the same equation with the horizon at zero,
+and zero is the one elevation the horizon is not. Raise `SEASON_DAYS` alongside
+it, or the days will not resemble each other.
 
 ### The moon
 The moon is placed the same way and on its own period, not opposite the sun. It
@@ -1258,10 +1329,17 @@ summed past white and bleached the horizon.
 
 Every horizon effect in the dome is measured from the **limb**, not from eye
 level. On a globe this small they are nowhere near each other: 9.5 units above
-a radius-200 planet puts the horizon about 17° BELOW horizontal, and it drops
-further as the camera climbs. `limbElev` is recomputed per pixel from
-`cameraPosition`, and the gradient, the twilight band and the sun's glow lobe
-all key off `rayElev - limbElev`.
+a radius-200 planet puts the horizon about 17° BELOW horizontal, at the chase
+camera's actual opening framing about **25°**, and it drops further as the
+camera climbs. `limbElev` is recomputed per pixel from `cameraPosition`, and
+the gradient, the twilight band and the sun's glow lobe all key off
+`rayElev - limbElev`.
+
+`horizon.ts` computes the same quantity on the CPU from the same expression,
+and the two must stay the same expression: it is what `solartime.ts` calls
+daybreak and what `daynight.ts` grades the key light and `env.dayFactor`
+against. A sun that rose out of a band of sky it was not drawn against would be
+the visible symptom. See **Where the day starts, and where the horizon is**.
 
 ### Draw order in the sky
 Everything in the sky is centred on the world origin, so Three's back-to-front

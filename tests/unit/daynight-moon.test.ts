@@ -11,6 +11,7 @@ import { Vector3 } from 'three';
 import { solarPhase } from '../../src/solartime';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { latLonToDir } from '../../src/geo';
+import { SUN_APPEARS_SIN } from '../../src/horizon';
 
 /**
  * The moon's orbit.
@@ -142,18 +143,19 @@ describe('moon orbit', () => {
     expect(moonLon).toBeLessThan(0);
   });
 
-  it('opens at 06:00 local, with the sun due east', () => {
+  it('opens on daybreak, with the sun due east and touching the water', () => {
     /*
-     * The world opens at dawn so the sun is in front of a ship that spawns on
-     * heading 090. START_ELAPSED is derived from DAY_LENGTH and the spawn
-     * longitude rather than written down, so what is checked here is that the
-     * derivation lands where it claims.
+     * The world opens as the sun's disc clears the sea, so it is in front of a
+     * ship that spawns on heading 090 and is visibly rising rather than
+     * already up. START_ELAPSED is solved from the same threshold and the same
+     * sunrise equation `solartime.ts` uses rather than written down, so what
+     * is checked here is that the solve lands where it claims.
      *
-     * Asserted through `solarPhase`, which is what the time dial reads, so
-     * this pins the hour the PLAYER sees rather than a vector that happens to
-     * imply it. Note the sun's own `y` is its declination -- the seasonal
-     * tilt, about 0.39 at this moment -- and not its height in the ship's sky;
-     * those two are easy to confuse and only the second one means dawn.
+     * Asserted through `solarPhase`, which is what the dial reads, so this
+     * pins the moment the PLAYER sees rather than a vector that happens to
+     * imply it. The old version of this case looked for elevation zero, and
+     * that was the bug: on this globe elevation zero is a sun already a
+     * quarter of the sky clear of the water.
      */
     const env = createEnv();
     createDayNight().update(0, env);
@@ -161,13 +163,25 @@ describe('moon orbit', () => {
     const up = latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG, new Vector3());
     const phase = solarPhase(up, env.sunDirection);
 
-    // 0.25 of the local solar day is 06:00. Within a second of game time.
-    expect(phase.time).toBeCloseTo(0.25, 5);
-    // Sunrise proper: the sun is on the horizon, not merely near it.
-    expect(phase.sinElevation).toBeCloseTo(0, 6);
-    // And it is the EASTERN horizon. Longitude +90 degrees on geo.ts's
-    // convention, where lon 0 is +Z and the spawn sits on it.
-    expect(lon(env.sunDirection)).toBeCloseTo(Math.PI / 2, 6);
+    // Exactly on the crossing, within a second of game time. Which SIDE of it
+    // the zero-length first frame lands on is a float's choice and not worth
+    // pinning, so the phase is read a second later, once time has moved.
+    expect(phase.solarTime).toBeCloseTo(phase.dayStart, 5);
+
+    const dayNight = createDayNight();
+    const running = createEnv();
+    dayNight.update(1, running);
+    const after = solarPhase(up, running.sunDirection);
+    expect(after.isDay).toBe(true);
+    expect(after.progress).toBeGreaterThan(0);
+    expect(after.progress).toBeLessThan(0.02);
+    // Daybreak proper: the disc is ON the drawn horizon, not merely near it.
+    expect(phase.sinElevation).toBeCloseTo(SUN_APPEARS_SIN, 6);
+    // And it is the EASTERN horizon. With the tilt at zero the sun sits on the
+    // equator, so its longitude is the hour angle of daybreak itself: east of
+    // the spawn meridian by acos of the threshold, about 117 degrees.
+    expect(lon(env.sunDirection)).toBeCloseTo(Math.acos(SUN_APPEARS_SIN), 6);
+    expect(lon(env.sunDirection)).toBeGreaterThan(0);
   });
 
   it('lets the sun gain exactly one lap on the moon per month', () => {
@@ -191,21 +205,26 @@ describe('moon orbit', () => {
     expect(oneMonth).toBeCloseTo(0, 9);
   });
 
-  it('leaves the sun exactly where it was before the moon existed', () => {
-    // Golden triples captured from `main` at the commit the moon landed on.
-    // Adding a body to the sky must not move the one every shader in the
-    // project already decides day from night by.
-    const golden: Array<[number, [number, number, number]]> = [
-      [0, [0, 0.3273525223712207, 0.9449022838882333]],
-      [600, [-1.1240916480829483e-16, 0.3968337839199034, -0.9178904879885244]],
-      [2600, [-0.8655909711516524, -0.03167061015596467, 0.4997491802025173]],
-      [9600, [0, 0.039777780460565, 0.9992085508949726]],
-    ];
-    for (const [t, [x, y, z]] of golden) {
+  it('tracks the equator exactly, and lets nothing in the sky move it', () => {
+    /*
+     * This used to be four golden triples captured before the moon landed,
+     * guarding the one vector every shader in the project decides day from
+     * night by against a second body being added next to it. It still guards
+     * that, and now says WHAT it is guarding rather than four hashes of it:
+     * with AXIAL_TILT at zero the sun holds the equator, and its longitude is
+     * the elapsed fraction of a day run westward. Nothing else may touch it.
+     *
+     * Restoring the tilt is expected to fail this case, which is the point --
+     * it is the one line that would otherwise let a season back in unnoticed.
+     */
+    for (const t of [0, 600, 2600, 9600]) {
       const sun = envAt(t).sunDirection;
-      expect(sun.x).toBeCloseTo(x, 12);
-      expect(sun.y).toBeCloseTo(y, 12);
-      expect(sun.z).toBeCloseTo(z, 12);
+      // On the equator: no declination, in any season.
+      expect(sun.y).toBeCloseTo(0, 12);
+      // And westward at one turn per DAY_LENGTH.
+      const expected = -((t / DAY_LENGTH) % 1) * Math.PI * 2;
+      expect(Math.cos(lon(sun))).toBeCloseTo(Math.cos(expected), 12);
+      expect(Math.sin(lon(sun))).toBeCloseTo(Math.sin(expected), 12);
     }
   });
 });

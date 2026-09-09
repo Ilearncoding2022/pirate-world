@@ -1,26 +1,36 @@
 import type { ShipState } from './types';
 import type { WorldEnv } from './env';
-import { solarPhase, phaseName, formatLocalTime } from './solartime';
+import { solarPhase, phaseName } from './solartime';
 
 /**
- * The time dial: where the ship stands in its own solar day.
+ * The day dial: where the ship stands in its own day, and how much of it is
+ * left.
  *
  * A 2D canvas, like `radar.ts` and `fishrender.ts`, so it costs no draw calls
  * and never touches the scene graph. All the geometry lives in `solartime.ts`;
  * this file only draws it.
  *
- * Noon sits at the top and time runs clockwise, so the lit arc is the part of
- * the ring the sun is above the horizon for. Two things move on it, and they
- * move for different reasons:
+ * It used to read `HH:MM`, and the hour is gone on purpose -- see the header of
+ * `solartime.ts` for why an hour could not be made to agree with the sun the
+ * player could see. What replaced it is a percentage through the CURRENT
+ * phase, day or night, because that is the question the dial was being asked
+ * anyway: not what time it is, but how long the light will last.
+ *
+ * Noon sits at the top and the day runs clockwise, so the lit arc is the part
+ * of the ring the sun's disc is clear of the water for. Three things move, for
+ * three different reasons:
  *
  *   - **The marker** runs round the ring at the rate the ship's local day
  *     passes. At anchor that is one lap per DAY_LENGTH. Under way it is not:
- *     the ship covers longitude about sixty times faster than the terminator
+ *     the ship covers longitude about ten times faster than the terminator
  *     does, so running east visibly drives the marker round and running west
  *     can stall it or push it backwards. That is not simulated anywhere; it
  *     falls out of measuring the angle between two meridians.
- *   - **The lit arc itself** grows and shrinks with latitude and season, and
- *     closes to nothing inside a polar night.
+ *   - **The lit arc** grows and shrinks with latitude. It covers about 65% of
+ *     the ring at the equator rather than half, because the drawn horizon is
+ *     below eye level and the sun is visible for longer than it is up.
+ *   - **The readout** runs 0 to 100% and resets at each crossing, so it is
+ *     the one part that does not care how long either phase happens to be.
  */
 export interface TimeDial {
   update(ship: ShipState, env: WorldEnv): void;
@@ -47,7 +57,7 @@ const SUN_CORE = '#fff2d6';
 const SUN_DOWN = '#5d7f97';
 const HORIZON_LINE = 'rgba(63, 224, 255, 0.22)';
 const TICK = 'rgba(207, 239, 251, 0.30)';
-const TIME_TEXT = '#cfeffb';
+const PROGRESS_TEXT = '#cfeffb';
 const PHASE_TEXT = '#6f93a6';
 
 /**
@@ -57,8 +67,8 @@ const PHASE_TEXT = '#6f93a6';
  * so a quarter turn is subtracted to put local noon at the top. Sunrise then
  * falls on the left, sunset on the right, and midnight at the bottom.
  */
-function angleFor(time: number): number {
-  return (time - 0.5) * Math.PI * 2 - Math.PI / 2;
+function angleFor(solarTime: number): number {
+  return (solarTime - 0.5) * Math.PI * 2 - Math.PI / 2;
 }
 
 export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
@@ -128,16 +138,19 @@ export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
       if (phase.dayFraction >= 1) {
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
       } else {
-        ctx.arc(cx, cy, r, angleFor(phase.sunrise), angleFor(phase.sunset));
+        ctx.arc(cx, cy, r, angleFor(phase.dayStart), angleFor(phase.dayEnd));
       }
       ctx.stroke();
     }
 
     // ---- horizon, and the quarter ticks --------------------------------
-    // The chord through sunrise and sunset: the line the sun crosses.
-    if (phase.dayFraction > 0 && phase.dayFraction < 1) {
-      const a0 = angleFor(phase.sunrise);
-      const a1 = angleFor(phase.sunset);
+    // The chord through daybreak and nightfall: the line the sun's disc
+    // crosses. Off centre, unlike the old one, because the day is longer than
+    // the night here -- which is the honest picture, and the reason the chord
+    // is worth drawing at all now.
+    if (!phase.polar) {
+      const a0 = angleFor(phase.dayStart);
+      const a1 = angleFor(phase.dayEnd);
       ctx.strokeStyle = HORIZON_LINE;
       ctx.lineWidth = Math.max(1, half * 0.012);
       ctx.beginPath();
@@ -159,10 +172,10 @@ export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
     }
 
     // ---- the sun marker -------------------------------------------------
-    const a = angleFor(phase.time);
+    const a = angleFor(phase.solarTime);
     const mx = cx + Math.cos(a) * r;
     const my = cy + Math.sin(a) * r;
-    const up = phase.sinElevation > 0;
+    const up = phase.isDay;
     const markerR = half * MARKER_RADIUS;
 
     if (up) {
@@ -184,13 +197,31 @@ export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
 
-    ctx.fillStyle = TIME_TEXT;
+    /*
+     * How far through this phase, as a percentage, with the phase named under
+     * it. A percentage rather than a countdown for the same reason the hour
+     * went: how long the rest of the day will TAKE is not a fact about the
+     * ship's position, and the moment the wheel goes over it stops being true.
+     *
+     * Where the sun never sets there is no phase to be a fraction of, so the
+     * dial says so rather than showing a number that would run 0 to 100 and
+     * mean nothing at either end.
+     */
+    ctx.fillStyle = PROGRESS_TEXT;
     ctx.font = `600 ${Math.round(half * 0.42)}px "Segoe UI Mono", "Consolas", monospace`;
-    ctx.fillText(formatLocalTime(phase.time), cx, cy + half * 0.06);
+    const readout = phase.polar
+      ? '--'
+      : `${Math.min(99, Math.floor(phase.progress * 100))}%`;
+    ctx.fillText(readout, cx, cy + half * 0.06);
 
     ctx.fillStyle = PHASE_TEXT;
     ctx.font = `600 ${Math.round(half * 0.21)}px "Segoe UI Mono", "Consolas", monospace`;
-    ctx.fillText(phaseName(phase), cx, cy + half * 0.34);
+    const label = phase.polar
+      ? phase.isDay
+        ? 'NO SUNSET'
+        : 'NO SUNRISE'
+      : phaseName(phase);
+    ctx.fillText(label, cx, cy + half * 0.34);
   }
 
   return { update };

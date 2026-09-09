@@ -33,7 +33,7 @@ const CELESTIAL_DISTANCE = GLOBE_RADIUS * 8;
  * Deliberately larger than the real sun's 0.0047 -- an art choice inherited
  * from the water, not an error.
  */
-const SUN_DISC_RADIANS = 0.03;
+export const SUN_DISC_RADIANS = 0.03;
 /** How far the corona reaches past the core, as a multiple of the core radius. */
 const SUN_CORONA_SCALE = 3.0;
 /**

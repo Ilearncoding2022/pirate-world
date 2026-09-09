@@ -28,6 +28,33 @@ const NEAR_HEIGHT = 9.5;
 const FAR_DISTANCE = GLOBE_RADIUS * 0.9;
 const FAR_HEIGHT = GLOBE_RADIUS * 0.55;
 
+/**
+ * Zoom the game opens on, 0 = closest framing and 1 = furthest.
+ *
+ * A fixed *distance*, not a fixed fraction of the range: the far end tracks
+ * GLOBE_RADIUS, so holding the fraction would have pushed the camera back with
+ * the planet and quietly reframed the game. 0.08 of 21..GLOBE_RADIUS*0.9 is the
+ * same 33 units back and 17 up the game opened on before the world grew.
+ */
+export const OPENING_ZOOM = 0.08;
+
+/**
+ * How far the chase camera sits from the globe's CENTRE at the opening framing.
+ *
+ * Exported for one reason, and it is not the camera's: on a planet this small
+ * the drawn horizon is nowhere near eye level, and how far below it sits is a
+ * function of exactly this distance. `horizon.ts` turns it into the elevation
+ * the sun's disc has to reach to clear the sea, which is what `solartime.ts`
+ * calls daybreak and what `daynight.ts` grades the light against.
+ *
+ * Derived here rather than measured there, so retuning the chase framing moves
+ * the horizon with it instead of leaving the sun rising at the old angle.
+ */
+export const CHASE_CAMERA_RADIUS = Math.hypot(
+  GLOBE_RADIUS + SHIP_ALTITUDE + lerp(NEAR_HEIGHT, FAR_HEIGHT, OPENING_ZOOM),
+  lerp(NEAR_DISTANCE, FAR_DISTANCE, OPENING_ZOOM),
+);
+
 /** How far ahead of the bow the camera aims, and how far above the deck. */
 const LOOK_AHEAD = 6;
 const LOOK_UP = 1.5;
@@ -87,16 +114,8 @@ export function createFollowCamera(aspect: number): FollowCamera {
   const smoothTarget = new Vector3();
   const smoothUp = new Vector3(0, 1, 0);
 
-  /**
-   * 0 = closest framing, 1 = furthest.
-   *
-   * The opening shot is a fixed *distance*, not a fixed fraction of the range:
-   * the far end tracks GLOBE_RADIUS, so holding the fraction would have pushed
-   * the camera back with the planet and quietly reframed the game. 0.08 of
-   * 21..GLOBE_RADIUS*0.9 is the same 33 units back and 17 up the game opened
-   * on before the world grew.
-   */
-  let zoomTarget = 0.08;
+  /** 0 = closest framing, 1 = furthest. See OPENING_ZOOM. */
+  let zoomTarget = OPENING_ZOOM;
   let zoom = zoomTarget;
   let initialized = false;
 
