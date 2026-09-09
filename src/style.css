@@ -781,6 +781,120 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   FLOW — what a segmented bar is DOING, over what it reads
+
+   Three bars in this panel carry a level that moves on its own: the tank,
+   the cell and the hull. The figure beside each one says where the level is
+   and the tag says why, but neither says it is MOVING, and a player watching
+   for the moment a storm starts eating the hull should not have to read two
+   rows of small type to catch it.
+
+   So one vocabulary, written by hud.ts as a `flow--*` modifier on the bar
+   element itself, drives every keyframe below. On the bar rather than on the
+   block, because the hull's bar is not inside the power block and wants the
+   same four states: `still`, `drain`, `drain-fast`, `charge`.
+
+   Two markers ride the segments, one notch at a time, also from hud.ts:
+
+     - `is-crest` — the highest LIT notch, the one the level stands on and so
+       the one a drain is about to take. This is what blinks: a whole bar
+       flashing is an ALARM and this panel already has two of those
+       (`pwr--dead`, `hull--critical`), which would have nothing left to say
+       if an ordinary burn looked the same.
+     - `is-sweep` — the notch a charging sweep is passing over this instant.
+
+   Nothing here is load-bearing. Every rule is an animation on a marker class,
+   so a browser that refuses to run them, or a player who has asked it not to,
+   loses the motion and keeps the whole reading.
+   ------------------------------------------------------------------- */
+
+/*
+ * Draining: one slow pulse every three seconds.
+ *
+ * Slow on purpose. A ship under way is nearly always spending something, so
+ * this is the panel's resting state rather than a warning, and anything
+ * faster would be a light flashing in the corner of the eye for the length of
+ * a voyage. The dip is short against the gap -- under half a second of a
+ * three-second cycle -- so it reads as a heartbeat rather than a flicker.
+ */
+.flow--drain .is-crest {
+  animation: seg-crest 3s ease-in-out infinite;
+}
+
+/*
+ * Draining fast: two pulses every second.
+ *
+ * The hull under weather, and only the hull -- `hull.ts` doubles the wear
+ * while a storm or rain sits over the ship and `hullFlow` in hud.ts routes
+ * that one mode here. A doubled beat for a doubled rate: the player is meant
+ * to connect the change in the panel with the change in the sky, so the
+ * difference from the pulse above is a COUNT rather than a colour, which
+ * survives being seen out of the corner of the eye.
+ */
+.flow--drain-fast .is-crest {
+  animation: seg-crest-fast 1s ease-in-out infinite;
+}
+
+/*
+ * Charging: a light running up the lit notches, one every half second.
+ *
+ * `sweepIndex` in hud.ts moves the marker and wraps it at the crest, so the
+ * sweep only ever crosses charge the ship actually has -- it is the bar
+ * filling, drawn as a thing in motion, and running it out over dark notches
+ * would draw charge that is not there.
+ *
+ * `infinite` rather than a single play, and the reason is the one-notch case:
+ * a bar with a single lit notch pins the marker at 0 and never moves it, so a
+ * one-shot animation would fire once and leave the notch dead for the rest of
+ * the charge. Looping makes that bar pulse in place at the same cadence the
+ * sweep would have crossed it. Every other bar moves the marker on before the
+ * second iteration can start.
+ *
+ * `filter` rather than a colour, so this one rule serves all three bars: the
+ * tank, the cell and the hull are three different accents and a brightness
+ * multiplier does not need to know which.
+ */
+.flow--charge .is-sweep {
+  animation: seg-sweep 500ms ease-out infinite;
+}
+
+@keyframes seg-crest {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  6% {
+    opacity: 0.15;
+  }
+  14% {
+    opacity: 1;
+  }
+}
+
+@keyframes seg-crest-fast {
+  0%,
+  20%,
+  40%,
+  100% {
+    opacity: 1;
+  }
+  10%,
+  30% {
+    opacity: 0.15;
+  }
+}
+
+@keyframes seg-sweep {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  30% {
+    filter: brightness(2.2);
+  }
+}
+
+/* ---------------------------------------------------------------------
    Radar (top-right) — surface plot, painted by radar.ts
    ------------------------------------------------------------------- */
 
@@ -1270,6 +1384,13 @@ kbd {
   .pwr__seg,
   .rsv__seg {
     transition: none;
+  }
+  /* The bars still read: the level, the colour and the tag are all untouched
+     by these three, which only ever said the level was moving. */
+  .flow--drain .is-crest,
+  .flow--drain-fast .is-crest,
+  .flow--charge .is-sweep {
+    animation: none;
   }
 }
 

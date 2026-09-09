@@ -171,6 +171,118 @@ function segmentWriter(el: HTMLElement | null, selector: string): (n: number) =>
   };
 }
 
+/**
+ * Returns a setter that keeps `className` on exactly ONE segment of a bar, or
+ * on none of them when handed a negative index.
+ *
+ * The companion to `segmentWriter` above, and cached the same way: a marker
+ * that has not moved costs one comparison, and a move costs two classList
+ * calls rather than a walk down the bar. Nothing in `index.html` ships either
+ * marker, so the first write is always an add.
+ *
+ * Two markers ride on these bars, and both are single by construction:
+ *
+ *   - `is-crest`, the highest LIT notch — the one the level is standing on,
+ *     and so the only one a drain is about to take. CSS blinks it while the
+ *     bar's `flow--*` says the level is falling.
+ *   - `is-sweep`, the notch the charging sweep is passing over this instant.
+ *     See `sweepIndex`.
+ */
+function markWriter(
+  el: HTMLElement | null,
+  selector: string,
+  className: string,
+): (index: number) => void {
+  const segments: HTMLElement[] =
+    el === null ? [] : Array.from(el.querySelectorAll<HTMLElement>(selector));
+  let last = -1;
+  return (index: number): void => {
+    if (segments.length === 0 || index === last) return;
+    if (last >= 0 && last < segments.length) segments[last].classList.remove(className);
+    if (index >= 0 && index < segments.length) segments[index].classList.add(className);
+    last = index;
+  };
+}
+
+/**
+ * What a segmented bar is DOING, as against what it reads.
+ *
+ * One vocabulary for all three bars — tank, cell and hull — because the three
+ * are read as one column and an animation that meant one thing on the power
+ * bar and another on the hull would be worse than no animation at all. It is
+ * written as a `flow--*` modifier on the bar element itself and every keyframe
+ * hangs off that one class; see the FLOW block in `style.css`.
+ */
+type BarFlow = 'still' | 'drain' | 'drain-fast' | 'charge';
+
+/** Milliseconds the charging sweep spends on each notch. */
+const SWEEP_STEP_MS = 500;
+
+/**
+ * Which notch the charging sweep stands on this frame, or -1 for no sweep.
+ *
+ * The sweep runs over the LIT notches only, from the lowest to the highest,
+ * and wraps: it is the bar filling, drawn as a thing in motion, so it may not
+ * run out over the dark notches the charge has not reached yet.
+ *
+ * Phase comes off the wall clock rather than off an accumulated `dt`, for the
+ * same reason the CSS keyframes it triggers do: the sweep is chrome, it keeps
+ * running while the sim is frozen behind an overlay, and nothing downstream
+ * may depend on where it happens to be. A one-notch bar pins this at 0 and
+ * never moves it, which is why the keyframe loops rather than playing once --
+ * the single notch then pulses in place at the same cadence.
+ */
+function sweepIndex(lit: number, nowMs: number): number {
+  if (lit <= 0) return -1;
+  return Math.floor(nowMs / SWEEP_STEP_MS) % lit;
+}
+
+/**
+ * What the POWER bar is doing.
+ *
+ * `EnergyState.rate` is the net change in the TOTAL — tank plus cell — so the
+ * one case it cannot be read off directly is `reserve`, where the main tank is
+ * already on the floor and every watt is coming out of the cell. The total is
+ * falling there and this bar is not, so the news belongs to the BACKUP bar
+ * below and blinking both would say the ship is losing charge twice over.
+ */
+function powerFlow(energy: EnergyState): BarFlow {
+  if (energy.rate > 0) return 'charge';
+  if (energy.rate < 0 && energy.mode !== 'reserve') return 'drain';
+  return 'still';
+}
+
+/**
+ * What the BACKUP bar is doing.
+ *
+ * `reserve` is the whole answer: the mode means "this frame's shortfall came
+ * out of the cell", which is the definition of this bar falling. The cell has
+ * no gradual charge to sweep for — a berth refills the tank and not the cell,
+ * and the only thing that puts charge back in one is a purchase, which lands
+ * whole rather than trickling.
+ */
+function reserveFlow(energy: EnergyState): BarFlow {
+  return energy.mode === 'reserve' ? 'drain' : 'still';
+}
+
+/**
+ * What the HULL bar is doing.
+ *
+ * Keyed on the RATE and not on the mode, so a hull sitting on its 1% floor is
+ * still: `hull.ts` publishes 0 there rather than the wear it is no longer
+ * paying, and a bar blinking over a number that has stopped moving is the
+ * same lie the rate readout beside it was written to avoid. The mode is asked
+ * only to separate the two speeds of wear.
+ *
+ * `weathering` is the doubled rate — a storm or rain over the ship, decided in
+ * `main.ts` against HULL_WEATHER_THRESHOLD — and gets the doubled beat.
+ */
+function hullFlow(mode: HullMode, rate: number): BarFlow {
+  if (rate > 0) return 'charge';
+  if (rate < 0) return mode === 'weathering' ? 'drain-fast' : 'drain';
+  return 'still';
+}
+
 /** "093" — heading as a zero-padded 3-digit integer in [0, 360). */
 function formatHeading(headingDeg: number): string {
   const deg = ((Math.round(headingDeg) % 360) + 360) % 360;
@@ -741,6 +853,12 @@ export function createHud(
   const writePwrAria = attrWriter(pwrBar, 'aria-valuenow');
   const writePwrMode = textWriter(document.getElementById('hud-pwr-mode'));
   const writePwrRate = textWriter(document.getElementById('hud-pwr-rate'));
+  // What the bar is DOING, on top of what it reads. The modifier goes on the
+  // bar rather than on the block, because the hull's bar three rows down wants
+  // the same four states and the same keyframes and is not inside this block.
+  const writePwrFlow = modifierWriter(pwrBar, 'flow');
+  const writePwrCrest = markWriter(pwrBar, '.pwr__seg', 'is-crest');
+  const writePwrSweep = markWriter(pwrBar, '.pwr__seg', 'is-sweep');
 
   // The backup cell. One colour and one behaviour, so it needs no modifier
   // writer -- the whole block is simply shown or hidden depending on whether
@@ -750,6 +868,10 @@ export function createHud(
   const writeRsvValue = textWriter(document.getElementById('hud-rsv-value'));
   const writeRsvSegments = segmentWriter(rsvBar, '.rsv__seg');
   const writeRsvAria = attrWriter(rsvBar, 'aria-valuenow');
+  // No sweep writer here, and that is not an omission: a cell has no gradual
+  // charge to draw one for. See `reserveFlow`.
+  const writeRsvFlow = modifierWriter(rsvBar, 'flow');
+  const writeRsvCrest = markWriter(rsvBar, '.rsv__seg', 'is-crest');
 
   // The hull, built exactly as the power block above it is: one modifier on
   // the wrapper carries the severity and the CSS fans it out to the number,
@@ -761,6 +883,9 @@ export function createHud(
   const writeHullAria = attrWriter(hullBar, 'aria-valuenow');
   const writeHullMode = textWriter(document.getElementById('hud-hull-mode'));
   const writeHullRate = textWriter(document.getElementById('hud-hull-rate'));
+  const writeHullFlow = modifierWriter(hullBar, 'flow');
+  const writeHullCrest = markWriter(hullBar, '.hull__seg', 'is-crest');
+  const writeHullSweep = markWriter(hullBar, '.hull__seg', 'is-sweep');
 
   // The purse pushes; it is not pulled. See the note on createHud above.
   const writeGold = textWriter(document.getElementById('hud-gold'));
@@ -799,6 +924,11 @@ export function createHud(
 
   return {
     update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void {
+      // Read once and shared by the two charging sweeps, so the tank and the
+      // hull step together at a berth rather than a frame apart. Wall clock
+      // rather than the sim's, on the terms `sweepIndex` sets out.
+      const nowMs = performance.now();
+
       // The one consumer of `WeatherState.kind`, and the reason it exists.
       // Absent means clear, so a caller with no weather prints the sky the
       // game always had.
@@ -839,7 +969,15 @@ export function createHud(
       writePwrState(powerSeverity(energy));
       writePwrValue(`${percent}%`);
       writePwrAria(percent);
-      writePwrSegments(litSegments(clamped, PWR_SEGMENTS));
+      const pwrLit = litSegments(clamped, PWR_SEGMENTS);
+      writePwrSegments(pwrLit);
+      // The crest is written every frame whether or not anything is animating
+      // it: it is a fact about the bar -- the notch the level stands on -- and
+      // the `flow--*` class beside it is what decides whether it blinks.
+      const pwrFlow = powerFlow(energy);
+      writePwrFlow(pwrFlow);
+      writePwrCrest(pwrLit - 1);
+      writePwrSweep(pwrFlow === 'charge' ? sweepIndex(pwrLit, nowMs) : -1);
       // The berth's name, and only while there is a berth to name. `mode` is
       // asked first because it is a field read and `dockAt` is a walk down the
       // town list: at sea the tag is the same string it always was and this
@@ -863,14 +1001,22 @@ export function createHud(
       // count say the same thing, and both say what the power bar above would
       // say for the same number.
       const reserve = energy.reserve;
-      writeRsvShown(reserve > 0);
-      if (reserve > 0) {
-        const cellFrac = Math.min(1, reserve / BATTERY_CAPACITY);
+      const hasCell = reserve > 0;
+      writeRsvShown(hasCell);
+      const rsvLit = hasCell
+        ? litSegments(Math.min(1, reserve / BATTERY_CAPACITY), RSV_SEGMENTS)
+        : 0;
+      if (hasCell) {
         const cellPercent = String(Math.round(reserve * 100));
         writeRsvValue(`${cellPercent}%`);
         writeRsvAria(cellPercent);
-        writeRsvSegments(litSegments(cellFrac, RSV_SEGMENTS));
+        writeRsvSegments(rsvLit);
       }
+      // Outside the guard, so a cell that has just been spent stops blinking
+      // rather than being hidden mid-animation and left that way for the next
+      // ship that buys one.
+      writeRsvFlow(hasCell ? reserveFlow(energy) : 'still');
+      writeRsvCrest(rsvLit - 1);
 
       /*
        * The hull.
@@ -891,9 +1037,14 @@ export function createHud(
       writeHullState(hullSeverity(hullPercent));
       writeHullValue(`${hullPercent}%`);
       writeHullAria(String(hullPercent));
-      writeHullSegments(litSegments(hullPercent / 100, HULL_SEGMENTS));
+      const hullLit = litSegments(hullPercent / 100, HULL_SEGMENTS);
+      writeHullSegments(hullLit);
       writeHullMode(hullTag(hullState.mode, hullPercent));
       writeHullRate(formatHullRate(hullState.rate));
+      const hullFlowState = hullFlow(hullState.mode, hullState.rate);
+      writeHullFlow(hullFlowState);
+      writeHullCrest(hullLit - 1);
+      writeHullSweep(hullFlowState === 'charge' ? sweepIndex(hullLit, nowMs) : -1);
 
       // A berth and nothing else. `energy.mode` is the one definition of
       // docked in the project -- see `wind.ts`, which shelters against the
