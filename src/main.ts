@@ -1144,10 +1144,48 @@ async function startGame(): Promise<void> {
   // while this is on; hud.ts owns the DOM row this feeds.
   let devTimingVisible = false;
   window.addEventListener('keydown', (event) => {
-    if (event.code !== 'Backquote') return;
-    devTimingVisible = !devTimingVisible;
-    postFx.setTimingEnabled(devTimingVisible);
-    hud.setDevTimingVisible(devTimingVisible);
+    if (event.code === 'Backquote') {
+      devTimingVisible = !devTimingVisible;
+      postFx.setTimingEnabled(devTimingVisible);
+      hud.setDevTimingVisible(devTimingVisible);
+      return;
+    }
+
+    /*
+     * Space: make fast to the berth, or cast off again.
+     *
+     * The guards are [FISH]'s and [SHOP]'s, for the same reasons written out
+     * up there -- no overlay, no menu, no fight, no maelstrom -- with one of
+     * its own on top: `battleui.ts` binds Space as FIRE, and a key that meant
+     * two things at once would moor a ship in the middle of a broadside. The
+     * battle guard already covers it, and this comment is why it may not be
+     * dropped as redundant.
+     *
+     * `event.repeat` is refused because this is a TOGGLE. A held key repeats
+     * at the OS rate, which would tie and cast off several times a second and
+     * leave the state on whichever edge the player happened to let go on.
+     *
+     * `preventDefault` because Space scrolls the page, exactly as the arrow
+     * keys do in `controls.ts`. It is called only once the key is known to be
+     * ours to act on, so a Space aimed at a focused button in an overlay still
+     * presses it.
+     *
+     * The eligibility test is NOT here. `energy.toggleMooring` refuses unless
+     * the ring's dwell has run out and says so in its return, which keeps the
+     * dwell clock and the lock that consumes it in one file -- this would
+     * otherwise be a second opinion about what it means to have arrived.
+     */
+    if (event.code !== 'Space' && event.key !== ' ') return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (menu.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
+    if (event.repeat) return;
+    event.preventDefault();
+    // A ship carrying way into the ring is stopped by the mooring itself --
+    // `ship.ts` writes a dead stop the moment `mode` reads docked -- so this
+    // needs no `halt()` of its own the way [SHOP] does.
+    energy.toggleMooring();
   });
 
   /*

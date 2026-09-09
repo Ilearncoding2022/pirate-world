@@ -455,7 +455,7 @@ const PWR_LOW_LEVEL = 0.25;
  * at a berth. The shop gate is not allowed to turn off because the tank
  * filled up.
  */
-type PwrTag = EnergyMode | 'full';
+type PwrTag = EnergyMode | 'full' | 'ready';
 
 /**
  * The tank is at its ceiling and something is holding it there.
@@ -466,6 +466,13 @@ type PwrTag = EnergyMode | 'full';
  * paying for something reads negative within a frame of the ceiling.
  */
 function powerTag(energy: EnergyState): PwrTag {
+  // Alongside with the dwell run out and the helm not yet committed. It sits
+  // ABOVE the full-tank test, unlike every other tag here, because it is the
+  // one reading that asks the player for something: a ship that arrived on a
+  // full tank would otherwise read TANK FULL and never mention the berth it
+  // is sitting in. `docked` is not tested here at all -- once made fast the
+  // mode says so on its own.
+  if (energy.berthReady && energy.mode === 'mooring') return 'ready';
   return energy.level >= 1 && energy.rate >= 0 ? 'full' : energy.mode;
 }
 
@@ -486,6 +493,7 @@ const PWR_TAG: Record<PwrTag, string> = {
   restart: 'NO THRUST - RESTARTING',
   docked: 'BERTH - CHARGING',
   mooring: 'BERTH - CONNECTING',
+  ready: 'BERTH - MAKE FAST',
   reserve: 'ON BACKUP CELL',
   overdrive: 'OVERDRIVE - 4x BURN',
   burn: 'UNDER WAY - BURN',
@@ -579,10 +587,40 @@ function formatRate(rate: number): string {
  */
 export function powerTagText(tag: PwrTag, berth: string | null): string {
   const text = PWR_TAG[tag];
-  if (berth === null || (tag !== 'docked' && tag !== 'mooring')) return text;
+  if (berth === null || (tag !== 'docked' && tag !== 'mooring' && tag !== 'ready')) return text;
   const separator = text.indexOf(' - ');
   if (separator < 0) return text;
   return `${berth.toUpperCase()}${text.slice(separator)}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mooring                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What the bottom-of-screen notice reads, made fast or merely alongside.
+ *
+ * The made-fast line carries the way OUT of the state in the same breath as
+ * the state itself, and that is the whole reason it stands there for as long
+ * as the ship is tied up rather than fading like an ordinary toast. Being
+ * moored takes the helm away: WASD, the arrows, the D-pad, the wind and the
+ * sea all stop moving the hull. A player who missed a message that vanished
+ * three seconds ago would be left pressing keys at a ship that will not
+ * answer, with nothing on screen admitting why.
+ *
+ * The berth's name is used where there is one, on the same terms as
+ * `powerTagText`: a player who ran for Rustwharf wants both instruments to
+ * confirm Rustwharf. A null name is not an error -- `dockAt` is geometric and
+ * `berthReady` is the dwell clock's, and there is one frame at the edge of a
+ * ring where the two can disagree -- so the word BERTH stands in.
+ *
+ * Exported for `tests/unit/hull-hud.test.ts`'s neighbours.
+ */
+export function mooringText(fast: boolean, berth: string | null): string {
+  const where = berth === null ? 'BERTH' : berth.toUpperCase();
+  return fast
+    ? `MOORED AT ${where} - HELM LOCKED - PRESS TO CAST OFF`
+    : `MOOR AT ${where}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -887,6 +925,12 @@ export function createHud(
   const writeHullCrest = markWriter(hullBar, '.hull__seg', 'is-crest');
   const writeHullSweep = markWriter(hullBar, '.hull__seg', 'is-sweep');
 
+  // The mooring notice. One modifier carries both states, so the wording and
+  // the colour can never end up describing different ones.
+  const writeMoorShown = hiddenWriter(document.getElementById('hud-moor'));
+  const writeMoorState = modifierWriter(document.getElementById('hud-moor'), 'moor');
+  const writeMoorText = textWriter(document.getElementById('hud-moor-text'));
+
   // The purse pushes; it is not pulled. See the note on createHud above.
   const writeGold = textWriter(document.getElementById('hud-gold'));
   wallet.onChange((gold) => writeGold(formatGold(gold)));
@@ -983,8 +1027,14 @@ export function createHud(
       // town list: at sea the tag is the same string it always was and this
       // costs one comparison.
       const tag = powerTag(energy);
+      // One walk down the town list, shared by the power tag and the mooring
+      // notice below. `berthReady` is in the test as well as the three tags
+      // because the notice outlives the tag: a ship made fast on a full tank
+      // reads TANK FULL up here and still has to name the berth down there.
+      const nearBerth =
+        tag === 'docked' || tag === 'mooring' || tag === 'ready' || energy.berthReady;
       const berth =
-        towns !== undefined && (tag === 'docked' || tag === 'mooring')
+        towns !== undefined && nearBerth
           ? (towns.dockAt(ship.position)?.town.name ?? null)
           : null;
       writePwrMode(powerTagText(tag, berth));
@@ -1045,6 +1095,26 @@ export function createHud(
       writeHullFlow(hullFlowState);
       writeHullCrest(hullLit - 1);
       writeHullSweep(hullFlowState === 'charge' ? sweepIndex(hullLit, nowMs) : -1);
+
+      /*
+       * The mooring notice.
+       *
+       * Shown on `berthReady` alone, which is true both while the offer stands
+       * and while the ship is tied up -- it is a fact about where the hull is,
+       * and the modifier beside it is what says what the helm has done about
+       * it. Hidden everywhere else, so a ship at sea carries nothing.
+       *
+       * `mode === 'docked'` is the made-fast test rather than a flag of this
+       * file's own, because being docked and being held fast are now the same
+       * thing (see `EnergyMode`), and a second opinion here could only ever
+       * come to disagree with the module that freezes the hull.
+       */
+      const moorFast = energy.mode === 'docked';
+      writeMoorShown(energy.berthReady);
+      if (energy.berthReady) {
+        writeMoorState(moorFast ? 'fast' : 'ready');
+        writeMoorText(mooringText(moorFast, berth));
+      }
 
       // A berth and nothing else. `energy.mode` is the one definition of
       // docked in the project -- see `wind.ts`, which shelters against the

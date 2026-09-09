@@ -895,6 +895,108 @@ body {
 }
 
 /* ---------------------------------------------------------------------
+   MOORING — the berth prompt and the made-fast notice, bottom-centre
+
+   One element, two states, driven by `moor--ready` / `moor--fast` from
+   hud.ts. Bottom-centre because it is the one edge nothing else claims
+   while the ship is sailing, and centred because it is the only thing on
+   this HUD that is addressed TO the player rather than read BY them: the
+   panel and the scope are instruments, this is a sentence.
+
+   `moor--fast` is the important one and looks it. The helm is locked while
+   it is up, which is a state the player must never be in by accident or
+   wonder how to leave, so it is the brighter of the two, it carries the way
+   out in its own text, and it has a border rather than the prompt's bare
+   glow. It does not pulse: it stands for as long as the ship is tied up,
+   and a light blinking for the length of a shopping trip is a light that
+   gets turned off in the reader's head.
+
+   Nothing here may set `display` on `.moor`. hud.ts hides it with the
+   `hidden` attribute, whose UA rule is `display: none` at author-origin
+   strength — any `display` declared here would beat it and a ship at sea
+   would carry a berth prompt. `.moor__key` and `.moor__text` are inside it
+   and may declare what they like.
+   ------------------------------------------------------------------- */
+
+.moor {
+  position: absolute;
+  bottom: calc(var(--hud-pad) + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 9px;
+  padding: 7px 14px;
+  /* Wide enough that the made-fast line fits on ONE row on a desktop and
+     wraps only where the viewport genuinely cannot hold it. */
+  max-width: min(620px, calc(100vw - 2 * var(--hud-pad)));
+  border-radius: 3px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  letter-spacing: 0.13em;
+  /* Wraps rather than truncates. The made-fast line ends in PRESS TO CAST OFF,
+     which is the half a player stuck at a berth actually needs, and an
+     ellipsis is exactly the wrong thing to spend on it. */
+  text-align: center;
+  background: rgba(3, 12, 22, 0.82);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+/* The `display` the block above forbids on `.moor` itself, put where it can
+   do no harm: `[hidden]` beats a rule on the element, and this one is on a
+   `:not([hidden])` so the two can never argue. */
+.moor:not([hidden]) {
+  display: flex;
+}
+
+/* The key legend, drawn as the helm keys are, because everything on this HUD
+   that can be pressed looks like a key. */
+.moor__key {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 2px;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  color: var(--moor-ink);
+  border: 1px solid var(--moor-edge);
+  background: var(--moor-key-bg);
+}
+
+.moor__text {
+  min-width: 0;
+  color: var(--moor-ink);
+}
+
+/* ready: alongside, not yet tied up. Quiet — an offer, not a state. */
+.moor--ready {
+  --moor-ink: #9fd8e8;
+  --moor-edge: rgba(63, 224, 255, 0.34);
+  --moor-key-bg: rgba(63, 224, 255, 0.08);
+  box-shadow: 0 0 18px rgba(3, 12, 22, 0.6);
+}
+
+/* fast: the helm is locked. The loud one, and the only thing on this HUD
+   that reports a control the player cannot use. */
+.moor--fast {
+  --moor-ink: #ffcf7a;
+  --moor-edge: rgba(255, 180, 69, 0.55);
+  --moor-key-bg: rgba(255, 180, 69, 0.14);
+  border: 1px solid rgba(255, 180, 69, 0.4);
+  box-shadow: 0 0 22px rgba(255, 180, 69, 0.14), 0 0 18px rgba(3, 12, 22, 0.7);
+}
+
+/* Clear of the helm keys once the viewport is too narrow to sit beside them.
+   The pad is bottom-LEFT and about 100px tall at this width, so the notice
+   steps above it rather than under a thumb. */
+@media (max-width: 720px) {
+  .moor {
+    bottom: calc(var(--hud-pad) + 116px);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+  }
+}
+
+/* ---------------------------------------------------------------------
    Radar (top-right) — surface plot, painted by radar.ts
    ------------------------------------------------------------------- */
 
@@ -3742,6 +3844,7 @@ kbd {
  */
 body.in-battle .panel--telemetry,
 body.in-battle .panel--radar,
+body.in-battle .moor,
 body.in-battle .dock {
   display: none;
 }

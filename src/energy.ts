@@ -48,6 +48,20 @@ export interface Energy {
    */
   spend(level: number): boolean;
   /**
+   * Makes the ship fast to the berth it is lying in, or casts it off again.
+   * Returns the state it left the ship in: true for made fast.
+   *
+   * The one door into `docked`, and it REFUSES unless `state.berthReady` says
+   * the ring's dwell has run out. That refusal is the whole reason this lives
+   * here rather than as a boolean in `main.ts`: the dwell clock, the readiness
+   * it produces and the lock that consumes it are one rule, and a caller that
+   * could set the lock without passing the clock would be a second definition
+   * of what it means to have arrived.
+   *
+   * Safe to call at any time -- at sea it does nothing and reports false.
+   */
+  toggleMooring(): boolean;
+  /**
    * Takes the hull's loss when a maelstrom has eaten it: the main tank keeps
    * WRECK_KEEP of whatever it held, and nothing else in the world changes.
    *
@@ -423,6 +437,7 @@ interface MutableEnergyState {
   rate: number;
   mode: EnergyMode;
   dock: Dock | null;
+  berthReady: boolean;
   canThrust: boolean;
 }
 
@@ -442,8 +457,20 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     rate: 0,
     mode: 'hotel',
     dock: null,
+    berthReady: false,
     canThrust: true,
   };
+
+  /**
+   * Whether the helm has made the ship fast to the berth it is lying in.
+   *
+   * The whole of the difference between being ELIGIBLE to dock and being
+   * docked. Nothing sets it but `toggleMooring`, and `update` clears it the
+   * moment the ship is no longer eligible -- which is a safety rule and not a
+   * behaviour: a made-fast hull cannot steer, so a lock that outlived its
+   * berth would be a ship frozen in open water with no key to press.
+   */
+  let moored = false;
 
   /** Seconds spent continuously inside `dwellBerth`. See DOCK_DWELL_SECONDS. */
   let dwell = 0;
@@ -493,7 +520,30 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
       dwell = 0;
     }
     if (berth !== null) dwell += dt;
-    const docked = berth !== null && dwell >= DOCK_DWELL_SECONDS;
+
+    /*
+     * The two halves of arriving, since the Space lock (2026-09-09).
+     *
+     * `berthReady` is the ring's own verdict: the hull is inside one and has
+     * been for the dwell. It says the ship MAY be made fast and nothing more.
+     * `docked` is the helm's, and it is the one every other module means when
+     * it asks whether the ship is at a berth -- shore power, the shop gate,
+     * the hull's repair, the wind's shelter, the hazard and raider suppression
+     * and the harbour's discovery all hang off it.
+     *
+     * The clock alone used to be enough. It is not any more, because being
+     * docked now takes the helm away from the player, and nothing may do that
+     * without being asked: drifting across a ring would otherwise freeze the
+     * ship solid two seconds later.
+     *
+     * The release is unconditional and comes first. A lock is only ever valid
+     * against the berth it was set in, so losing the ring drops it -- see the
+     * note on `moored`.
+     */
+    const berthReady = berth !== null && dwell >= DOCK_DWELL_SECONDS;
+    if (!berthReady) moored = false;
+    const docked = berthReady && moored;
+    state.berthReady = berthReady;
 
     let charge = 0;
     /**
@@ -685,5 +735,27 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     state.level = Math.max(0, state.level - STALEMATE_COST);
   }
 
-  return { state: state as EnergyState, update, spend, wreck, defeat, stalemate };
+  /**
+   * See `Energy.toggleMooring`.
+   *
+   * Reads `state.berthReady`, which the last `update` wrote, rather than
+   * asking `towns.dockAt` again here. The two can only disagree for the one
+   * frame between a key press and the next update, and the reading the player
+   * acted on is the one on their screen.
+   */
+  function toggleMooring(): boolean {
+    if (!state.berthReady) return false;
+    moored = !moored;
+    return moored;
+  }
+
+  return {
+    state: state as EnergyState,
+    update,
+    spend,
+    wreck,
+    defeat,
+    stalemate,
+    toggleMooring,
+  };
 }

@@ -841,7 +841,28 @@ export function createShip(
      * up until it goes under.
      */
     const drive = hazard.drive;
-    if (drive === null) {
+
+    /*
+     * Made fast to a berth: not the player's hull either, and for a reason
+     * they chose rather than one the sea chose for them.
+     *
+     * `energy.mode === 'docked'` is the project's one definition of being at a
+     * berth, and since the Space lock it is the helm's own decision -- see
+     * `EnergyMode` in `types.ts`. Testing it here rather than taking a
+     * parameter keeps that single definition single: a ship that is docked and
+     * a ship that is held fast are the same ship, and a second flag threaded
+     * through this signature could only ever come to disagree with it.
+     *
+     * The freeze is total, which is the point of the feature: no helm, no
+     * throttle, and no push from the wind, the waves or a hazard. The last
+     * three arrive here as `wind.along`/`across` and `hazard.along`/`across`,
+     * and every one of them is spent inside the block below, so skipping it is
+     * the whole implementation. `energy.ts` and `hazards.ts` already refuse to
+     * push a docked hull in their own terms; this is what makes it true of the
+     * integration itself rather than true by their good manners.
+     */
+    const moored = energy.mode === 'docked';
+    if (drive === null && !moored) {
       // ---- Steering: always allowed, even while beached --------------------
       let turnInput = 0;
       if (input.left) turnInput -= 1;
@@ -1004,7 +1025,7 @@ export function createShip(
       // transport for the whole step, however many attempts `tryStep` made.
       transportForward(_prevPosition);
       syncStateGeo();
-    } else {
+    } else if (drive !== null) {
       state.position.copy(drive.position).normalize();
       state.up.copy(state.position);
       // Taken as given rather than transported: the spiral's own heading is
@@ -1031,6 +1052,33 @@ export function createShip(
       // carry `forward` across the whole spiral in one rotation.
       _prevPosition.copy(state.position);
       syncStateGeo();
+    } else {
+      /*
+       * Alongside and fast. The hull holds the position and the heading it
+       * arrived on, and reports a dead stop.
+       *
+       * LAST of the three branches, so a maelstrom's drive outranks a mooring
+       * rather than the other way round. The two cannot overlap today --
+       * `hazards.ts` suppresses everything at a berth, and the berth is the
+       * only place this branch runs -- but if they ever did, the sea taking
+       * the hull is the truth and a rope is not.
+       *
+       * All three readings are written rather than merely left alone. `speed`
+       * is what `energy.ts` tests to decide the panels are deployed and what
+       * `wake.ts` lays a ribbon against; `groundSpeed` is what the HUD prints.
+       * A ship made fast while still carrying a knot of way would otherwise
+       * sit at a berth reporting it forever, because nothing else decays a
+       * speed the helm block is no longer running.
+       *
+       * The bank eases out on the same curve the helm uses, so a ship moored
+       * mid-turn settles upright over about a second instead of freezing at a
+       * tilt. The wave sampling below still runs, so the hull goes on heaving
+       * on the swell -- a moored ship is held, not lifted out of the water.
+       */
+      state.speed = 0;
+      state.velocity.set(0, 0, 0);
+      state.groundSpeed = 0;
+      bankRoll += (0 - bankRoll) * (1 - Math.exp(-4 * dt));
     }
     // How far the hull is drawn below its own waterline. Read by
     // `applyTransform`; zero whenever nothing is driving it.

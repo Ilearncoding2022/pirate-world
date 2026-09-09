@@ -158,9 +158,23 @@ export type EnergyMode =
   | 'dead'
   /** Both tanks dry but climbing again. Still no thrust — see RESTART_LEVEL. */
   | 'restart'
-  /** Shore power, connected. The one definition of "at a berth". */
+  /**
+   * Made fast to a berth: shore power connected, and the helm locked.
+   *
+   * The one definition of "at a berth", and since 2026-09-09 it is a state the
+   * player ENTERS rather than one that happens to them. The ring's dwell makes
+   * the ship eligible -- see `EnergyState.berthReady` -- and Space makes it
+   * fast. Nothing here connects on its own any more, because a berth now takes
+   * the helm away and no instrument may do that without being asked.
+   */
   | 'docked'
-  /** Inside a berth's ring with the dwell clock running, not yet connected. */
+  /**
+   * Inside a berth's ring and not made fast.
+   *
+   * Covers both halves of an approach: the two seconds of dwell, and the wait
+   * for the helm to press Space afterwards. `EnergyState.berthReady` is what
+   * separates them, and the HUD tag reads them differently.
+   */
   | 'mooring'
   /** Main tank on the floor; this frame's shortfall came out of the cell. */
   | 'reserve'
@@ -209,8 +223,18 @@ export interface EnergyState {
    */
   readonly rate: number;
   readonly mode: EnergyMode;
-  /** The berth currently charging the ship, or null. */
+  /** The berth currently charging the ship, or null. Null until made fast. */
   readonly dock: Dock | null;
+  /**
+   * Inside a berth's ring with the dwell clock run out: the ship MAY be made
+   * fast, and is not.
+   *
+   * The half-state the Space lock created. It stays true while the ship is
+   * moored as well -- it is a fact about where the hull is, not about what the
+   * helm has done with it -- so read it with `mode === 'docked'` to tell the
+   * two apart. The HUD's mooring toast is driven off exactly that pair.
+   */
+  readonly berthReady: boolean;
   /**
    * False once BOTH tanks have run dry, until the plant has recovered past the
    * restart threshold. `ship.ts` refuses thrust while this is false; steering,

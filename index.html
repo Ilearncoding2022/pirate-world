@@ -426,6 +426,30 @@
         </button>
       </nav>
 
+      <!-- ===================== MOORING =====================
+           The berth prompt, and then the standing notice that the helm is
+           locked. Bottom-centre, which is the one edge of this HUD nothing
+           else claims while the ship is sailing: the panel and the dock take
+           top-left, the scope top-right, the helm keys bottom-left.
+
+           Two states in one element rather than two elements, because they are
+           one sentence at two moments -- "you may tie up here" and "you are
+           tied up here" -- and a player watching for the second should not
+           have to notice that the first moved.
+
+           `aria-live="polite"` because this is the only thing on the HUD that
+           announces a change the player did not just cause: arriving makes it
+           speak, and pressing Space makes it speak again. `role="status"`
+           carries the same for readers that do not honour the live region.
+
+           Ships hidden, because a new ship starts at sea. hud.ts reveals it
+           off `energy.berthReady` and swears by nothing else; see the MOORING
+           block in style.css for why nothing here may declare a `display`. -->
+      <div class="moor" id="hud-moor" role="status" aria-live="polite" hidden>
+        <span class="moor__key" aria-hidden="true">SPACE</span>
+        <span class="moor__text" id="hud-moor-text"></span>
+      </div>
+
     </div>
 
     <!-- ===================== FISHING CARD =====================
