@@ -49,13 +49,18 @@
     monospace;
 
   --hud-pad: clamp(10px, 1.6vw, 22px);
-  /* One helm key. The original scaled by 0.75, so the whole pad shrinks as one
-     piece, and the source of truth for three separate things: the pad's own
-     grid, the key label's font size (`.dbtn__label`), and how far the mooring
-     notice has to sit above the pad on a narrow screen. It lives up here
-     rather than on `.dpad` for that third one -- `.moor` is not inside the pad
-     and cannot read a variable declared on it. */
-  --key-size: clamp(42px, 4.5vw, 55.5px);
+  /* One helm key. The original scaled by 0.825 -- it was 0.75 until the owner
+     asked for 10% back on 2026-09-09 -- so the whole pad grows as one piece,
+     and the source of truth for three separate things: the pad's own grid, the
+     key label's font size (`.dbtn__label`, which is `--key-size` times a
+     constant and so took the 10% on its own), and how far the mooring notice
+     has to sit above the pad on a narrow screen. It lives up here rather than
+     on `.dpad` for that third one -- `.moor` is not inside the pad and cannot
+     read a variable declared on it.
+
+     The glyph is the one size in the pad this does NOT reach: see
+     `.dbtn__glyph`, which carries its own clamp and had to be moved by hand. */
+  --key-size: clamp(46.2px, 4.95vw, 61.05px);
 }
 
 * {
@@ -1289,8 +1294,12 @@ body {
 }
 
 .dbtn__glyph {
-  /* 0.6x the original clamp(15px, 1.6vw, 19px): a 40% cut, as with the label. */
-  font-size: clamp(9px, 0.96vw, 11.4px);
+  /* 0.66x the original clamp(15px, 1.6vw, 19px). It was 0.6 -- a 40% cut, as
+     with the label -- until the pad took 10% back on 2026-09-09. Moved by hand
+     because this clamp is its own number: unlike `.dbtn__label` it is not
+     derived from `--key-size`, so it would otherwise have stayed put while the
+     key under it grew. */
+  font-size: clamp(9.9px, 1.056vw, 12.54px);
   line-height: 1;
   text-shadow: 0 0 10px rgba(63, 224, 255, 0.5);
 }
@@ -1401,19 +1410,36 @@ body {
    looks still reaches all four keys.
    ------------------------------------------------------------------- */
 
-.dpad__act {
-  height: 24px;
-  padding: 0 7px;
-  /* Softer than the helm's 9px, because these are half the height and the
-     same radius on a 24px box reads as a lozenge rather than a key. */
-  border-radius: 6px;
+/*
+ * Everything here is 10% under what a dock key is (owner's call, 2026-09-09),
+ * which is the other half of the same change that put 10% ON the helm keys:
+ * the two move in opposite directions, so the helm reads as the pad's subject
+ * and these three as what is bolted around it.
+ *
+ * The box rules are written `.dpad .dpad__act` and the reason is load-bearing:
+ * `.dock__btn` sets the height and padding these have to beat, and it is
+ * further down this file. At one class each it would win on order alone, which
+ * is exactly what happened when this block was first written -- the heights
+ * here were dead for a whole commit and nobody could see it, because the
+ * numbers they were being overridden BY happened to fit. Two classes settle it
+ * wherever either rule ends up.
+ *
+ * The 27px is the dock's own 30px less a tenth; the compact block below does
+ * the same to its 27px. Written as the arithmetic rather than as a scale
+ * factor because `.dock__btn` is a plain height and there is nothing to scale.
+ */
+.dpad .dpad__act {
+  height: 27px;
+  padding: 0 10.8px;
+  /* Softer than the helm's 9px, because these are half the height and the same
+     radius on a 27px box reads as a lozenge rather than a key. */
+  border-radius: 5.4px;
 }
 
-/* Sized down from the dock's 10px to fit a 42px column at the pad's smallest.
-   The tracking goes with it: 0.18em is a fifth of FISH's width again, and the
-   brackets have to fit inside the column too. */
+/* Sized down from the dock's 10px, and down again with the rest of this block.
+   The tracking is cut with it: 0.18em is a fifth of FISH's width again. */
 .dpad__act .dock__key {
-  font-size: 7.5px;
+  font-size: 6.75px;
   letter-spacing: 0.06em;
 }
 
@@ -1446,15 +1472,21 @@ body {
  *
  * `align-self: start` is the whole of "the top borders line up": the row is a
  * key tall and this button is not, so without it the button would centre in
- * the row and sit a dozen pixels low. It stretches to the column instead of
- * hugging its word, because a key that is not as wide as the column it is in
- * would not read as being in the pad at all — and FISH is short enough to fit
- * one at every width.
+ * the row and sit a dozen pixels low.
+ *
+ * `start` rather than `stretch` on the other axis, and that is not a taste
+ * change. It stretched to the column for as long as the two happened to be the
+ * same width, but the column is `--key-size` and the helm just took 10% while
+ * these three gave 10% back: a stretched FISH would have GROWN with the column
+ * it was pinned to, which is the exact opposite of what was asked for. Its
+ * width comes from its own word now, so the 10% off the font is 10% off the
+ * button. The left edge still sits on the column, which is the edge that reads
+ * against THRUST.
  */
 .dpad__act--fish {
   grid-column: 3;
   grid-row: 2;
-  justify-self: stretch;
+  justify-self: start;
   align-self: start;
 }
 
@@ -1762,6 +1794,12 @@ kbd {
   .dock__btn {
     height: 27px;
     padding: 0 9px;
+  }
+  /* The same tenth off, against the compact dock key rather than the full one.
+     See the note on `.dpad .dpad__act` for why this is two classes. */
+  .dpad .dpad__act {
+    height: 24.3px;
+    padding: 0 8.1px;
   }
   .dock__key {
     font-size: 9.5px;
