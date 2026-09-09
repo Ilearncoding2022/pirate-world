@@ -1430,21 +1430,52 @@ body {
  */
 .dpad .dpad__act {
   height: 27px;
-  padding: 0 10.8px;
+  /* Both of these are fractions of a helm key rather than fixed pixels, and
+     that is what makes the alignment hold: the button is stretched to a key's
+     column, so its content has to shrink with the column or spill out of it at
+     the narrow end of the clamp. A fixed padding did exactly that. */
+  padding: 0 calc(var(--key-size) * 0.05);
   /* Softer than the helm's 9px, because these are half the height and the same
      radius on a 27px box reads as a lozenge rather than a key. */
   border-radius: 5.4px;
 }
 
-/* Sized down from the dock's 10px, and down again with the rest of this block.
-   The tracking is cut with it: 0.18em is a fifth of FISH's width again. */
+/*
+ * Sized off the key, on `.dbtn__label`'s principle three rules up: the longest
+ * label has to fit its button at EVERY step of the clamp, so the size comes
+ * from the button rather than from a number picked once at one viewport.
+ *
+ * `ANCHOR x5` sets the coefficient, and it is the true worst case rather than
+ * a guess: `SEA_ANCHOR_STORE_MAX` is 5 and `OVERDRIVE_STORE_MAX` is 3, so the
+ * count is one digit for good. 0.122 leaves about 2px spare at the bottom of
+ * the clamp, where the budget is 39.6px; raise either cap past 9 and this has
+ * to come down with it.
+ *
+ * Tracking goes to zero for the same reason -- at eight glyphs even 0.06em is
+ * half a glyph of width this cannot spare.
+ */
 .dpad__act .dock__key {
-  font-size: 6.75px;
-  letter-spacing: 0.06em;
+  font-size: calc(var(--key-size) * 0.122);
+  letter-spacing: 0;
+}
+
+/*
+ * No brackets on the pad.
+ *
+ * They are what makes a word on this HUD read as a thing to press, and that
+ * argument is exactly as good as it ever was -- in the DOCK, where a key sits
+ * alone against a panel. Here the button is one of seven in a grid of keys and
+ * the context does the same job the brackets were doing, which is lucky,
+ * because they cost two glyphs and 4px of margin out of a budget that is 38px
+ * wide at the bottom of the clamp. The dock's own [SHOP] keeps them.
+ */
+.dpad__act .dock__key::before,
+.dpad__act .dock__key::after {
+  content: none;
 }
 
 .dpad__act .dock__count {
-  margin-left: 3px;
+  margin-left: calc(var(--key-size) * 0.04);
 }
 
 /* Over THRUST and under REVERSE, centred on the throttle's own column.
@@ -1454,7 +1485,7 @@ body {
 .dpad__act--coil {
   grid-column: 2;
   grid-row: 1;
-  justify-self: center;
+  justify-self: stretch;
   align-self: end;
   margin-bottom: 4px;
 }
@@ -1462,7 +1493,7 @@ body {
 .dpad__act--anchor {
   grid-column: 2;
   grid-row: 4;
-  justify-self: center;
+  justify-self: stretch;
   align-self: start;
   margin-top: 4px;
 }
@@ -1486,7 +1517,7 @@ body {
 .dpad__act--fish {
   grid-column: 3;
   grid-row: 2;
-  justify-self: start;
+  justify-self: stretch;
   align-self: start;
 }
 
@@ -1795,11 +1826,10 @@ kbd {
     height: 27px;
     padding: 0 9px;
   }
-  /* The same tenth off, against the compact dock key rather than the full one.
-     See the note on `.dpad .dpad__act` for why this is two classes. */
+  /* Height only. The padding is a fraction of `--key-size` now and has already
+     shrunk with the key by the time this block applies. */
   .dpad .dpad__act {
     height: 24.3px;
-    padding: 0 8.1px;
   }
   .dock__key {
     font-size: 9.5px;
