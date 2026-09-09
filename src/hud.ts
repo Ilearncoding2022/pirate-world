@@ -306,16 +306,22 @@ function windArrowDeg(wind: WindState, ship: ShipState): number {
 const PWR_SEGMENTS = 10;
 
 /**
- * Notches in the backup cell's bar. Five, not ten, on purpose.
+ * Notches in the backup cell's bar. Ten, the tank's own count, on purpose.
  *
- * The cell holds half a tank, so five notches makes one notch mean the same
- * 10% of a tank on both bars. `style.css` then draws this bar at half the
- * power bar's length, which is what lets the two be read against each other at
- * a glance: a full cell reaches the middle of the panel, because that is
- * exactly how far its charge goes. `index.html` must ship exactly this many
- * segments.
+ * The cell holds a WHOLE tank -- `BATTERY_CAPACITY` is `BATTERY_CELL` times
+ * `BATTERY_CELLS_MAX`, 0.5 x 2 -- and its figure is quoted against that same
+ * tank, so ten notches makes one notch worth the same 10% on both bars and
+ * 55% light the same notch in both places. `style.css` draws it on the same
+ * scale, indented under the power bar rather than beside it.
+ *
+ * It was five half-width notches back when a cell really did hold half a
+ * tank. The capacity doubled and this did not, so the bar drew a full cell as
+ * a half-full one until 2026-09-09. If `BATTERY_CAPACITY` ever stops being a
+ * whole tank, this and the `aria-valuemax` in `index.html` both move with it.
+ *
+ * `index.html` must ship exactly this many segments.
  */
-const RSV_SEGMENTS = 5;
+const RSV_SEGMENTS = 10;
 
 /**
  * A quarter tank, under which a *falling* tank goes amber.
@@ -418,14 +424,22 @@ function litSegments(fraction: number, count: number): number {
 }
 
 /**
- * "+0.85 %/s" — change in level as a signed percentage of the tank per second.
+ * "+0.9 %/s" — change in level as a signed percentage of the tank per second.
+ *
+ * ONE decimal, not two (2026-09-09, owner's call). The figure is read at a
+ * glance while steering and the second decimal was never the thing being
+ * read; a shorter number is a faster one. The cost is that any load under
+ * 0.05 %/s -- the after-dark hotel load in `energy.ts` is 0.04 -- now rounds
+ * to `+0.0 %/s`, which reads as a plant holding station when it is in fact
+ * draining very slowly. The tag beside it still names the state, so nothing
+ * is lost that the row does not say twice.
  *
  * The sign is taken off the *rounded* magnitude, so a rate a hair under zero
- * prints "+0.00" rather than the nonsense "-0.00".
+ * prints "+0.0" rather than the nonsense "-0.0".
  */
 function formatRate(rate: number): string {
-  const magnitude = Math.abs(rate * 100).toFixed(2);
-  const sign = magnitude === '0.00' || rate > 0 ? '+' : '-';
+  const magnitude = Math.abs(rate * 100).toFixed(1);
+  const sign = magnitude === '0.0' || rate > 0 ? '+' : '-';
   return `${sign}${magnitude} %/s`;
 }
 
@@ -546,15 +560,19 @@ export function hullTag(mode: HullMode, percent: number): string {
 }
 
 /**
- * "-0.25 %/min", "+2.00 %/s", "0.00 %/min" — the hull's signed rate.
+ * "-0.5 %/min", "+2.0 %/s", "0.0 %/min" — the hull's signed rate.
+ *
+ * One decimal, matching `formatRate` above, and for the same reason: the two
+ * figures sit in one column and a panel that changed precision between them
+ * would read as two instruments.
  *
  * The one readout on this panel that does NOT share the power rate's unit, and
  * the reason is arithmetic rather than taste. `HullState.rate` is percent per
  * second like the plant's, but the two rates are three orders of magnitude
- * apart: wear is 0.25 %/MINUTE, which in the power block's `%/s` at two
- * decimals prints as `-0.00` — a figure that is simultaneously wrong, alarming
- * and unreadable. Minutes for wear puts a real number on the panel; seconds
- * for a repair keeps a berth's 2.00 from reading as an absurd 120.
+ * apart: wear is 0.25 %/MINUTE, which in the power block's `%/s` prints as
+ * `-0.0` — a figure that is simultaneously wrong, alarming and unreadable.
+ * Minutes for wear puts a real number on the panel; seconds for a repair keeps
+ * a berth's 2.0 from reading as an absurd 120.
  *
  * So the unit is printed beside the figure on every line, every time, rather
  * than assumed from the row. A player who never notices it switch is a player
@@ -569,13 +587,13 @@ export function hullTag(mode: HullMode, percent: number): string {
  */
 export function formatHullRate(rate: number): string {
   if (rate > 0) {
-    const gain = rate.toFixed(2);
-    if (gain !== '0.00') return `+${gain} %/s`;
+    const gain = rate.toFixed(1);
+    if (gain !== '0.0') return `+${gain} %/s`;
   } else if (rate < 0) {
-    const loss = Math.abs(rate * 60).toFixed(2);
-    if (loss !== '0.00') return `-${loss} %/min`;
+    const loss = Math.abs(rate * 60).toFixed(1);
+    if (loss !== '0.0') return `-${loss} %/min`;
   }
-  return '0.00 %/min';
+  return '0.0 %/min';
 }
 
 /**
@@ -840,8 +858,10 @@ export function createHud(
       //
       // Its percentage is of the MAIN tank, matching the figure above it and
       // the one the shop sells against -- a cell reading 50% is half a tank,
-      // which is what it is worth. Its bar is of its own capacity, so a full
-      // cell is a full bar.
+      // which is what it is worth. The bar is of the cell's own capacity,
+      // which is a whole tank, so the two agree: the figure and the notch
+      // count say the same thing, and both say what the power bar above would
+      // say for the same number.
       const reserve = energy.reserve;
       writeRsvShown(reserve > 0);
       if (reserve > 0) {

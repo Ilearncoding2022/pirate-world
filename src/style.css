@@ -336,26 +336,6 @@ body {
   }
 }
 
-.panel__rule {
-  height: 1px;
-  margin: 10px 0 7px;
-  background: linear-gradient(
-    to right,
-    transparent,
-    var(--cyan-ghost) 15%,
-    rgba(63, 224, 255, 0.4) 50%,
-    var(--cyan-ghost) 85%,
-    transparent
-  );
-}
-
-.panel__note {
-  margin: 0;
-  font-size: 8.5px;
-  letter-spacing: 0.2em;
-  color: var(--ink-mute);
-}
-
 /* GPU/CPU/draw-call line, appended by hud.ts -- absent from index.html
    because it does not exist for most players. Off by default ([hidden] is
    the UA's own display:none, undisturbed here), toggled with Backquote. */
@@ -684,68 +664,104 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   BACKUP — the bought cell, under the POWER block
+   BACKUP POWER — the bought cell, hanging off the POWER block
 
-   Deliberately a different instrument. The power block above swaps five
-   colour states on one wrapper; this has exactly one colour and never
-   changes it, because the cell has exactly one behaviour — it goes down.
-   Violet rather than any of the plant's colours (cyan, green, amber, red),
-   five notches rather than ten, and a hairline rule above it, so the eye
-   reads a second tank bolted on rather than more of the first.
+   The SAME instrument as the tank above it, one step down the hierarchy.
+   It inherits `--pwr-accent` and the three rail variables straight off the
+   `.pwr` wrapper it sits inside, so it recolours with the plant through all
+   five states and can never be caught reading a different story from the bar
+   three rows up. It was violet and its own thing for a while; a cell that
+   looks independent is a cell a player reads as a second, unrelated gauge,
+   when what it actually is is more of the same charge.
 
-   The distinction has to survive being glanced at. A player who mistakes the
-   cell for the tank is a player waiting at a berth for a charge that is
-   never coming.
+   What carries the subordination is layout rather than colour: the block is
+   INDENTED, and an elbow is drawn from the power cluster down and into the
+   left of its label, the way a tree draws a child of the node above it.
+
+   Nothing here may set `display` on `.rsv`. hud.ts hides the block with the
+   `hidden` attribute, whose UA rule is `display: none` at author-origin
+   strength — any `display` declared here would beat it and a ship with no
+   cell would carry an empty gauge it never bought.
    ------------------------------------------------------------------- */
 
 .rsv {
-  --rsv-accent: #b05cff;
-  --rsv-glow: rgba(176, 92, 255, 0.45);
-  --rsv-rail: rgba(176, 92, 255, 0.1);
-  --rsv-rail-edge: rgba(176, 92, 255, 0.26);
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px solid rgba(176, 92, 255, 0.18);
+  position: relative;
+  margin-top: 5px;
+  /* Clear of the elbow. 13px is the connector's 6px arm plus its 2px left
+     offset plus a 5px gap, so the label starts where the arm stops rather
+     than on top of it. */
+  padding-left: 13px;
+}
+
+/*
+ * The elbow: one box, two borders, no glyph.
+ *
+ * It rises 5px into the margin above — over the POWER block's own status row —
+ * and turns right at the vertical middle of the label beside it, so the line
+ * visibly leaves the cluster above and arrives at this row rather than
+ * floating between the two. `height` is that midpoint: 5px of rise plus half
+ * the 15px label row.
+ *
+ * Drawn in `--pwr-rail-edge`, the same translucent accent the unlit notches
+ * carry, so the connector reads as structure at the weight of a rail and
+ * never competes with the lit bar it points at. It follows the plant's state
+ * with everything else in the block.
+ */
+.rsv::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: -5px;
+  height: 12px;
+  width: 6px;
+  border-left: 1px solid var(--pwr-rail-edge);
+  border-bottom: 1px solid var(--pwr-rail-edge);
+  border-bottom-left-radius: 3px;
+  pointer-events: none;
 }
 
 /* The row's own padding would push the bar away from its key; the block
    above already spaces the two apart. */
 .rsv__head {
   padding: 0;
+  min-height: 15px;
 }
 
-/* One size down from the tank's figure. The cell is the smaller tank and the
-   panel should say so before the key beside it is read. */
+/* One size down from the tank's key, which is 9.5px. The cell is the lesser
+   of the two tanks and the panel should say so before the figure beside it is
+   read — the label is the only thing left carrying that, now that the colour
+   does not. */
+.rsv__key {
+  font-size: 8.5px;
+}
+
+/* One size down from the tank's figure, for the same reason, and in the
+   plant's own accent rather than a colour of its own. */
 .rsv__val {
   font-size: 13px;
-  color: var(--rsv-accent);
-  text-shadow: 0 0 11px var(--rsv-glow);
+  color: var(--pwr-accent);
+  text-shadow: 0 0 11px var(--pwr-glow);
 }
 
 /*
- * Five notches, HALF the length of the power bar above, and that is the whole
- * point of the width below.
+ * Ten notches, on the tank's own scale, and that is the whole point.
  *
- * The cell holds half a tank. Five notches stretched across the full width
- * would draw a full cell as a full bar, so a glance would read 100% where the
- * truth is 50% -- the one misreading this instrument exists to prevent. At
- * half the length a notch here is the same size as a notch up there, both
- * worth 10% of a tank, and a full cell reaches the middle of the panel because
- * that is exactly how far its charge goes.
+ * The cell holds a full tank — `BATTERY_CELL x BATTERY_CELLS_MAX` is 1.0 in
+ * battery.ts — and hud.ts quotes its charge as a percentage of that same
+ * tank. So a notch here is worth exactly what a notch up there is worth, and
+ * 55% lights the sixth notch on both bars. A player can read the pair as one
+ * quantity in two halves without converting between two scales, which is what
+ * the old five half-width notches forced them to do.
  *
- * The `- 1px` is that equality made exact rather than approximate. A power
- * notch is `(W - 9 x 2px) / 10` wide; five notches and four gaps come to the
- * same figure at a width of `W/2 - 1px`. Without it the two bars' notches
- * differ by a fifth of a pixel, which is invisible -- but a bar whose whole
- * job is to be read against its neighbour should be right, not nearly right.
+ * It runs the full width of the INDENTED column rather than the panel, so it
+ * starts under the label it belongs to. That costs the 13px of indent against
+ * the bar above, which is the intended reading: the same scale, one step in.
  *
- * Left-aligned, because "half as long" only reads as half if both bars start
- * at the same edge.
+ * Slimmer than the tank's 7px, because subordinate.
  */
 .rsv__bar {
   display: flex;
   gap: 2px;
-  width: calc(50% - 1px);
   height: 5px;
   margin: 4px 0 1px;
 }
@@ -754,14 +770,14 @@ body {
   flex: 1 1 0;
   min-width: 0;
   border-radius: 1px;
-  background: var(--rsv-rail);
-  box-shadow: inset 0 0 0 1px var(--rsv-rail-edge);
+  background: var(--pwr-rail);
+  box-shadow: inset 0 0 0 1px var(--pwr-rail-edge);
   transition: background-color 110ms linear;
 }
 
 .rsv__seg.is-lit {
-  background: var(--rsv-accent);
-  box-shadow: inset 0 0 0 1px var(--rsv-accent), 0 0 6px var(--rsv-glow);
+  background: var(--pwr-accent);
+  box-shadow: inset 0 0 0 1px var(--pwr-accent), 0 0 6px var(--pwr-glow);
 }
 
 /* ---------------------------------------------------------------------
@@ -1251,7 +1267,8 @@ kbd {
   .pwr--dead .pwr__tag {
     animation: none;
   }
-  .pwr__seg {
+  .pwr__seg,
+  .rsv__seg {
     transition: none;
   }
 }

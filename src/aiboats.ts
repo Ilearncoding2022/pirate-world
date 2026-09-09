@@ -99,12 +99,13 @@ export interface AiBoats {
  * Seconds between spawn rolls, and the odds each colour is drawn at on one.
  *
  * Read them together: they are one rate written as a cadence and two chances.
- * Over a ten-minute sail that is about two red boats and fourteen orange ones
- * on the nominal figures. The period is deliberately twice `hazards.ts`'s: a
- * raider is a longer interruption than a wave, so it may not arrive as often.
+ * Over a ten-minute sail that is about two red boats and forty-odd orange
+ * rolls on the nominal figures. The period is deliberately twice
+ * `hazards.ts`'s: a raider is a longer interruption than a wave, so it may
+ * not arrive as often.
  *
- * **The two colours are now an order of magnitude apart, and that is the
- * point.** Orange wanders a track drawn once and never revised: it is weather,
+ * **The two colours are now more than an order of magnitude apart, and that is
+ * the point.** Orange wanders a track drawn once and never revised: it is weather,
  * and meeting one is the normal condition of being at sea. Red steers at the
  * player every frame and ends in a fight unless it is out-turned, so it is an
  * event, and an event that arrives every minute is a chore. P_RED was cut by
@@ -112,20 +113,29 @@ export interface AiBoats {
  * doubled from 0.08 the day before -- which puts an aggressive raider at
  * roughly one every five minutes of sailing rather than one a minute.
  *
+ * P_ORANGE went the other way, TRIPLED from 0.24 to 0.72 (2026-09-09, owner's
+ * call), and for the mirror of the same reason. Orange is the colour the
+ * player is meant to keep meeting, and at 0.24 the sea between harbours read
+ * as empty for minutes at a stretch. At 0.72 a roll all but always lands, so
+ * the rate is now governed almost entirely by how long a boat LIVES and by
+ * the one-per-colour cap below -- which is the intent: an orange hull should
+ * be somewhere on the water most of the time, not an event.
+ *
  * The nominal counts above are ceilings the sea does not actually deliver:
  * the odds are per roll and per COLOUR, a colour already on the water is
  * drawn for and skipped, and the real rate is governed by how long a boat
  * LIVES at least as much as by these numbers -- see PHASE_SECONDS and the
- * post-fight grace. That correction bites hardest on orange, which is far
- * more often already out; at 3.2% red is almost never the colour being
- * skipped, so its own figure is close to what it says.
+ * post-fight grace. That correction now all but swallows orange, which at
+ * 72% a roll is nearly always either out already or born on the spot; at 3.2%
+ * red is almost never the colour being skipped, so its own figure is close to
+ * what it says.
  *
  * Move the period and both frequencies move with it, which is usually not what
  * you wanted; move a single probability instead.
  */
 export const ROLL_PERIOD = 10;
 export const P_RED = 0.032;
-export const P_ORANGE = 0.24;
+export const P_ORANGE = 0.72;
 
 /**
  * The fixed order the two colours are drawn in, every roll, live or not.

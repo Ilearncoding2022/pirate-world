@@ -1769,7 +1769,8 @@ Browsers carry a **minimum font size** preference (Chrome: Settings →
 Appearance → Customize fonts). It clamps the *computed* `font-size`, so any
 rule asking for less than the floor — commonly 12px — is silently discarded.
 Most of this HUD is authored below that: `.readout__key` at 9.5px,
-`.panel__note` and `.radar__range` at 8.5px, the D-pad glyph at 11.4px. On a
+`.rsv__head .readout__key` and `.radar__range` at 8.5px, the D-pad glyph at
+11.4px. On a
 machine with the floor set they all render at 12px and the typographic
 hierarchy flattens.
 

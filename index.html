@@ -161,34 +161,49 @@
 
           <div class="pwr__status">
             <span class="pwr__tag" id="hud-pwr-mode">TANK FULL</span>
-            <span class="pwr__rate" id="hud-pwr-rate">+0.00 %/s</span>
+            <span class="pwr__rate" id="hud-pwr-rate">+0.0 %/s</span>
           </div>
 
-          <!-- The bought backup cell. Deliberately NOT the same instrument as
-               the tank above it: violet rather than the power block's five
-               states, five notches rather than ten, and a hairline rule over
-               it so it reads as a second tank bolted on rather than as more of
-               the first. A cell that looked like the main reserve would be a
-               cell a player expects a berth to refill.
+          <!-- The bought backup cell. A SUBORDINATE of the tank above it, not
+               a rival to it: it takes the power block's own accent, indents
+               under it, and hangs off an elbow drawn from the POWER cluster
+               down into its label, so the eye reads one plant with a second
+               tank on it rather than two instruments stacked.
+
+               Ten notches, the tank's own count, because the cell now holds a
+               whole tank (BATTERY_CELL x BATTERY_CELLS_MAX = 1.0) and its
+               percentage is quoted against the same 100. That is what lets a
+               player read 55% here against 55% up there without arithmetic:
+               the same figure lights the same notch on both bars. It was five
+               half-width notches when a cell held half a tank; the capacity
+               changed and this did not, and the bar has been lying by a factor
+               of two ever since.
 
                Ships hidden, because a ship that has never been to a shop has
                no cell at all and an empty row would only advertise one. hud.ts
                reveals it the moment there is charge to show and hides it again
-               when the last of it goes. -->
+               when the last of it goes. Nothing in style.css may give `.rsv` a
+               `display`, which would beat the UA's `[hidden]` and strand the
+               row on screen. -->
           <div class="rsv" id="hud-rsv" hidden>
             <div class="readout rsv__head">
-              <span class="readout__key">BACKUP</span>
+              <span class="readout__key rsv__key">BACKUP POWER</span>
               <span class="readout__val rsv__val" id="hud-rsv-value">0%</span>
             </div>
             <div
               class="rsv__bar"
               id="hud-rsv-bar"
               role="meter"
-              aria-label="Backup cell"
+              aria-label="Backup power"
               aria-valuemin="0"
-              aria-valuemax="50"
+              aria-valuemax="100"
               aria-valuenow="0"
             >
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
+              <span class="rsv__seg"></span>
               <span class="rsv__seg"></span>
               <span class="rsv__seg"></span>
               <span class="rsv__seg"></span>
@@ -244,13 +259,11 @@
             </div>
             <div class="hull__status">
               <span class="hull__tag" id="hud-hull-mode">HULL FULL</span>
-              <span class="hull__rate" id="hud-hull-rate">0.00 %/min</span>
+              <span class="hull__rate" id="hud-hull-rate">0.0 %/min</span>
             </div>
           </div>
         </div>
 
-        <div class="panel__rule"></div>
-        <p class="panel__note">PIRATE WORLD &#8226; NAV CORE v0.1</p>
       </section>
 
       <!-- ===================== HUD DOCK =====================

@@ -140,32 +140,37 @@ describe('hullTag — the seven phrases', () => {
 describe('formatHullRate — minutes for wear, seconds for a repair', () => {
   /*
    * The whole reason the two units differ. `HULL_WEAR` is 0.25/60 percent per
-   * SECOND, which in the power block's `%/s` at two decimals prints `-0.00` --
-   * a figure that is wrong, alarming and unreadable at once.
+   * SECOND, which in the power block's `%/s` prints `-0.0` -- a figure that is
+   * wrong, alarming and unreadable at once.
+   *
+   * One decimal since 2026-09-09, matching the power rate above it. Plain wear
+   * is 0.25 %/min and lands on a half, which `toFixed` rounds away from zero:
+   * `-0.3`, not `-0.2`. That is the rounding the panel actually performs and
+   * the figure a player actually reads, so it is the figure asserted here.
    */
   it('prints plain wear per minute', () => {
-    expect(formatHullRate(-0.25 / 60)).toBe('-0.25 %/min');
+    expect(formatHullRate(-0.25 / 60)).toBe('-0.3 %/min');
   });
 
   it('prints doubled wear per minute', () => {
-    expect(formatHullRate(-0.5 / 60)).toBe('-0.50 %/min');
+    expect(formatHullRate(-0.5 / 60)).toBe('-0.5 %/min');
   });
 
   it("prints a berth's repair per second", () => {
-    expect(formatHullRate(2)).toBe('+2.00 %/s');
+    expect(formatHullRate(2)).toBe('+2.0 %/s');
   });
 
   /* A moored hull at 100%, or one frozen behind an overlay. Unsigned, because
-     a `+0.00` would read as a slow repair. */
+     a `+0.0` would read as a slow repair. */
   it('prints a still hull unsigned', () => {
-    expect(formatHullRate(0)).toBe('0.00 %/min');
+    expect(formatHullRate(0)).toBe('0.0 %/min');
   });
 
   /* The same guard `formatRate` keeps: a sign taken off an unrounded magnitude
-     produces the nonsense `-0.00`. */
+     produces the nonsense `-0.0`. */
   it('never prints a signed zero', () => {
-    expect(formatHullRate(-1e-9)).toBe('0.00 %/min');
-    expect(formatHullRate(1e-9)).toBe('0.00 %/min');
+    expect(formatHullRate(-1e-9)).toBe('0.0 %/min');
+    expect(formatHullRate(1e-9)).toBe('0.0 %/min');
   });
 });
 
