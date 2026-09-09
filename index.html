@@ -645,10 +645,42 @@
         <header class="shop__head">
           <span class="panel__dot"></span>
           <h2 class="shop__title" id="shop-title">CHANDLERY</h2>
+          <!-- WHICH harbour. Ships empty and is written by shop.ts on every
+               open from `towns.dockAt(...)`, because the panel is built once
+               at boot and opened at every berth the ship ever reaches. The
+               longest name in `harbournames.ts` is 17 characters; the rule
+               that sizes this ellipsises rather than wraps, so a long name
+               cannot push the close button off the head. -->
+          <span class="shop__harbour" id="shop-harbour"></span>
           <button class="shop__close" id="shop-close" type="button" aria-label="Close">
             &#10005;
           </button>
         </header>
+
+        <!-- ============ REPAIR ============
+             Gold for hull, above the tabs because it belongs to neither
+             category and because it is what a limping player came in for.
+             Always shown, at every harbour -- the four upgrade ladders below
+             are the only stock that varies. Every figure in it, the hull
+             percent included, is written by shop.ts. -->
+        <div class="repair" id="shop-repair">
+          <div class="repair__text">
+            <h3 class="repair__name">REPAIR</h3>
+            <p class="repair__detail" id="shop-repair-detail"></p>
+          </div>
+          <div class="repair__side">
+            <span class="repair__hull" id="shop-repair-hull"></span>
+            <div class="repair__buys">
+              <button class="fbtn repair__buy" id="shop-repair-step" type="button">
+                <span id="shop-repair-step-label"></span>
+                <span class="fbtn__cost" id="shop-repair-step-price"></span>
+              </button>
+              <button class="fbtn repair__buy" id="shop-repair-all" type="button">
+                FIX ALL <span class="fbtn__cost" id="shop-repair-all-price"></span>
+              </button>
+            </div>
+          </div>
+        </div>
 
         <!-- role="tablist" per the two panels below: `shop.ts` is the only
              thing that ever shows or hides either `.shop__panel-group`, on
@@ -741,7 +773,7 @@
             </article>
 
             <!-- Trim & Sheathing -->
-            <article class="offer offer--trim">
+            <article class="offer offer--trim" id="shop-trim-offer">
               <div class="offer__text">
                 <h3 class="offer__name">TRIM &amp; SHEATHING</h3>
                 <p class="offer__detail" id="shop-trim-detail"></p>
@@ -759,8 +791,16 @@
               </div>
             </article>
 
+            <!-- Stands in for the row above where this harbour does not carry
+                 the ladder. shop.ts hides one and shows the other on every
+                 open; the text -- `Not sold here.`, or that plus the harbours
+                 the player has actually moored at that do sell it -- is
+                 written there. Hidden in the markup, so a panel whose script
+                 never runs shows the offers rather than four apologies. -->
+            <p class="offer__absent" id="shop-trim-absent" hidden></p>
+
             <!-- Moonglass Array -->
-            <article class="offer offer--moonglass">
+            <article class="offer offer--moonglass" id="shop-moonglass-offer">
               <div class="offer__text">
                 <h3 class="offer__name">MOONGLASS ARRAY</h3>
                 <p class="offer__detail" id="shop-moonglass-detail"></p>
@@ -777,6 +817,14 @@
                 </button>
               </div>
             </article>
+
+            <!-- Stands in for the row above where this harbour does not carry
+                 the ladder. shop.ts hides one and shows the other on every
+                 open; the text -- `Not sold here.`, or that plus the harbours
+                 the player has actually moored at that do sell it -- is
+                 written there. Hidden in the markup, so a panel whose script
+                 never runs shows the offers rather than four apologies. -->
+            <p class="offer__absent" id="shop-moonglass-absent" hidden></p>
           </div>
 
           <!-- ============ FISHING ============ -->
@@ -843,7 +891,7 @@
             </article>
 
             <!-- Arc-Lamp Rig -->
-            <article class="offer offer--arclamp">
+            <article class="offer offer--arclamp" id="shop-arclamp-offer">
               <div class="offer__text">
                 <h3 class="offer__name">ARC-LAMP RIG</h3>
                 <p class="offer__detail" id="shop-arclamp-detail"></p>
@@ -861,8 +909,16 @@
               </div>
             </article>
 
+            <!-- Stands in for the row above where this harbour does not carry
+                 the ladder. shop.ts hides one and shows the other on every
+                 open; the text -- `Not sold here.`, or that plus the harbours
+                 the player has actually moored at that do sell it -- is
+                 written there. Hidden in the markup, so a panel whose script
+                 never runs shows the offers rather than four apologies. -->
+            <p class="offer__absent" id="shop-arclamp-absent" hidden></p>
+
             <!-- Efficiency Governor -->
-            <article class="offer offer--governor">
+            <article class="offer offer--governor" id="shop-governor-offer">
               <div class="offer__text">
                 <h3 class="offer__name">EFFICIENCY GOVERNOR</h3>
                 <p class="offer__detail" id="shop-governor-detail"></p>
@@ -879,6 +935,14 @@
                 </button>
               </div>
             </article>
+
+            <!-- Stands in for the row above where this harbour does not carry
+                 the ladder. shop.ts hides one and shows the other on every
+                 open; the text -- `Not sold here.`, or that plus the harbours
+                 the player has actually moored at that do sell it -- is
+                 written there. Hidden in the markup, so a panel whose script
+                 never runs shows the offers rather than four apologies. -->
+            <p class="offer__absent" id="shop-governor-absent" hidden></p>
           </div>
         </div>
 

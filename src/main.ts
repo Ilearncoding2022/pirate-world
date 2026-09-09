@@ -258,7 +258,11 @@ async function startGame(): Promise<void> {
    * subscription, for the same reason. `pagehide` catches the last few
    * seconds a throttle would otherwise lose.
    */
-  const chart = createChart(undefined, undefined, loadChart());
+  // The seed is `DEFAULT_SEED` only until `worldgen.ts` lands and the world is
+  // drawn at random -- integration replaces this with the seed that world was
+  // actually built from. It is passed rather than defaulted because a chart is
+  // now keyed on its world; see `chart.ts` on why version 2 has a header.
+  const chart = createChart(DEFAULT_SEED, loadChart());
   chart.onChange(() => writeChart(chart.encode()));
   window.addEventListener('pagehide', () => writeChart(chart.encode()));
 
