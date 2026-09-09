@@ -159,6 +159,27 @@ const SOLAR_FULL_SECONDS = 200;
 const DOCK_FULL_SECONDS = 50;
 
 /**
+ * Shore power's NET climb, tank fractions per second. Exactly 0.02.
+ *
+ * The one figure outside this module that anything is allowed to know about a
+ * berth, and it exists for exactly one consumer: `hull.ts` repairs at the
+ * same speed a berth charges at, and states that as one number rather than
+ * two. `HULL_REPAIR_RATE` is this times 100.
+ *
+ * NET, and this is the trap it exists to avoid. `DOCK_RATE` below is the
+ * GROSS yield, 1/50 + IDLE_DRAIN = 0.020397, because the hotel load is still
+ * being paid alongside; the tank climbs by 1/DOCK_FULL_SECONDS. A consumer
+ * that reached for `DOCK_RATE` would repair 2% faster than it claimed, and it
+ * would be off by the one quantity nobody looking at a repair rate would
+ * think to check.
+ *
+ * Derived from DOCK_FULL_SECONDS rather than typed as 0.02 so that retuning
+ * the berth moves the repair with it, which is the whole reason this is an
+ * export and not a copy.
+ */
+export const DOCK_NET_RATE = 1 / DOCK_FULL_SECONDS;
+
+/**
  * The constant hotel load, level/s. 1 / 2520 = 0.000397.
  *
  * Drawn in every mode, under way and at rest alike, which is what makes the

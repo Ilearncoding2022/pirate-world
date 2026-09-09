@@ -200,6 +200,43 @@ describe('battle: the outcome', () => {
     expect(draw.state.player.x === before.x && draw.state.player.z === before.z).toBe(false);
   });
 
+  it('settles each side against its OWN threshold, not against one shared number', () => {
+    /*
+     * The split docs/HARBOURS_PLAN.md calls Trap 2. `HITS_TO_LOSE` used to be
+     * compared against both sides; it is the AI's number now, and the
+     * player's is whatever `main.ts` read off the hull at contact — 1 for a
+     * hull under 25%.
+     *
+     * This is the case that would catch the two halves of that being wired
+     * back together: a player who loses on the first ball while the raider
+     * across the ring still has to be hit three times.
+     */
+    const failing = createBattleSim(mulberry32(21), CALM, 1);
+    expect(failing.state.player.hitsToLose).toBe(1);
+    expect(failing.state.ai.hitsToLose).toBe(HITS_TO_LOSE);
+
+    mutable(failing.state).player.hits = 1;
+    failing.update(DT, IDLE);
+    expect(failing.state.outcome).toBe('loss');
+
+    // And the raider is unaffected by it: two hits on the same fight decide
+    // nothing, three end it, exactly as they always did.
+    const raider = createBattleSim(mulberry32(22), CALM, 1);
+    mutable(raider.state).ai.hits = HITS_TO_LOSE - 1;
+    raider.update(DT, IDLE);
+    expect(raider.state.outcome).toBe(null);
+    mutable(raider.state).ai.hits = HITS_TO_LOSE;
+    raider.update(DT, IDLE);
+    expect(raider.state.outcome).toBe('win');
+
+    // Saying nothing gets the fight as it shipped: three each.
+    const ordinary = createBattleSim(mulberry32(23), CALM);
+    expect(ordinary.state.player.hitsToLose).toBe(HITS_TO_LOSE);
+    mutable(ordinary.state).player.hits = HITS_TO_LOSE - 1;
+    ordinary.update(DT, IDLE);
+    expect(ordinary.state.outcome).toBe(null);
+  });
+
   it('calls the timeout a draw, which is now the only way a stand-off ends', () => {
     // There used to be a rule above this one: both lockers empty and no ball
     // in the air was a draw. With unlimited rounds it can never be true, and

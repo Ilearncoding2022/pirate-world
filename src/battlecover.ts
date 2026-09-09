@@ -78,7 +78,16 @@ export interface BattleCover {
    * ones `fishCover.isOpen` is on. A live getter, never a latched flag.
    */
   readonly isOpen: boolean;
-  open(kind: AiBoatKind): void;
+  /**
+   * Raises the card for a fight against `kind`.
+   *
+   * `playerHitsToLose` is `hull.state.hitsToLose`, sampled by `main.ts` at
+   * CONTACT and handed to this screen and to `createBattleSim` from that one
+   * read, so the number the card teaches and the number the sim enforces
+   * cannot be two different figures. Defaulted to `HITS_TO_LOSE`, which is
+   * the fight exactly as it was before hulls existed.
+   */
+  open(kind: AiBoatKind, playerHitsToLose?: number): void;
   close(): void;
   /**
    * Advances the count. Called once a frame while open.
@@ -131,14 +140,26 @@ const KIND_LABEL: Record<AiBoatKind, string> = {
  * the strip a second later. Naming one here would teach a figure instead of
  * the fact the player actually needs before the first shot: the ring shoves
  * you off its mark, and the water can eat a ball meant for the enemy.
+ *
+ * The hit count is now the PLAYER'S, off their hull, and it is the reason
+ * this is rebuilt on every `open` instead of written once at build time. A
+ * player who takes a fight at 20% has one hit to give and the card is the
+ * only place in the game they can be told so before the first ball is in the
+ * air — the strip's pips say it too, but by then they are being shot at.
+ * The singular is spelled out rather than tolerated ("1 hits lose it") for
+ * the same reason every other figure here is derived: the one sentence whose
+ * whole job is to teach the rules cannot be the sentence that reads as
+ * broken.
  */
-function blurbText(): string {
+function blurbText(playerHitsToLose: number): string {
   const perSecond = Math.round(1 / FIRE_COOLDOWN);
+  const n = playerHitsToLose;
   return (
     `Unlimited rounds, up to ${perSecond} a second, fired straight out of the ` +
-    `inboard beam. ${HITS_TO_LOSE} hits lose it. W and S are your place on ` +
-    `the ring — there is no helm in a fight. The sea will shove you off it, ` +
-    `and the wreckage adrift in it will eat a shot meant for the enemy.`
+    `inboard beam. ${n} hit${n === 1 ? '' : 's'} lose${n === 1 ? 's' : ''} it. ` +
+    `W and S are your place on the ring — there is no helm in a fight. The ` +
+    `sea will shove you off it, and the wreckage adrift in it will eat a shot ` +
+    `meant for the enemy.`
   );
 }
 
@@ -182,9 +203,17 @@ export function createBattleCover(deps: BattleCoverDeps): BattleCover {
 
   const overlay: HTMLElement = root;
 
-  // Written once, at build, for the reason `blurbText` gives. It cannot change
-  // between fights, so there is nothing to re-write on open.
-  if (blurbEl !== null) blurbEl.textContent = blurbText();
+  /**
+   * The hit count the blurb was last written with, so the sentence is rebuilt
+   * only when it would actually read differently.
+   *
+   * It used to be written once at build, when it could not change between
+   * fights. It can now: it is the player's threshold and it moves with the
+   * hull. This is the same write-through cache every paint in the overlays
+   * keeps, and `-1` is "never written", which forces the first `open` to do
+   * the work whatever it finds.
+   */
+  let blurbHits = -1;
 
   let open = false;
   /** Seconds left. Only meaningful while `open`. */
@@ -236,12 +265,16 @@ export function createBattleCover(deps: BattleCoverDeps): BattleCover {
       return open;
     },
 
-    open(kind: AiBoatKind): void {
+    open(kind: AiBoatKind, playerHitsToLose: number = HITS_TO_LOSE): void {
       if (open) return;
       remaining = COUNTDOWN;
       lastTick = performance.now();
       shown = -1;
       fired = false;
+      if (blurbEl !== null && playerHitsToLose !== blurbHits) {
+        blurbHits = playerHitsToLose;
+        blurbEl.textContent = blurbText(playerHitsToLose);
+      }
       if (foeEl !== null) foeEl.textContent = KIND_LABEL[kind];
       if (kindClass !== null) overlay.classList.remove(kindClass);
       kindClass = KIND_CLASS[kind];
