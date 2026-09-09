@@ -378,10 +378,19 @@
              its two extremes at its two ends. [FISH] beside THRUST, in the
              corner the pad never used.
 
-             They keep `dock__btn`, which is where their glass, their brackets
-             and their disabled colours live; `dpad__act` only resizes them to
-             fit here. Both counts keep their ids, so hud.ts and main.ts are
-             untouched by the move. -->
+             They keep `dock__btn`, which is where their glass and their
+             disabled colours live; `dpad__act` recolours and resizes them.
+             Both counts keep their ids, so hud.ts and main.ts are untouched by
+             the move.
+
+             The `dpad__act__inner` wrapper is not decoration. These labels are
+             drawn far below the ~12px floor a browser's minimum-font-size
+             preference imposes, so they are laid out ten times too big and
+             scaled back down -- the same dodge `.dbtn__label` uses, and for
+             the same reason. It takes a wrapper here because the word and its
+             count are two boxes that must stay side by side: scaling them
+             separately would leave each correct and the pair ten times too far
+             apart. See the MOORING-adjacent notes in style.css. -->
         <button
           id="btn-overdrive"
           class="dbtn dock__btn dpad__act dpad__act--coil"
@@ -390,8 +399,10 @@
           disabled
           title="None stowed"
         >
-          <span class="dock__key">COIL</span>
-          <span class="dock__count" id="hud-overdrive-count"></span>
+          <span class="dpad__act__inner">
+            <span class="dock__key">COIL</span>
+            <span class="dock__count" id="hud-overdrive-count"></span>
+          </span>
         </button>
         <button
           id="btn-fish"
@@ -399,7 +410,9 @@
           type="button"
           aria-label="Fishing"
         >
-          <span class="dock__key">FISH</span>
+          <span class="dpad__act__inner">
+            <span class="dock__key">FISH</span>
+          </span>
         </button>
         <button
           id="btn-anchor"
@@ -409,8 +422,10 @@
           disabled
           title="None stowed"
         >
-          <span class="dock__key">ANCHOR</span>
-          <span class="dock__count" id="hud-anchor-count"></span>
+          <span class="dpad__act__inner">
+            <span class="dock__key">ANCHOR</span>
+            <span class="dock__count" id="hud-anchor-count"></span>
+          </span>
         </button>
         <button id="btn-up" class="dbtn dbtn--up" type="button" aria-label="Thrust">
           <span class="dbtn__glyph">&#9650;</span>

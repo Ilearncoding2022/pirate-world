@@ -1441,22 +1441,156 @@ body {
 }
 
 /*
- * Sized off the key, on `.dbtn__label`'s principle three rules up: the longest
- * label has to fit its button at EVERY step of the clamp, so the size comes
- * from the button rather than from a number picked once at one viewport.
+ * Rendered size is font-size x --act-scale, not font-size on its own, and the
+ * wrapper is what carries both.
  *
- * `ANCHOR x5` sets the coefficient, and it is the true worst case rather than
- * a guess: `SEA_ANCHOR_STORE_MAX` is 5 and `OVERDRIVE_STORE_MAX` is 3, so the
- * count is one digit for good. 0.122 leaves about 2px spare at the bottom of
- * the clamp, where the budget is 39.6px; raise either cap past 9 and this has
- * to come down with it.
+ * This is `.dbtn__label`'s dodge, applied to a second place that needed it and
+ * did not have it. Browsers carry a minimum-font-size preference that clamps
+ * the COMPUTED size -- commonly to 12px -- so a rule asking for 7.4px is
+ * silently served at 12.6 and `ANCHOR x5` runs off both ends of its button.
+ * That was reported from a real machine, and it is exactly the bug
+ * ARCHITECTURE.md records against STARBOARD. Transforms are applied after
+ * layout and are never clamped, so the label is laid out ten times too big,
+ * far above any floor a browser can impose, and scaled back down.
  *
- * Tracking goes to zero for the same reason -- at eight glyphs even 0.06em is
- * half a glyph of width this cannot spare.
+ * It takes a WRAPPER here where the helm label needed none, because the word
+ * and its count are two boxes that have to stay side by side. Scaling each of
+ * them on its own would leave both the right size and the pair ten times too
+ * far apart, so every gap inside is in `em` -- see `.dock__count` below -- and
+ * the whole group is scaled once.
+ *
+ * The size still comes off `--key-size`, on the same principle as the helm
+ * label: the button is pinned to a column that moves through a clamp, so a
+ * label that does not move with it spills out at the narrow end. `ANCHOR x5`
+ * sets the coefficient and is the true worst case rather than a guess --
+ * `SEA_ANCHOR_STORE_MAX` is 5 and `OVERDRIVE_STORE_MAX` is 3, so the count is
+ * one digit for good.
+ *
+ * 0.1037 is 15% under the 0.122 that came before it (owner's call), which is
+ * the other half of the same report: the text was too big for its button on
+ * top of being clamped.
+ *
+ * Keep font-size, height and transform in step if this is retuned -- the first
+ * two are written in terms of --act-scale so that happens by itself.
  */
+.dpad__act__inner {
+  --act-scale: 0.1;
+  display: flex;
+  align-items: baseline;
+  font-size: calc(var(--key-size) * 0.1037 / var(--act-scale));
+  line-height: 1;
+  height: calc(1em * var(--act-scale));
+  transform: scale(var(--act-scale));
+  /* Laid out ten times wider than it draws, so its box reaches well past the
+     button on both sides. `.dbtn` centres it, so the overflow is symmetrical
+     and the drawn group lands in the middle; it must never be a hit target,
+     because the button under it is. */
+  transform-origin: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* `inherit`, and it is load-bearing: `.dock__key` carries an absolute 10px for
+   the dock, which would otherwise win here and leave the wrapper scaling a
+   10px label down to 1px. Everything inside the wrapper has to take its size
+   FROM the wrapper or the scale means nothing. */
 .dpad__act .dock__key {
-  font-size: calc(var(--key-size) * 0.122);
+  font-size: inherit;
   letter-spacing: 0;
+}
+
+/* In `em`, so it survives the scale above. A px margin here would be laid out
+   at face value against a font ten times too big and then shrunk with it,
+   putting the count a tenth of the intended distance from the word. */
+.dpad__act .dock__count {
+  margin-left: 0.9em;
+  letter-spacing: 0;
+}
+
+/* ---------------------------------------------------------------------
+   The three ship keys' own colours
+
+   One hue each, on the key and its count together (owner's call): the coil
+   orange, the fishing green, the anchor brown. They are three unrelated
+   things that happen to share a shape, and the pad is read at a glance while
+   steering -- a colour tells them apart before the word is, which is the
+   same argument the power block's five states are built on.
+
+   The BUTTON keeps the family's cyan glass and border. Only the text moves,
+   so the pad still reads as one control rather than three stickers.
+
+   Every rule here is weaker than `.dock__btn:disabled .dock__key`, and that
+   is deliberate: a key with nothing stowed is dim first and coloured second.
+   The `act--live` block below is the one thing that outranks it, and it has
+   to -- see the note there.
+   ------------------------------------------------------------------- */
+
+.dpad__act--coil {
+  --act-ink: #ff9a3c;
+  --act-glow: rgba(255, 154, 60, 0.5);
+}
+
+.dpad__act--fish {
+  --act-ink: #4bf0a6;
+  --act-glow: rgba(75, 240, 166, 0.45);
+}
+
+/* Brown is the hard one on a black HUD: taken far enough down it stops being a
+   colour and starts being a dim amber. This is a tan -- brown in hue, lifted
+   in value until it reads at 6px -- with a weaker glow than the other two, so
+   it stays warm-dark beside them rather than joining the amber family the
+   hull's worn state owns. */
+.dpad__act--anchor {
+  --act-ink: #c08a52;
+  --act-glow: rgba(192, 138, 82, 0.32);
+}
+
+.dpad__act .dock__key {
+  color: var(--act-ink);
+  /* In `em` for the same reason the count's margin is: a px blur here would be
+     drawn against the ten-times layout and then scaled to a tenth of itself. */
+  text-shadow: 0 0 1.3em var(--act-glow);
+}
+
+.dpad__act .dock__count {
+  color: var(--act-ink);
+  opacity: 0.78;
+}
+
+/* ---------------------------------------------------------------------
+   In use -- the coil burning, the anchor over the side
+
+   hud.ts writes `act--live` off `overdrive.isActive` / `seaAnchor.isDeployed`,
+   the same two fields the gates beside them already read every frame. [FISH]
+   never gets it: opening a menu is not a window that runs down.
+
+   It has to beat `.dock__btn:disabled`, which is why these are four classes
+   deep. Both keys are disabled for the whole of their own window -- you cannot
+   engage a coil that is already burning -- so without the override the one
+   moment the player most needs to see the state is the one moment it would be
+   drawn in dead grey.
+   ------------------------------------------------------------------- */
+
+.dpad .dpad__act.act--live .dock__key,
+.dpad .dpad__act.act--live .dock__count {
+  color: var(--act-ink);
+  text-shadow: 0 0 1.3em var(--act-glow);
+}
+
+.dpad .dpad__act.act--live .dpad__act__inner {
+  animation: act-flash 700ms ease-in-out infinite;
+}
+
+/* Faster than the panel's 900ms alarms and slower than nothing: this is a
+   window running down, not a fault. */
+@keyframes act-flash {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.28;
+  }
 }
 
 /*
@@ -1472,10 +1606,6 @@ body {
 .dpad__act .dock__key::before,
 .dpad__act .dock__key::after {
   content: none;
-}
-
-.dpad__act .dock__count {
-  margin-left: calc(var(--key-size) * 0.04);
 }
 
 /* Over THRUST and under REVERSE, centred on the throttle's own column.
@@ -1652,6 +1782,11 @@ kbd {
   .flow--drain .is-crest,
   .flow--drain-fast .is-crest,
   .flow--charge .is-sweep {
+    animation: none;
+  }
+  /* The live key keeps its colour against the disabled grey, which is the half
+     of `act--live` that carries the meaning. Only the beat goes. */
+  .dpad .dpad__act.act--live .dpad__act__inner {
     animation: none;
   }
 }

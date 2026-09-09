@@ -964,10 +964,15 @@ export function createHud(
   const writeAnchorCount = textWriter(document.getElementById('hud-anchor-count'));
   seaAnchor.onChange((count) => writeAnchorCount(`×${count}`));
   const writeAnchorGate = reasonGateWriter(document.getElementById('btn-anchor'));
+  // Whether the window this key opened is still running. Read every frame off
+  // the same field the gate beside it reads, so the flashing label and the
+  // dead button can never disagree about what the anchor is doing.
+  const writeAnchorLive = modifierWriter(document.getElementById('btn-anchor'), 'act');
 
   const writeOverdriveCount = textWriter(document.getElementById('hud-overdrive-count'));
   overdrive.onChange((count) => writeOverdriveCount(`×${count}`));
   const writeOverdriveGate = reasonGateWriter(document.getElementById('btn-overdrive'));
+  const writeOverdriveLive = modifierWriter(document.getElementById('btn-overdrive'), 'act');
 
   return {
     update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void {
@@ -1130,6 +1135,12 @@ export function createHud(
 
       writeAnchorGate(seaAnchor.canDeploy, seaAnchor.isDeployed ? 'Already deployed' : 'None stowed');
       writeOverdriveGate(overdrive.canEngage, overdrive.isActive ? 'Already burning' : 'None stowed');
+      // The label flashes for as long as the window runs. Off the same two
+      // fields the gates above are written from, one line apart, because the
+      // whole point is that they are the same fact said twice: the key is dead
+      // BECAUSE the thing it does is already happening.
+      writeAnchorLive(seaAnchor.isDeployed ? 'live' : 'idle');
+      writeOverdriveLive(overdrive.isActive ? 'live' : 'idle');
     },
 
     setDevTimingVisible(visible: boolean): void {
