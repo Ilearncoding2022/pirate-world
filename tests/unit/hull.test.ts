@@ -20,12 +20,21 @@ import { DOCK_NET_RATE } from '../../src/energy';
  * assert on how any of it looks; the HUD's tags and bands are the owner's
  * eye, per docs/TESTING.md.
  *
- * One thing to know before reading the wear cases. The float inside is
- * deliberately private and `percent` is a ROUNDING of it, so "60 s of wear is
- * 0.25" cannot be read off `state.percent` directly — 99.75 publishes as 100.
- * It is measured two ways instead, both through the public surface: by how
- * much repair it takes to put the hull back on the top (`mode` reads `'full'`
- * only at 100), and by when the published percent actually crosses.
+ * Two things to know before reading the wear cases.
+ *
+ * The float inside is deliberately private and `percent` is the FLOOR of it,
+ * so "60 s of wear is 0.25" cannot be read off `state.percent` directly —
+ * 99.75 publishes as 99, and so does 99.01. It is measured two ways instead,
+ * both through the public surface: by how much repair it takes to put the
+ * hull back on the top (`mode` reads `'full'` only at 100), and by how long
+ * the published percent takes to step by one.
+ *
+ * And because it is a floor rather than a rounding, a hull started on an
+ * exact whole percent publishes the next one down almost at once, and then
+ * holds it for a full four minutes. That is `battery.ts`'s behaviour and it
+ * is deliberate: the point of the floor is that the published figure is never
+ * more hull than the ship has got, which is also what makes the speed caps
+ * bite at exactly the percent the HUD is showing.
  */
 
 const DT = 1 / 60;
@@ -67,21 +76,27 @@ describe('hull: the rates', () => {
     expect(HULL_WEAR).toBeCloseTo(0.25 / 60, 12);
   });
 
-  it('publishes the crossing at half a percent, twice as soon in weather', () => {
-    // 0.25 %/min means the printed figure leaves 100 when the float passes
-    // 99.5, which is two minutes. This is the same arithmetic as the case
-    // above, read in the unit the player actually sees.
-    const dry = createHull(100);
-    run(dry, 100, false, false);
-    expect(dry.state.percent).toBe(100);
-    run(dry, 21, false, false);
-    expect(dry.state.percent).toBe(99);
+  it('steps the printed percent once every four minutes, or two in weather', () => {
+    // The same arithmetic as the case above, read in the unit the player
+    // actually sees: a quarter of a percent a minute is four minutes a
+    // percent. Started at 99 and asserted at 98, because the first step down
+    // from a whole number is immediate under a floor and says nothing about
+    // the rate.
+    const dry = createHull(99);
+    run(dry, 1, false, false);
+    expect(dry.state.percent).toBe(98);
+    run(dry, 238, false, false);
+    expect(dry.state.percent).toBe(98);
+    run(dry, 2, false, false);
+    expect(dry.state.percent).toBe(97);
 
-    const wet = createHull(100);
-    run(wet, 50, false, true);
-    expect(wet.state.percent).toBe(100);
-    run(wet, 11, false, true);
-    expect(wet.state.percent).toBe(99);
+    const wet = createHull(99);
+    run(wet, 1, false, true);
+    expect(wet.state.percent).toBe(98);
+    run(wet, 118, false, true);
+    expect(wet.state.percent).toBe(98);
+    run(wet, 2, false, true);
+    expect(wet.state.percent).toBe(97);
   });
 
   it('repairs at the berth at exactly the rate shore power charges at', () => {
@@ -93,8 +108,10 @@ describe('hull: the rates', () => {
     expect(HULL_REPAIR_RATE).toBeCloseTo(2, 12);
 
     const hull = createHull(HULL_MIN);
-    run(hull, 25, true, false);
-    // 1 + 25 * 2 = 51, and the tank would be half full on the same clock.
+    // 1 + 25.1 * 2 = 51.2. The half-second is there on purpose: the target is
+    // kept off a whole number so a floor cannot be pushed to the percent below
+    // by the last bit of a 1506-step sum.
+    run(hull, 25.1, true, false);
     expect(hull.state.percent).toBe(51);
     expect(hull.state.mode).toBe('repairing');
     expect(hull.state.rate).toBeCloseTo(2, 12);
@@ -102,13 +119,14 @@ describe('hull: the rates', () => {
     // Fifty seconds from the floor is the whole way, and it stops there.
     run(hull, 25, true, false);
     expect(hull.state.percent).toBe(100);
+    expect(hull.state.mode).toBe('full');
     run(hull, 10, true, false);
     expect(hull.state.percent).toBe(100);
   });
 
   it('lets docked beat weathered, whatever the weather is doing', () => {
     const hull = createHull(50);
-    run(hull, 10, true, true);
+    run(hull, 10.1, true, true);
     // Repairing at 2%/s, not wearing at 0.5%/min: 20 points up, not down.
     expect(hull.state.percent).toBe(70);
     expect(hull.state.mode).toBe('repairing');
@@ -205,14 +223,36 @@ describe('hull: the floors and the caps', () => {
 
 describe('hull: the derived table', () => {
   /*
-   * docs/HARBOURS_PLAN.md's four rows, at every edge of every one of them.
-   * The bands are read off the float rather than off the published percent,
-   * which is why 49.99 is a worn hull even though it prints as 50%.
+   * docs/HARBOURS_PLAN.md's four rows, at every edge of every one of them,
+   * and each edge asserted in PAIRS: the last float that publishes the band
+   * below and the first that publishes the band above.
+   *
+   * Every row is checked against `percent` as well as against the figure it
+   * derives, because that agreement is the point. The owner's rule is "under
+   * 50% caps at 10 kn", and with a floored percent the cap turns over at
+   * exactly the percent the HUD is showing — 49.99 prints 49 AND is capped,
+   * 50.99 prints 50 AND is not.
    */
+  it('publishes a floored percent, and never a zero', () => {
+    expect(createHull(100).state.percent).toBe(100);
+    expect(createHull(50.99).state.percent).toBe(50);
+    expect(createHull(49.99).state.percent).toBe(49);
+    expect(createHull(1.99).state.percent).toBe(1);
+    // The one reading that must be impossible: 0% would read as a scuttled
+    // ship, and there is no such thing in this game.
+    expect(createHull(HULL_MIN).state.percent).toBe(HULL_MIN);
+    const floored = createHull(100);
+    floored.damage(200);
+    run(floored, 600, false, true);
+    expect(floored.state.percent).toBe(1);
+  });
+
   it('speedCap, at each boundary', () => {
     expect(createHull(100).state.speedCap).toBe(Infinity);
+    expect(createHull(50.99).state.speedCap).toBe(Infinity);
     expect(createHull(50).state.speedCap).toBe(Infinity);
     expect(createHull(49.99).state.speedCap).toBe(HULL_CAP_WORN);
+    expect(createHull(25.99).state.speedCap).toBe(HULL_CAP_WORN);
     expect(createHull(25).state.speedCap).toBe(HULL_CAP_WORN);
     expect(createHull(24.99).state.speedCap).toBe(HULL_CAP_FAILING);
     expect(createHull(2).state.speedCap).toBe(HULL_CAP_FAILING);
@@ -234,6 +274,37 @@ describe('hull: the derived table', () => {
     expect(createHull(25).state.hitsToLose).toBe(2);
     expect(createHull(24.99).state.hitsToLose).toBe(1);
     expect(createHull(HULL_MIN).state.hitsToLose).toBe(1);
+  });
+
+  it('turns the band over on the same percent it prints', () => {
+    // The defect this pins: a hull that publishes 50 must not be capped and a
+    // hull that publishes 49 must be, at every float in between. Anything
+    // deriving a band from the float instead would disagree with the readout
+    // for the two minutes a crossing takes.
+    for (const value of [49, 49.01, 49.5, 49.99]) {
+      const worn = createHull(value);
+      expect(worn.state.percent).toBe(49);
+      expect(worn.state.speedCap).toBe(HULL_CAP_WORN);
+      expect(worn.state.hitsToLose).toBe(2);
+    }
+    for (const value of [50, 50.01, 50.5, 50.99]) {
+      const sound = createHull(value);
+      expect(sound.state.percent).toBe(50);
+      expect(sound.state.speedCap).toBe(Infinity);
+      expect(sound.state.hitsToLose).toBe(3);
+    }
+    for (const value of [24, 24.5, 24.99]) {
+      const failing = createHull(value);
+      expect(failing.state.percent).toBe(24);
+      expect(failing.state.speedCap).toBe(HULL_CAP_FAILING);
+      expect(failing.state.canFish).toBe(false);
+    }
+    for (const value of [25, 25.5, 25.99]) {
+      const fishable = createHull(value);
+      expect(fishable.state.percent).toBe(25);
+      expect(fishable.state.speedCap).toBe(HULL_CAP_WORN);
+      expect(fishable.state.canFish).toBe(true);
+    }
   });
 
   it('re-derives after a damage rather than serving a cached band', () => {
@@ -268,20 +339,18 @@ describe('hull: the save throttle', () => {
     // nothing.
     expect(calls).toBe(0);
 
-    // Two minutes of wear is one crossing, out of 7200 frames.
+    // Four minutes of wear is one crossing, out of 14400 frames. The step
+    // off 100 is immediate under a floor, and every step after it is a whole
+    // percent apart.
     run(hull, 121, false, false);
     expect(hull.state.percent).toBe(99);
     expect(calls).toBe(1);
 
-    // Another two minutes is another crossing and no more than that: the
-    // printed figure steps once per four minutes of wear after the first,
-    // because 100 is only half a percent from the first edge and every edge
-    // after it is a whole one.
-    run(hull, 120, false, false);
+    run(hull, 118, false, false);
     expect(hull.state.percent).toBe(99);
     expect(calls).toBe(1);
 
-    run(hull, 120, false, false);
+    run(hull, 2, false, false);
     expect(hull.state.percent).toBe(98);
     expect(calls).toBe(2);
   });
@@ -338,12 +407,17 @@ describe('hull: the ?hull= override', () => {
     hull.onChange(() => {
       calls++;
     });
-    hull.override(49);
-    // Not from 100: an override that left `lastPercent` at the old figure
-    // would fire on the very next frame of wear.
-    run(hull, 60, false, false);
+    hull.override(49.9);
+    expect(hull.state.percent).toBe(49);
+    // The discriminator: an override that left `lastPercent` on the save's
+    // 100 would notify on the very first frame of wear, because the floor is
+    // already 49 and 49 is not 100. Silence here is what says the override
+    // moved the throttle's own reference with it.
+    run(hull, 1, false, false);
     expect(calls).toBe(0);
-    run(hull, 61, false, false);
+    // And the next real crossing still lands where it should: 0.9 of a
+    // percent below 49.9 is 216 seconds of wear.
+    run(hull, 216, false, false);
     expect(hull.state.percent).toBe(48);
     expect(calls).toBe(1);
   });

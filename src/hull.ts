@@ -180,23 +180,31 @@ export const HULL_CAP_CRITICAL = 1;
  * there is exactly one place each band edge is written down and no cached
  * copy of it to go stale after a `damage()`.
  *
- * The bands are read off the FLOAT, not off the published whole percent, and
- * that is the one place the two can disagree: a hull at 49.6 publishes 50%
- * and is already capped at 10 kn. The cap is a fact about the hull and the
- * percent is a readout of it, and of the two it is the readout that is
- * allowed to be a rounding. Anything painting a band — the HUD's severity
- * modifier and its tag — should follow `speedCap` and `canFish` rather than
- * re-deriving the band from `percent`, or it will disagree with the ship for
- * the two minutes either crossing takes.
+ * All three are derived from the PUBLISHED PERCENT and never from the float
+ * behind it, and that is load-bearing rather than incidental. The rule the
+ * owner set is "under 50% the ship travels at 10 kn": with a floored percent
+ * that is exactly what happens at exactly that edge — a float anywhere in
+ * [49, 50) publishes 49 and is capped, a float anywhere in [50, 51)
+ * publishes 50 and is not, and there is no half-percent of grace in either
+ * direction. Deriving from the float instead would let a hull print 50% while
+ * already capped at 10 kn for the two minutes a crossing takes, and an
+ * instrument that disagrees with the ship is worse than either reading on its
+ * own. So: one number in the sim, one published form of it, and one band
+ * function reading that. `hud.ts` can key its severity and its tag straight
+ * off `percent` and be right by construction.
+ *
+ * The published form is a FLOOR, for the same reason `battery.ts` floors the
+ * charge it persists: a reload must never hand back more than was aboard, and
+ * a hull must never round up into a speed it has not got.
  */
 
-/** Speed ceiling for a hull at `value`, world units/s. `Infinity` is "no ceiling". */
-function capFor(value: number): number {
-  if (value >= HULL_WORN_BELOW) return Infinity;
-  if (value >= HULL_FAILING_BELOW) return HULL_CAP_WORN;
+/** Speed ceiling for a hull at `percent`, world units/s. `Infinity` is "no ceiling". */
+function capFor(percent: number): number {
+  if (percent >= HULL_WORN_BELOW) return Infinity;
+  if (percent >= HULL_FAILING_BELOW) return HULL_CAP_WORN;
   // The critical row is the floor itself and nothing else, so its edge is one
   // percent above `HULL_MIN` rather than a constant of its own.
-  if (value >= HULL_MIN + 1) return HULL_CAP_FAILING;
+  if (percent >= HULL_MIN + 1) return HULL_CAP_FAILING;
   return HULL_CAP_CRITICAL;
 }
 
@@ -207,9 +215,9 @@ function capFor(value: number): number {
  * threshold that moved mid-fight would be a rule the player could not have
  * been told.
  */
-function hitsFor(value: number): number {
-  if (value >= HULL_WORN_BELOW) return 3;
-  if (value >= HULL_FAILING_BELOW) return 2;
+function hitsFor(percent: number): number {
+  if (percent >= HULL_WORN_BELOW) return 3;
+  if (percent >= HULL_FAILING_BELOW) return 2;
   return 1;
 }
 
@@ -300,8 +308,24 @@ function toPercent(value: number): number {
  */
 export function createHull(initialPercent: number = HULL_MAX): Hull {
   let value = toPercent(initialPercent);
-  /** The published figure, and the one `onChange` is throttled against. */
-  let lastPercent = Math.round(value);
+
+  /**
+   * The published form of the value: a whole percent, rounded DOWN.
+   *
+   * The one conversion in the file, called by everything that reports and by
+   * the notify throttle, so `percent`, the three derived fields and the save
+   * can never be reading two different roundings of the same hull. Floored
+   * on `battery.ts`'s principle — never hand back more than was aboard — and
+   * it cannot publish 0, because `value` is clamped to `HULL_MIN` and
+   * `Math.floor(1)` is 1. A hull reading 0% would be a scuttled ship, and
+   * there is no such thing here.
+   */
+  function percentNow(): number {
+    return Math.floor(value);
+  }
+
+  /** The last published figure, and the one `onChange` is throttled against. */
+  let lastPercent = percentNow();
   const subscribers = new Set<() => void>();
 
   /*
@@ -315,7 +339,7 @@ export function createHull(initialPercent: number = HULL_MAX): Hull {
   let weathered = false;
 
   function notifyIfPersistedChanged(): void {
-    const percent = Math.round(value);
+    const percent = percentNow();
     if (percent === lastPercent) return;
     lastPercent = percent;
     // Over a copy, the contract `battery.ts` and `wallet.ts` both keep: a
@@ -346,9 +370,15 @@ export function createHull(initialPercent: number = HULL_MAX): Hull {
    * beats both wear modes below that, for the same reason `update` lets
    * `docked` beat `weathered`: alongside, the weather is not what is
    * happening to the ship.
+   *
+   * Off the published percent like everything else the HUD reads, so the tag
+   * and the figure beside it can never disagree. At this one edge the two
+   * forms are the same test — a floor of 100 needs a float of 100 — but
+   * writing it against the float would leave a second rounding in the file
+   * for someone to change independently later.
    */
   function modeNow(): HullMode {
-    if (value >= HULL_MAX) return 'full';
+    if (percentNow() >= HULL_MAX) return 'full';
     if (docked) return 'repairing';
     return weathered ? 'weathering' : 'wearing';
   }
@@ -364,16 +394,16 @@ export function createHull(initialPercent: number = HULL_MAX): Hull {
    */
   const state: HullState = {
     get percent(): number {
-      return Math.round(value);
+      return percentNow();
     },
     get speedCap(): number {
-      return capFor(value);
+      return capFor(percentNow());
     },
     get canFish(): boolean {
-      return value >= HULL_FAILING_BELOW;
+      return percentNow() >= HULL_FAILING_BELOW;
     },
     get hitsToLose(): number {
-      return hitsFor(value);
+      return hitsFor(percentNow());
     },
     get mode(): HullMode {
       return modeNow();
@@ -435,7 +465,7 @@ export function createHull(initialPercent: number = HULL_MAX): Hull {
       // ordinary crossing is measured from where the query put the hull
       // rather than from where the save file did. See the note on `?hull=`
       // above for why this one door does not write.
-      lastPercent = Math.round(value);
+      lastPercent = percentNow();
     },
   };
 }
