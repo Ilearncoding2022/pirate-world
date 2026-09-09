@@ -381,10 +381,15 @@ body {
   left: var(--hud-pad);
   transform: scale(var(--panel-scale));
   transform-origin: top left;
-  /* Wide enough for the longest power tag, "IDLE - SOLAR CHARGING", beside
-     its rate on one line. The panel is shrink-to-fit, so this is the floor
-     that keeps the status line from wrapping under the bar. */
-  min-width: 246px;
+  /* The floor the panel actually sits on: it is shrink-to-fit and its content
+     comes in under this, so this figure IS the width.
+
+     246px was the old one, set by the longest power tag ("IDLE - SOLAR
+     CHARGING") beside its rate on one line. 283px is that plus the 15% the
+     owner asked for, and the tag has more room than it ever had -- the two
+     rows that used to be the panel's widest content, WIND and SKY, are over
+     on the scope now. */
+  min-width: 283px;
 }
 
 .readout {
@@ -1040,8 +1045,83 @@ body {
   padding: 11px 12px 12px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  /* `stretch`, not `center`. The panel is wider than the scope now that the
+     weather sits beside the dial, and a centred column would have put the
+     scope in the middle of the panel while the dial started at the left of the
+     row under it -- which is precisely the misalignment this change is here to
+     remove. The title keeps its old centring explicitly, below. */
+  align-items: stretch;
   gap: 8px;
+}
+
+/* The title was centred by the panel's own `align-items` until that became
+   `stretch`. Kept by hand rather than let go, because it is the one thing in
+   this panel that labels the whole of it. */
+.panel--radar .panel__title {
+  align-self: center;
+}
+
+/*
+ * The scope's column beside the weather's block.
+ *
+ * `flex-end` is what puts the two rows of weather level with the DIAL rather
+ * than with the plot above it: the column is much the taller of the two, and
+ * bottom-aligning the shorter one is what "to the right of the dial" means in
+ * a row that also contains a 158px circle.
+ */
+.radar__body {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+/*
+ * The plot and the dial, at one width.
+ *
+ * This is the whole mechanism behind the dial lining up with the plot: both
+ * are `width: 100%` of this column, so their left borders are the same border.
+ * Neither is positioned against the panel any more, so the panel may grow to
+ * the right without moving either of them.
+ *
+ * The fix row is deliberately NOT in here. It reads across the panel and wants
+ * every pixel of it -- LAT, HDG and LON met in the middle at 118px once
+ * already, which is why they were taken out of the disc in the first place.
+ * Inside this column they would have been squeezed back to exactly that width.
+ */
+.radar__col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  flex: none;
+  width: clamp(118px, 12vw, 158px);
+}
+
+/*
+ * WIND and SKY, moved off the telemetry panel.
+ *
+ * They read against the dial, which is the point of putting them here: that
+ * ring is what the sky is doing to the light, and these two are what it is
+ * doing to the wind and the water. The telemetry panel keeps the ship's own
+ * instruments and is 15% wider for having handed these over.
+ *
+ * `min-width` rather than a fixed one so the pair can grow if a weather word
+ * ever runs longer than CLEAR; the panel is shrink-to-fit and follows.
+ */
+.radar__wx {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 104px;
+  /* Level with the dial's own bottom edge rather than the row's, so the two
+     read as one line of instruments. */
+  padding-bottom: 4px;
+}
+
+/* The rows are the telemetry panel's, and keep its spacing; only the width
+   they are laid out in has changed. */
+.radar__wx .readout {
+  padding: 0;
 }
 
 .radar {
@@ -1050,7 +1130,10 @@ body {
      are its caption, and a caption that crowds the glass reads as part of the
      plot. */
   margin-top: 6px;
-  width: clamp(118px, 12vw, 158px);
+  /* Its column's width -- see `.radar__col`. It set this clamp itself until
+     the dial had to line up with it, and two copies of one figure is exactly
+     how they would have drifted apart. */
+  width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   /* Under the plot, so the scope still reads as a lit tube where the canvas
@@ -1085,8 +1168,9 @@ body {
 .timedial {
   position: relative;
   margin-top: 8px;
-  /* Matches .radar's clamp so the two stay the same width at every size. */
-  width: clamp(118px, 12vw, 158px);
+  /* Its column's width, which is `.radar`'s too: that is what makes the two
+     share a left border at every step of the clamp. */
+  width: 100%;
   /* Wider than tall: the dial is a ring with a readout in it, and a square
      box would leave a band of dead panel under it. */
   aspect-ratio: 1 / 0.62;
@@ -1466,20 +1550,30 @@ body {
  * `SEA_ANCHOR_STORE_MAX` is 5 and `OVERDRIVE_STORE_MAX` is 3, so the count is
  * one digit for good.
  *
- * 0.1037 is 15% under the 0.122 that came before it (owner's call), which is
- * the other half of the same report: the text was too big for its button on
- * top of being clamped.
+ * 0.16 is where three rounds of this landed: 0.122, then 0.1037 when the label
+ * was found spilling, then back up once the spill turned out to be the clamp
+ * above rather than the size, and up again when the count moved to its own row
+ * and stopped being what set the width.
  *
- * Keep font-size, height and transform in step if this is retuned -- the first
- * two are written in terms of --act-scale so that happens by itself.
+ * Keep font-size and transform in step if this is retuned -- the first is
+ * written in terms of --act-scale so that happens by itself. There is no
+ * explicit height any more: with two rows there is no one figure to write, and
+ * the button is a fixed height that centres whatever it is given.
  */
 .dpad__act__inner {
   --act-scale: 0.1;
   display: flex;
-  align-items: baseline;
-  font-size: calc(var(--key-size) * 0.1037 / var(--act-scale));
+  /* A column, so the count sits UNDER the word rather than after it (owner's
+     call). That is what pays for the size below: stacked, the widest thing in
+     the button is `ANCHOR` at six glyphs instead of `ANCHOR x5` at nine, and
+     the coefficient could go up by half again without coming any closer to the
+     edges. Two rows of it still clear the button's height with room to spare
+     -- 1.85em against 27px at the top of the clamp. */
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--key-size) * 0.16 / var(--act-scale));
   line-height: 1;
-  height: calc(1em * var(--act-scale));
   transform: scale(var(--act-scale));
   /* Laid out ten times wider than it draws, so its box reaches well past the
      button on both sides. `.dbtn` centres it, so the overflow is symmetrical
@@ -1501,9 +1595,14 @@ body {
 
 /* In `em`, so it survives the scale above. A px margin here would be laid out
    at face value against a font ten times too big and then shrunk with it,
-   putting the count a tenth of the intended distance from the word. */
+   putting the count a tenth of the intended distance from the word.
+
+   `margin-left` is explicitly cleared: `.dock__count` sets one for the dock,
+   where the count follows its word along a row, and here it would push the
+   second row off centre under the first. */
 .dpad__act .dock__count {
-  margin-left: 0.9em;
+  margin-left: 0;
+  margin-top: 0.25em;
   letter-spacing: 0;
 }
 

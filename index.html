@@ -84,37 +84,11 @@
           </span>
         </div>
 
-        <!-- True wind. The arrow is bow-relative, matching the bow-up scope
-             rather than the north-up compass, so it points where the wind is
-             pushing the hull. It ships blowing because the wind never drops
-             to nothing -- see LULL_SPEED in wind.ts -- and hud.ts reads that
-             class back rather than assuming it. -->
-        <div class="readout">
-          <span class="readout__key">WIND</span>
-          <span class="wnd wnd--blowing" id="hud-wnd">
-            <span class="wnd__arrow" id="hud-wnd-arrow" aria-hidden="true">
-              <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" focusable="false">
-                <polygon class="wnd__dart" points="50,8 80,92 50,70 20,92" />
-              </svg>
-            </span>
-            <span class="readout__val wnd__val" id="hud-wnd-value">1 kn</span>
-          </span>
-        </div>
-
-        <!-- The sky. One word, off `WeatherState.kind`, which is a label
-             derived from the envelopes and the only thing in the game allowed
-             to branch on it. It sits directly under WIND because the two are
-             one system read two ways: the wind is what the weather is doing
-             to the hull, this is what it is doing to everything else. -->
-        <div class="readout">
-          <span class="readout__key">SKY</span>
-          <span class="readout__val" id="hud-wx">CLEAR</span>
-        </div>
-
-        <!-- The purse. It sits between the weather and the power because it
-             is the one warm figure on a cold panel and the rule beneath the
-             POWER block would otherwise separate it from the readouts it is
-             one of. hud.ts writes it from a wallet subscription, not from the
+        <!-- The purse. It sits between the sailing figures and the power
+             because it is the one warm figure on a cold panel and the rule
+             beneath the POWER block would otherwise separate it from the
+             readouts it is one of. WIND and SKY used to stand between the two;
+             they are over on the scope now, with the rest of the weather. hud.ts writes it from a wallet subscription, not from the
              frame loop, so the shipped 0 is what a new save actually holds
              and the first write is a real catch. -->
         <div class="readout">
@@ -320,6 +294,11 @@
              disc is where the plot is, and at 118px the two coordinate blocks
              met in the middle of it. Out here they get the panel's full width
              and the plot gets its own back. -->
+        <!-- Everything the scope owns, in one column: the fix, the plot and
+             the dial under it. They share a width, which is the whole reason
+             the column exists -- the dial's left border lines up with the
+             scope's because neither is centred against the panel any more,
+             and the panel is now wider than both. -->
         <div class="radar__head">
           <div class="radar__fix">
             <span class="radar__fix-key">LAT</span>
@@ -340,6 +319,8 @@
           </div>
         </div>
 
+        <div class="radar__body">
+        <div class="radar__col">
         <div class="radar">
           <canvas class="radar__scope" id="hud-radar" aria-hidden="true"></canvas>
         </div>
@@ -353,6 +334,45 @@
              no clock on it. -->
         <div class="timedial">
           <canvas class="timedial__face" id="hud-timedial" aria-hidden="true"></canvas>
+        </div>
+        </div>
+
+        <!-- The weather, moved off the telemetry panel and onto the scope.
+             It belongs here: the dial beside it is what the sky is doing to
+             the light, these two are what it is doing to the wind and the
+             water, and the telemetry panel is the SHIP's instruments. It sits
+             at the foot of the column so it reads against the dial rather
+             than against the plot.
+
+             Both rows keep their ids, so hud.ts is untouched by the move. -->
+        <div class="radar__wx">
+          <!-- True wind. The arrow is bow-relative, matching the bow-up scope
+               rather than the north-up compass, so it points where the wind is
+               pushing the hull. It ships blowing because the wind never drops
+               to nothing -- see LULL_SPEED in wind.ts -- and hud.ts reads that
+               class back rather than assuming it. -->
+          <div class="readout">
+            <span class="readout__key">WIND</span>
+            <span class="wnd wnd--blowing" id="hud-wnd">
+              <span class="wnd__arrow" id="hud-wnd-arrow" aria-hidden="true">
+                <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" focusable="false">
+                  <polygon class="wnd__dart" points="50,8 80,92 50,70 20,92" />
+                </svg>
+              </span>
+              <span class="readout__val wnd__val" id="hud-wnd-value">1 kn</span>
+            </span>
+          </div>
+
+          <!-- The sky. One word, off `WeatherState.kind`, which is a label
+               derived from the envelopes and the only thing in the game
+               allowed to branch on it. Directly under WIND because the two are
+               one system read two ways: the wind is what the weather is doing
+               to the hull, this is what it is doing to everything else. -->
+          <div class="readout">
+            <span class="readout__key">SKY</span>
+            <span class="readout__val" id="hud-wx">CLEAR</span>
+          </div>
+        </div>
         </div>
       </section>
 
