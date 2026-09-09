@@ -3856,8 +3856,11 @@ body.in-battle .dbtn--right {
  * that class out of the tab groups or teaching the tab code about an
  * exception. A dozen lines of its own is the cheaper of the two.
  *
- * Amber, the hull's own family in the telemetry panel, so the block that
- * repairs the hull and the bar that reports it read as one system.
+ * Amber, `hull--worn`'s own colour in the telemetry panel, so the block that
+ * repairs the hull and the bar that reports it read as one system. It is the
+ * DAMAGED hull's colour that is borrowed here, which is the only one that
+ * matters: nobody opens this block over a sound hull, and a sound hull is
+ * cyan now anyway.
  */
 .repair {
   --repair: #ffb445;
@@ -3989,12 +3992,26 @@ body.in-battle .dbtn--right {
 
    It is built like the power block — one `hull--*` modifier on the wrapper
    fanning out to the number, the bar and the tag — and separated like the
-   backup cell, by a hairline rule. What it does not share with either is
-   the palette. The plant owns cyan, green, amber, pink and red; the cell
-   owns violet; the hull is BRASS, ageing through amber to red as it goes.
-   Brass because the hull is the one thing on this panel that is a physical
-   object rather than a flow, and ART-DIRECTION.md's wood-and-brass against
-   neon is exactly that reading.
+   backup cell, by a hairline rule. It now shares the plant's palette too,
+   and the whole column is one SEVERITY ladder rather than three instruments
+   wearing three liveries: cyan is fine, amber is a warning, orange is
+   failing, red is an emergency, on whichever bar it appears.
+
+   This bar was BRASS for a while, on the reasoning that the hull is the one
+   thing on this panel that is a physical object rather than a flow, and that
+   ART-DIRECTION.md's wood-and-brass against neon was exactly that reading.
+   It was the wrong call, and what killed it was the column's own arithmetic
+   rather than taste: `pwr--warn` is #ffb445 and `hull--worn` is the same
+   #ffb445, so the moment the tank fell to mid the tank and the cell went the
+   colour brass was supposed to be distinctive against, and a glance down the
+   panel found three warm bars and no way to tell which of them was the hull.
+   Colour was carrying identity AND severity, and it could not do both.
+
+   Identity is carried by position and by the key beside each bar, which are
+   the two things that never change; colour is left to say only how bad it
+   is. The one thing lost is telling the hull from the plant WITHOUT reading
+   either label, and that was never worth the cost of an amber tank looking
+   like a worn hull.
 
    Four severities, and they are severities and not causes, on the power
    block's rule: `hullSeverity` in hud.ts derives them from the percent
@@ -4003,18 +4020,22 @@ body.in-battle .dbtn--right {
    ------------------------------------------------------------------- */
 
 .hull {
-  /* sound, 50..100. Deeper than `--gold` on purpose: the purse's figure is
-     three rows up this same column, and a hull bar in the identical brass
-     would read as more of that reading rather than as a different one. */
-  --hull-accent: #d8a63f;
-  --hull-glow: rgba(216, 166, 63, 0.42);
-  --hull-rail: rgba(216, 166, 63, 0.1);
-  --hull-rail-edge: rgba(216, 166, 63, 0.24);
+  /* sound, 50..100. The plant's own cyan, to the same four values `.pwr`
+     sets: a sound hull and a steady tank are the same news and the panel now
+     says so in the same words. It also puts the warm end of the column back
+     to meaning one thing -- something is wrong -- rather than meaning either
+     "this is the hull" or "the tank is low" depending on which row it is on. */
+  --hull-accent: var(--cyan);
+  --hull-glow: rgba(63, 224, 255, 0.45);
+  --hull-rail: rgba(63, 224, 255, 0.09);
+  --hull-rail-edge: rgba(63, 224, 255, 0.22);
   margin-top: 6px;
   padding-top: 5px;
-  /* The backup cell's hairline, in the hull's own hue: this is a second
-     instrument bolted under the first, and the rule is what says so. */
-  border-top: 1px solid rgba(216, 166, 63, 0.2);
+  /* The rule that says this is a second instrument bolted under the first.
+     Off `--hull-rail-edge` rather than a hue typed in here, so it follows the
+     block down the severity ladder with everything else in it -- it was a
+     hard-coded brass that would have stayed brass under a cyan bar. */
+  border-top: 1px solid var(--hull-rail-edge);
 }
 
 /* worn, 25..49 — a 10 kn cap the player has to plan around. The same amber

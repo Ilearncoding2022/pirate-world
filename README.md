@@ -353,7 +353,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   fit thirty-six harbours, or that opens on land, is thrown away and another
   is drawn before you ever see it.
 - **The hull wears out.** A second reserve beside the power one, on the same
-  panel and in brass. It falls a quarter of a percent a minute, twice that in
+  panel and on the same severity colours: cyan while it is sound, ageing
+  through amber to red. It falls a quarter of a percent a minute, twice that in
   a storm, a squall or a fog bank — the panel says `x2` when it is happening.
   A fight costs 5% won or drawn and **15% lost**, and a maelstrom costs the
   same 15%. Below **50%** the ship will not make more than 10 knots whatever
