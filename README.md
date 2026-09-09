@@ -76,16 +76,22 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 - **Lakes and inland seas.** Water is flood-filled from the spawn point at
   startup; anything the ship can never reach is shaded as still fresh water —
   green, glassy, a quarter of the sea's motion, and no surf.
-- **Day and night.** The sun orbits every twenty minutes on a slowly drifting
-  tilt — ten minutes of daylight and ten of dark for a ship at anchor on the
-  equator — sweeping a terminator across the globe. Under way it is not twenty
-  minutes: the sun is placed in world space and every surface works out day or
-  night from where it actually is, so sailing east into the sunrise shortens
-  your day and sailing west holds the sunset, the same way crossing time zones
-  does. Light warms toward the horizon.
-  **The game opens at six in the morning**, with the sun low and dead ahead of
-  the bow, because at the noon it used to start on the sun was overhead and
-  behind you — the one hour at which none of the sky can be seen.
+- **Day and night.** The sun orbits every twenty minutes, sweeping a terminator
+  across the globe. Day and dark are not halves of it. The world is a 200-unit
+  ball, so the horizon you can actually SEE sits about 25 degrees below eye
+  level, and the sun is over the water for the whole climb from there to
+  overhead and back: **thirteen minutes of light to seven of dark** for a ship
+  at anchor on the equator. Under way it is neither, because the sun is placed
+  in world space and every surface works out day or night from where it
+  actually is, so sailing east into the sunrise shortens your day and sailing
+  west holds the sunset, the same way crossing time zones does. Light warms
+  toward the horizon. Every day is now the same length and the sun always rises
+  due east — the seasonal tilt that made no two days alike is set to zero, since
+  a year ran inside six game days and a latitude could gain four hours of
+  daylight overnight.
+  **The game opens on the frame the sun's disc touches the water**, dead ahead
+  of the bow, because at the noon it used to start on the sun was overhead and
+  behind you — the one moment at which none of the sky can be seen.
 - **A sun and a moon you can actually see.** Both are up there now, and the
   sun's disc is the same size the sea has always reflected it at, so the road
   of glints on the water leads to the thing casting it. The moon keeps its own
@@ -379,10 +385,14 @@ by hand either: `assets/pirateship_beginner.glb` is built by
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the
   world is built from. Under it, a dial shows where the ship stands in its own
-  solar day: noon at the top, the lit arc the hours the sun is above the
-  horizon. It is not a clock the ship carries. Run east and the marker visibly
-  drives round it; run west and it stalls. N, E, S and W ride the scope's rim
-  and turn with the bow, so reading `E` off the right-hand rim tells you east
+  solar day: noon at the top, the lit arc the stretch the sun is above the
+  horizon. It is not a clock the ship carries, and it no longer pretends to be
+  one: it reads `DAY 42%` — how far through the current phase you are — rather
+  than an hour. An hour would have had to lie, because the visible day is
+  longer than the dark, so a dial that called the sunrise six would have run
+  its daylight hours at nearly twice the length of its night ones. Run east and
+  the marker visibly drives round it; run west and it stalls. N, E, S and W
+  ride the scope's rim and turn with the bow, so reading `E` off the right-hand rim tells you east
   is to starboard; north keeps a blue arrow and a letter twice the size of its
   neighbours. Latitude, longitude and heading sit above the glass in three
   matching blocks; the
