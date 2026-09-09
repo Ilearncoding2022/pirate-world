@@ -218,6 +218,30 @@ const FOG_CLEAR_CORE = HULL_LENGTH * 2;
 const FOG_CLEAR_EDGE = NEAR_DISTANCE;
 
 /**
+ * How far out from the ship the displaced fog banks up, world units.
+ *
+ * The clearing on its own SUBTRACTS: fog inside the bowl simply stops being
+ * drawn, which is cheap and correct and reads, if you look for it, as fog that
+ * was deleted rather than fog that was moved. Real air does not work that way.
+ * A hull pushing through a bank shoves the fog aside and it piles against the
+ * outside of the hole, which is the difference between a bubble that the boat
+ * is making and a bubble the boat merely happens to be inside.
+ *
+ * So a bow wave: a band of raised density from `FOG_CLEAR_CORE` out to here,
+ * peaking near the clearing's own edge, where the alpha ramp has already let
+ * the fog most of the way back up. Half again the clearing's reach, so the
+ * wall it makes is well outside the bowl and never closes over the boat.
+ *
+ * It is not a conservation law and does not pretend to be -- the field is
+ * procedural, there is no quantity of fog to conserve -- it is the visual
+ * consequence of one, at the cost of one clamp and a multiply.
+ */
+const FOG_PILE_REACH = FOG_CLEAR_EDGE * 1.5;
+
+/** The band the bow wave is spread over. Derived, so only the reach is tuned. */
+const FOG_PILE_SPAN = FOG_PILE_REACH - FOG_CLEAR_CORE;
+
+/**
  * The chase camera's own line of sight to the hull, world units, and the
  * geometry the two constants above are justified against. Exported for the
  * test that walks it; nothing in the shader reads it.
@@ -339,6 +363,7 @@ const FRAGMENT_SHADER = [
   'uniform float uGraze;',
   'uniform float uRelief;',
   'uniform float uSilver;',
+  'uniform float uPile;',
   'uniform float uSeaRadius;',
   '// The bank AT THE SHIP, for the half of the weather that has no place --',
   '// the same scalar `fogglsl.ts` reads as `uFogHere`, and combined with the',
@@ -420,11 +445,27 @@ const FRAGMENT_SHADER = [
   '  // half of the stack stays thick and the taper is spent in the upper half,',
   '  // where the top of a real bank frays.',
   '  float alt = pow(uAltitude, 1.35);',
+  '  // The bow wave: the fog the bowl takes out of the middle banks up against',
+  '  // the outside of it, so the clearing reads as the hull shouldering the',
+  '  // bank aside rather than as fog quietly deleted. See FOG_PILE_REACH.',
+  '  //',
+  '  // Applied to the THRESHOLD rather than added to `density` further down,',
+  '  // and that is not a style choice: `best` below is an upper bound on the',
+  '  // density used for the two-octave early-out, so a term added after it',
+  '  // would discard pixels that should have become fog and punch holes in the',
+  '  // wall. Lowering the threshold before the bound is computed is the same',
+  '  // effect with the bound still sound -- the trick `bank * 0.42` above',
+  '  // already uses.',
+  '  //',
+  '  // Scaled by `bank` so a thin bank does not grow a hard ring: the wave is a',
+  '  // consequence of there being fog to push, and there is none at bank 0.',
+  '  float pileT = clamp((vAxisDist - FOG_CLEAR_CORE_C) / FOG_PILE_SPAN_C, 0.0, 1.0);',
+  '  float pileUp = uPile * bank * (pileT * (1.0 - pileT) * 4.0);',
   '  // A strong bank does not merely go greyer, it goes DEEPER: the threshold',
   '  // drops with strength, so a bank at full does not just thicken where it',
   '  // already was, it fills in the gaps and closes over the ship. The subtract',
   '  // is what makes `?weather=fog` a whiteout instead of a thicker mist.',
-  '  float thr = uThreshold + uTopTaper * alt - bank * 0.42;',
+  '  float thr = uThreshold + uTopTaper * alt - bank * 0.42 - pileUp;',
   '  // Two cheap octaves and an early-out on their own upper bound, exactly as',
   '  // the cloud deck does it: `uWisp` is added to `best` in full and only ever',
   '  // subtracted from below, so this stays a sound bound however far the',
@@ -524,7 +565,8 @@ const FRAGMENT_SHADER = [
   .replace(/FOG_NEAR_MIN_C/g, FOG_NEAR_MIN.toFixed(1))
   .replace(/FOG_NEAR_FULL_C/g, FOG_NEAR_FULL.toFixed(1))
   .replace(/FOG_CLEAR_CORE_C/g, FOG_CLEAR_CORE.toFixed(3))
-  .replace(/FOG_CLEAR_EDGE_C/g, FOG_CLEAR_EDGE.toFixed(3));
+  .replace(/FOG_CLEAR_EDGE_C/g, FOG_CLEAR_EDGE.toFixed(3))
+  .replace(/FOG_PILE_SPAN_C/g, FOG_PILE_SPAN.toFixed(3));
 
 /* ------------------------------------------------------------------ */
 /* Build                                                               */
@@ -668,6 +710,16 @@ export function createFogBank(slices: number): FogBank {
      * and which turned an early shot salmon from limb to terminator.
      */
     uSilver: { value: 0.15 },
+    /**
+     * How far the bow wave lowers the coverage threshold at its crest.
+     *
+     * Sized against `uSoft` (0.16), which is the width of the coverage ramp:
+     * at 0.10 the wall is most of a ramp-width thicker than the bank around
+     * it, which reads as fog heaped up without becoming a second, denser
+     * weather system sitting in a ring around the boat. Push it past `uSoft`
+     * and the ring stops being a consequence and starts being the subject.
+     */
+    uPile: { value: 0.10 },
     /** The radius the camera's altitude is measured against. */
     uSeaRadius: { value: GLOBE_RADIUS },
     /** cos of the cap half-angle, for the vertex shader's rim term. */
@@ -744,6 +796,7 @@ export function createFogBank(slices: number): FogBank {
 }
 
 export {
+  FOG_PILE_REACH,
   FOG_CLEAR_CORE,
   FOG_CLEAR_EDGE,
   FOG_NEAR_FULL,

@@ -864,6 +864,21 @@ Four things about it are easy to undo by accident:
   It is a COLUMN about the ship's vertical axis, costs no uniform and cannot
   drift out of sync with the ship: in the cap's object space that axis IS +Y,
   so the vertex shader reads the distance straight off `length(dir.xz)`.
+- **The bowl pushes a bow wave ahead of it.** The clearing on its own
+  SUBTRACTS — fog inside it simply stops being drawn, which reads, if you look
+  for it, as fog deleted rather than fog moved. `FOG_PILE_REACH` (half again
+  the clearing's own edge) adds a band of raised density outside the bowl,
+  cresting near its rim, so the hole reads as the hull shouldering the bank
+  aside. It is not a conservation law and does not pretend to be: the field is
+  procedural and there is no quantity of fog to conserve, only the visual
+  consequence of one, at the cost of a clamp and a multiply. Two things about
+  it are load-bearing. It is applied to the coverage THRESHOLD, not added to
+  the density further down, because `best` is an upper bound used for the
+  two-octave early-out and a term added after it would discard pixels that
+  should have become fog and punch holes in the wall — a bug nothing in the
+  Node tier could see, since none of it compiles GLSL. And it is scaled by the
+  bank, so thin fog grows no ring: the wave is a consequence of there being
+  fog to push.
 - **Per-slice opacity is derived, not chosen**, exactly as the deck's is:
   `sliceOpacity(n)` solves `1 - (1 - a)^n = STACK_OPACITY`, so nine slices are
   as DENSE as fourteen and what a lower tier loses is smoothness in the

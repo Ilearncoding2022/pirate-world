@@ -12,6 +12,7 @@ import {
   FOG_CAP_ARC,
   FOG_NEAR_FULL,
   FOG_NEAR_MIN,
+  FOG_PILE_REACH,
   FOG_SLICE_MAX,
   FOG_WAKE_RANGE,
   HULL_LENGTH,
@@ -219,6 +220,58 @@ describe('the clear air the ship keeps around itself', () => {
     const noiseAt = frag.indexOf('float a0 = snoise');
     expect(clearAt).toBeGreaterThan(-1);
     expect(noiseAt).toBeGreaterThan(clearAt);
+  });
+});
+
+describe('the bow wave the bubble pushes ahead of it', () => {
+  /** The shader's crest shape, at a distance from the ship's axis. */
+  function crest(fromAxis: number): number {
+    const t = Math.min(
+      1,
+      Math.max(0, (fromAxis - FOG_CLEAR_CORE) / (FOG_PILE_REACH - FOG_CLEAR_CORE)),
+    );
+    return t * (1 - t) * 4;
+  }
+
+  it('never thickens the fog inside the clear bowl', () => {
+    // The whole risk of a pile-up term: a wall that closes back over the boat
+    // would undo the clearing it is supposed to explain.
+    expect(crest(0)).toBe(0);
+    expect(crest(FOG_CLEAR_CORE)).toBe(0);
+  });
+
+  it('crests outside the bowl and dies away beyond its reach', () => {
+    expect(crest(FOG_CLEAR_EDGE)).toBeGreaterThan(0.9);
+    expect(crest(FOG_PILE_REACH)).toBe(0);
+    expect(crest(FOG_PILE_REACH * 2)).toBe(0);
+    // Far enough out that the wall is never between the camera and the hull.
+    expect(FOG_PILE_REACH).toBeGreaterThan(FOG_CLEAR_EDGE);
+  });
+
+  it('lowers the threshold rather than raising the density, so the early-out stays sound', () => {
+    // `best` is an upper bound on the density, used to discard open water at
+    // two noise samples. A pile-up ADDED to the density after that bound is
+    // computed would discard pixels that should have become fog and punch
+    // holes in the wall -- a bug no unit test could see, since nothing in the
+    // Node tier compiles GLSL. Subtracting from the threshold first is the
+    // same effect with the bound intact, and this pins the ordering.
+    const slice = createFogBank(9).object.children[0] as Mesh;
+    const frag = (slice.material as ShaderMaterial).fragmentShader;
+    const pileAt = frag.indexOf('float pileUp =');
+    const thrAt = frag.indexOf('float thr =');
+    const bestAt = frag.indexOf('float best =');
+    expect(pileAt).toBeGreaterThan(-1);
+    expect(thrAt).toBeGreaterThan(pileAt);
+    expect(bestAt).toBeGreaterThan(thrAt);
+    expect(frag).toContain('- bank * 0.42 - pileUp;');
+    // And it must never be added to `density`, which is computed after `best`.
+    expect(frag).not.toMatch(/density \+= pileUp/);
+  });
+
+  it('vanishes with the bank, so thin fog grows no ring', () => {
+    const slice = createFogBank(9).object.children[0] as Mesh;
+    const frag = (slice.material as ShaderMaterial).fragmentShader;
+    expect(frag).toContain('uPile * bank *');
   });
 });
 
