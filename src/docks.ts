@@ -2,11 +2,24 @@ import * as THREE from 'three';
 import type { Dock, EnergyState, ShipState, Towns } from './types';
 import type { WorldEnv } from './env';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
-import { LAYER_REFLECTED } from './layers';
+import { LAYER_DEFAULT, LAYER_REFLECTED } from './layers';
 
 export interface Docks {
   object: THREE.Object3D;
-  update(dt: number, env: WorldEnv, ship: ShipState, energy: EnergyState): void;
+  /**
+   * `camera` is optional and is the name labels' only reader: they hold a
+   * screen size, so how legible one is depends on how far the LENS is from it
+   * and on nothing else. The same optional-fifth-argument shape `rain.ts`
+   * takes the camera through, for the same reason — a caller that does not
+   * pass one simply gets no labels rather than labels at the wrong opacity.
+   */
+  update(
+    dt: number,
+    env: WorldEnv,
+    ship: ShipState,
+    energy: EnergyState,
+    camera?: THREE.Camera,
+  ): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -75,6 +88,84 @@ const LAMP_RADIUS = 1.5;
  * not pulse in unison.
  */
 const BREATHE_RATE = 1.25;
+
+/* ------------------------------------------------------------------ */
+/* The name over the harbour                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How far a label is legible, in world units. Ship-scale, both of them.
+ *
+ * Full strength inside `LABEL_FADE_NEAR` and gone by `LABEL_FADE_FAR`, and the
+ * fade is what makes 36 of them bearable. The world is redrawn on every load,
+ * so the name is the only durable fact about a harbour and the player has to
+ * be able to read it off the world rather than only off the scope — but from
+ * the chase camera's far end, and certainly from orbit, 36 names scattered
+ * over a globe is a word cloud with a planet behind it.
+ *
+ * 60 is a little past the range at which the beacon's lamp resolves into a
+ * shape rather than a point, so the name arrives at the moment the harbour
+ * stops being a light and starts being a place. 140 is comfortably inside the
+ * chase camera's ≈211-unit far framing, so zooming out clears the sky rather
+ * than merely thinning it.
+ */
+export const LABEL_FADE_NEAR = 60;
+export const LABEL_FADE_FAR = 140;
+
+/**
+ * Where the label sits above the beacon's foot, in world units.
+ *
+ * Clear of the lamp, which tops out at `MAST_HEIGHT + LAMP_RADIUS * 1.55`. The
+ * gap above that is deliberately most of a lamp again: the lamp is the one
+ * thing here that clears the bloom threshold, and text sitting in its halo is
+ * text with a glow bleeding through it.
+ */
+const LABEL_LIFT = MAST_HEIGHT + LAMP_RADIUS * 2.8;
+
+/**
+ * The label's height as a fraction of the viewport's, and the padding around
+ * the glyphs as a fraction of the type size.
+ *
+ * `sizeAttenuation` is off, so a sprite's scale is very nearly the fraction of
+ * the screen's HEIGHT it covers: Three multiplies the scale by the view-space
+ * depth, which cancels the perspective divide, and the residual factor is
+ * `2 * tan(fov / 2)` — 1.04 at `camera.ts`'s 55° field. So 0.034 here is about
+ * 3.4% of the frame, or 31px on a 900px window, of which the type itself is
+ * most and the padding the rest.
+ *
+ * A screen size rather than a world size is the whole point. A world-sized
+ * label is a label that is unreadable at the range you actually want to read
+ * it at and a billboard at the range you do not.
+ */
+const LABEL_SCREEN_HEIGHT = 0.034;
+const LABEL_PAD = 0.34;
+
+/**
+ * The size the name is rasterised at, in canvas pixels, and the halo under it.
+ *
+ * Generous, because the texture is authored once and then only ever scaled
+ * DOWN: at the near fade a label is around 30 screen pixels tall on a 1080p
+ * window and around 60 on a 2x display, and rasterising at 44 costs four
+ * kilobytes of texture per harbour and removes the question entirely. The halo
+ * is the scope's, for the scope's reason — this text crosses a lit sea, a
+ * night sky and a green hillside, and a bare glyph over the third is not
+ * there.
+ */
+const LABEL_RASTER_PX = 44;
+const LABEL_HALO_PX = 4;
+
+/**
+ * The face, and the colours.
+ *
+ * The HUD's mono stack, named here rather than read from CSS for `radar.ts`'s
+ * reason: a 2D canvas has no cascade to read. Mint, the same hue the scope
+ * draws a berth's diamond in, so the name over the water and the name on the
+ * instrument are recognisably one label for one place.
+ */
+const LABEL_FONT_STACK =
+  'ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Liberation Mono", monospace';
+const LABEL_FILL = '#8affc4';
+const LABEL_HALO = 'rgba(2, 10, 18, 0.86)';
 
 /* ------------------------------------------------------------------ */
 /* Colour                                                              */
@@ -238,6 +329,63 @@ const BEACON_FRAGMENT = [
   '  gl_FragColor = vec4(pow(col, vec3(0.4545454545)), 1.0);',
   '}',
 ].join('\n');
+
+/**
+ * Rasterises one harbour name into a transparent canvas texture.
+ *
+ * Returns null where there is no canvas to draw on — a headless run, or a
+ * browser that has refused the 2D context — because a label is the most
+ * optional thing in this file and must never be the reason a world fails to
+ * build.
+ *
+ * The canvas is sized from the measured text rather than fixed, so a sprite's
+ * aspect matches its own name and `Rustwharf` is not stretched to the width of
+ * `Bilgewater Reach`.
+ */
+function makeLabelTexture(name: string): { texture: THREE.CanvasTexture; aspect: number } | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  const measure = canvas.getContext('2d');
+  if (measure === null) return null;
+
+  const font = `600 ${LABEL_RASTER_PX}px ${LABEL_FONT_STACK}`;
+  measure.font = font;
+  const pad = LABEL_RASTER_PX * LABEL_PAD;
+  const width = Math.ceil(measure.measureText(name).width + pad * 2);
+  const height = Math.ceil(LABEL_RASTER_PX + pad * 2);
+  canvas.width = Math.max(1, width);
+  canvas.height = Math.max(1, height);
+
+  // The context is re-fetched off the resized canvas: setting width or height
+  // resets every piece of 2D state, the font included.
+  const ctx = canvas.getContext('2d');
+  if (ctx === null) return null;
+  ctx.font = font;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = LABEL_HALO_PX;
+  ctx.strokeStyle = LABEL_HALO;
+  ctx.strokeText(name, canvas.width / 2, canvas.height / 2);
+  ctx.fillStyle = LABEL_FILL;
+  ctx.fillText(name, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  /*
+   * sRGB going in, because this is COLOUR and not data — the opposite of
+   * `wakemap.ts` and `weathermap.ts`, and the distinction is exactly the one
+   * ARCHITECTURE draws. Three decodes it to linear on the fetch, and
+   * `postfx.ts`'s self-encode patch — which a `SpriteMaterial` does receive,
+   * being a stock material — puts it back on the way out. Leave it
+   * `NoColorSpace` and the round trip is missing its first half, and the mint
+   * comes out washed.
+   */
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
+  return { texture, aspect: canvas.width / canvas.height };
+}
 
 /* ------------------------------------------------------------------ */
 /* Build                                                               */
@@ -505,11 +653,86 @@ export function createDocks(towns: Towns): Docks {
   beacons.layers.enable(LAYER_REFLECTED);
   group.add(beacons);
 
+  /* ---- Name labels ------------------------------------------------ */
+
+  /*
+   * One sprite per harbour, floating over its beacon.
+   *
+   * Thirty-six draw calls, and that is the accepted price rather than an
+   * oversight: every one carries a different string, so they cannot share a
+   * texture without an atlas, and an atlas is the work that gets done if and
+   * when the Backquote overlay says these cost something. They are cheap in
+   * the way that matters — no geometry, no matrix hierarchy, and every one
+   * past `LABEL_FADE_FAR` marks itself invisible and costs nothing at all.
+   *
+   * `sizeAttenuation` is off, so the label holds a screen size instead of
+   * shrinking with distance. That is what makes the pair of fade constants the
+   * whole of the range logic: a label is either legible or absent, never a
+   * two-pixel smear that the eye reads as dirt on the lens.
+   */
+  const labels: { sprite: THREE.Sprite; material: THREE.SpriteMaterial }[] = [];
+
+  for (const dock of docks) {
+    const name = dock.town.name;
+    if (name === '') continue;
+    const drawn = makeLabelTexture(name);
+    if (drawn === null) continue;
+
+    const material = new THREE.SpriteMaterial({
+      map: drawn.texture,
+      transparent: true,
+      // Not written into the depth buffer, exactly as the ring is not: a
+      // label is an annotation on the world and must not carve the sea, the
+      // spray or another harbour's label out of itself.
+      depthWrite: false,
+      // TESTED though, so a hill between the camera and a harbour hides its
+      // name. A label read through solid rock would place the harbour on the
+      // wrong side of the island.
+      depthTest: true,
+      opacity: 0,
+    });
+
+    const sprite = new THREE.Sprite(material);
+    sprite.name = `dock-label-${name}`;
+    sprite.position
+      .copy(dock.dir)
+      .multiplyScalar(GLOBE_RADIUS + RING_LIFT)
+      .addScaledVector(dock.dir, LABEL_LIFT);
+    sprite.scale.set(LABEL_SCREEN_HEIGHT * drawn.aspect, LABEL_SCREEN_HEIGHT, 1);
+    /*
+     * The one line that keeps the harbour's name out of the water.
+     *
+     * `layers.set` rather than a comment about the default: the beacons above
+     * OPT IN to `LAYER_REFLECTED`, so the exclusion here is a decision and
+     * should be written as one. A name reflected in the sea would be a mirror
+     * image of text — unreadable, and read at a glance as a rendering fault —
+     * and the reflection cube is 128-256 pixels a face, where a label is a
+     * smear whatever way round it is.
+     */
+    sprite.layers.set(LAYER_DEFAULT);
+    // Above the wake and with the beacons, under the cloud deck.
+    sprite.renderOrder = 2;
+    // Hidden until a camera says otherwise, so a frame drawn before the first
+    // `update` never flashes 36 names at full strength.
+    sprite.visible = false;
+    group.add(sprite);
+    labels.push({ sprite, material });
+  }
+
+  /** Scratch for the camera's world position; never allocated per frame. */
+  const eye = new THREE.Vector3();
+
   const materials = [ringMaterial, beaconMaterial];
 
   return {
     object: group,
-    update(_dt: number, env: WorldEnv, ship: ShipState, energy: EnergyState): void {
+    update(
+      _dt: number,
+      env: WorldEnv,
+      ship: ShipState,
+      energy: EnergyState,
+      camera?: THREE.Camera,
+    ): void {
       // "Inside a zone" is the world's answer, not the power plant's: `energy`
       // may be refusing to charge (below CHARGE_SPEED_LIMIT is its rule, not
       // ours) and the ring still has to light up to say the ship is in the
@@ -524,6 +747,36 @@ export function createDocks(towns: Towns): Docks {
         u.uActive.value = active;
         u.uCharging.value = charging;
         u.uSunDirection.value.copy(env.sunDirection);
+      }
+
+      /*
+       * The labels' distance fade.
+       *
+       * Measured from the CAMERA and not from the ship, which is the whole
+       * point of taking the camera at all: the chase view sits between 23 and
+       * 211 units behind the hull, so a fade keyed to the ship would hold a
+       * label at full strength while the lens was a hundred units further off
+       * than the number it was tested at.
+       *
+       * `visible` is set as well as `opacity`, so a label out of range costs
+       * nothing rather than costing a transparent draw. A camera that is not
+       * passed leaves every label exactly as the last frame left it, which for
+       * a caller that never passes one is hidden.
+       */
+      if (camera !== undefined && labels.length > 0) {
+        camera.getWorldPosition(eye);
+        for (const label of labels) {
+          const distance = eye.distanceTo(label.sprite.position);
+          if (distance >= LABEL_FADE_FAR) {
+            label.sprite.visible = false;
+            continue;
+          }
+          label.sprite.visible = true;
+          label.material.opacity =
+            distance <= LABEL_FADE_NEAR
+              ? 1
+              : 1 - (distance - LABEL_FADE_NEAR) / (LABEL_FADE_FAR - LABEL_FADE_NEAR);
+        }
       }
     },
   };

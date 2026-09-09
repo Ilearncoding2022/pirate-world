@@ -12,6 +12,8 @@ import type {
 } from './types';
 import type { Chart } from './chart';
 import type { WaterBodies } from './waterbodies';
+import type { Hull } from './hull';
+import { createStubHull } from './hull';
 import { OCEAN_CAP } from './wind';
 
 /**
@@ -485,6 +487,106 @@ const DOCK_FILL = 'rgba(72, 255, 168, 0.92)';
 const DOCK_RING = 'rgba(226, 255, 240, 0.7)';
 const TOWN_FILL = 'rgba(186, 198, 208, 0.5)';
 
+/**
+ * Harbour names beside their diamonds, in the berth's own mint.
+ *
+ * The same colour as the icon and deliberately not a quieter one: the name and
+ * the diamond are one mark in two parts, exactly as north's arrow and its
+ * letter are, and a label in a second colour would read as a separate thing
+ * that happens to be nearby. The world is redrawn on every load, so a name is
+ * the ONLY durable fact about a harbour — the diamond alone says "somewhere to
+ * moor", and the pair says "this is the place you were looking for".
+ *
+ * Two sizes, and the discriminator is the scope's own width rather than the
+ * viewport's. The panel comes in at 720px of viewport (`style.css`), which
+ * takes the scope from 118..158 CSS px down to 104, and 9px of name over a
+ * 104px plot buries the coastline it is meant to be labelling. Written in CSS
+ * pixels and multiplied by the live device-pixel ratio at the call site, which
+ * is what makes "7px" mean the same physical size on a 1x and a 2x display —
+ * the one place this file departs from the cardinal ring's device-pixel floor,
+ * and it does so because a size chosen against a MEDIA QUERY has to be in the
+ * units the media query is in.
+ */
+const NAME_FILL = DOCK_FILL;
+const NAME_HALO = 'rgba(2, 10, 18, 0.85)';
+const NAME_SMALL_SCOPE_PX = 112;
+const NAME_SMALL_CSS_PX = 7;
+const NAME_CSS_PX = 9;
+
+/**
+ * How far the name sits from the centre of its diamond, in scope radii.
+ *
+ * Offset OUTWARD — away from the scope's centre — rather than to a fixed side.
+ * A label always to the right would sit on top of the coast a harbour on the
+ * right-hand rim is standing on, which is the one piece of terrain the player
+ * is reading when they look at that harbour at all. Outward, it falls on the
+ * water or the bezel the ship has already sailed past, and it also stops the
+ * whole ring of labels leaning the same way.
+ *
+ * The gap clears the hairline ring around the diamond (`DOCK_ICON * 1.55`)
+ * with a little air; the text is anchored on the far side of it, so the two
+ * never touch at any scope size.
+ */
+const NAME_GAP = DOCK_ICON * 1.55 + 0.03;
+
+/* ------------------------------------------------------------------ */
+/* The hull annunciator                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The two colours a hull warning is drawn in.
+ *
+ * Lifted from the telemetry panel's own hull block (`hull--worn`'s amber and
+ * `hull--critical`'s red) rather than from the two raider colours a few
+ * constants above, and the distinction matters more than it looks: on this
+ * instrument `--red` and `--orange` already mean "a boat, and which kind", and
+ * a third mark in either would be read as a raider that had somehow got onto
+ * the bezel. These two are the HUD's warning pair instead, so the glyph is the
+ * same colour as the block it is warning about.
+ *
+ * Keep them in step with the HULL section at the end of `style.css`, on the
+ * same terms as the raider pair above: a 2D canvas has no cascade to read.
+ */
+const HULL_WARN_FILL = 'rgb(255, 180, 69)';
+const HULL_CRIT_FILL = 'rgb(255, 84, 112)';
+
+/**
+ * Where the glyph sits, and how big it is, in scope radii.
+ *
+ * A BEZEL ornament, like the wind arrow and the compass ring, and it is the
+ * only one of the three pinned to the canvas rather than to a bearing. That is
+ * on purpose: the wind arrow swings with the weather and the cardinals swing
+ * with the helm, so a warning placed "beside" either would be a warning that
+ * spends part of every turn hidden behind the mark it was placed beside. The
+ * lower-left quadrant is the one stretch of rim no rotating mark ever rests
+ * on for long, and a fixed station is what lets a player find an alarm without
+ * first finding out where it went.
+ *
+ * Below the 50% threshold and nothing above it: a sound hull has nothing to
+ * say, and an annunciator that is lit in the ordinary case is furniture.
+ */
+const HULL_MARK_X = -0.72;
+const HULL_MARK_Y = 0.72;
+const HULL_MARK_SIZE = 0.085;
+
+/** Percent below which the glyph shows at all, and below which it turns red. */
+const HULL_MARK_WARN_BELOW = 50;
+const HULL_MARK_CRIT_BELOW = 25;
+/** Percent at which it flashes: the floor, and nothing else. */
+const HULL_MARK_FLASH_AT = 1;
+
+/**
+ * The flash, in seconds per cycle and in how far down it dips.
+ *
+ * 900ms and 0.3, which is `pwr-alarm` in `style.css` to the millisecond. The
+ * panel's power block and this scope are two instruments a player watches at
+ * once, and two alarms beating against each other at slightly different rates
+ * is the sort of thing that reads as a rendering fault rather than as an
+ * alarm.
+ */
+const HULL_FLASH_PERIOD = 0.9;
+const HULL_FLASH_FLOOR = 0.3;
+
 function mix(a: number[], b: number[], t: number, out: number[]): void {
   const k = t < 0 ? 0 : t > 1 ? 1 : t;
   out[0] = a[0] + (b[0] - a[0]) * k;
@@ -553,6 +655,22 @@ export function createRadar(
   waterBodies: WaterBodies,
   seaLevel: number,
   towns: Towns,
+  /**
+   * Names of harbours the ship has moored at, in this world or an earlier one.
+   *
+   * A live `ReadonlySet` handed over once, not a snapshot: `knownharbours.ts`
+   * mutates the set the moment a berth is made, and the scope has to show the
+   * name on the same frame rather than on the next reload. An empty default is
+   * a ship that has never moored anywhere, which is exactly what a new save
+   * is.
+   */
+  known: ReadonlySet<string> = new Set(),
+  /**
+   * The durability sim, for the bezel's warning glyph and nothing else. The
+   * stub is a sound hull, so a caller that knows nothing about durability gets
+   * the instrument the game shipped with.
+   */
+  hull: Hull = createStubHull(),
 ): Radar {
   const noop: Radar = { update: (): void => undefined };
 
@@ -713,6 +831,15 @@ export function createRadar(
   let sweep = 0;
   /** Turns the maelstrom's arcs. Wrapped so it cannot drift out of float precision on a long run. */
   let spin = 0;
+  /**
+   * The hull annunciator's flash phase, seconds into its own cycle.
+   *
+   * Its own accumulator rather than a share of `sweep`'s: the sweep is four
+   * seconds a lap and this is nine-tenths of one, and hanging an alarm off a
+   * clock tuned for something else is how the two end up retuned together by
+   * accident. Wrapped for `spin`'s reason.
+   */
+  let alarm = 0;
   let cssSize = 0;
 
   /**
@@ -835,6 +962,7 @@ export function createRadar(
 
     sweep = (sweep + (dt * Math.PI * 2) / SWEEP_PERIOD) % (Math.PI * 2);
     spin = (spin + dt * MAELSTROM_SPIN) % (Math.PI * 2);
+    alarm = (alarm + dt) % HULL_FLASH_PERIOD;
 
     const size = resizeToCss();
     if (size <= 0) return;
@@ -923,6 +1051,22 @@ export function createRadar(
       ctx.clip();
       ctx.lineWidth = 1 / R;
 
+      /*
+       * Names are collected here and drawn in one pass below, in device
+       * pixels, after every icon is down.
+       *
+       * Two reasons, and the second is the one that matters. A glyph has a
+       * size of its own and cannot be authored in a unit system where 1 is the
+       * whole scope -- the same escape the cardinal letters and the wind glyph
+       * make, by the same route -- so the text pass runs under a different
+       * transform and cannot be interleaved with the diamonds. And drawing
+       * every label after every icon is what stops one harbour's name being
+       * painted over by the next harbour's diamond on a crowded coastline,
+       * which at CLUSTER_MIN_ARC's 15 units is a coastline the world routinely
+       * produces.
+       */
+      const labels: { x: number; y: number; name: string; alpha: number }[] = [];
+
       const list = towns.all;
       // The same cull the raster's mask uses, in the cosine the town loop
       // already compares against, so the icons and the plot under them agree
@@ -938,12 +1082,23 @@ export function createRadar(
         if (c < COS_RADAR_RANGE) continue;
         /*
          * Beyond what the scope can presently see, a harbour is drawn only if
-         * it has been charted -- and then out to the full range, exactly as
+         * it is remembered -- and then out to the full range, exactly as
          * before. A remembered harbour is most of the point of keeping a
          * chart at all: fog should make a coast hard to READ, not make the
          * berth you were running for cease to exist.
+         *
+         * Remembered means either of two things, and the second is the whole
+         * of decision 9. The CHART is where this world has been: it is wiped
+         * with the world, because it records ground. `known` is where the SHIP
+         * has been, by name, and it survives every world the player ever
+         * loads -- so a harbour moored at three seas ago is on the scope from
+         * the first frame of a sea it has never been seen in, at whatever
+         * position this world put it. The chart cannot express that, because
+         * the chart is a picture of a coastline that no longer exists.
          */
-        if (c < cosVisibility && (theChart === null || !theChart.discovered(d))) continue;
+        const remembered =
+          known.has(town.name) || (theChart !== null && theChart.discovered(d));
+        if (c < cosVisibility && !remembered) continue;
 
         // Rounding can push a unit-vector dot fractionally over 1, and acos of
         // that is NaN -- which would silently drop the icon, not crash.
@@ -963,7 +1118,17 @@ export function createRadar(
         // flip the north mark below makes.
         const y = -k * f;
 
-        ctx.globalAlpha = r > ICON_FADE ? Math.max(0, (1 - r) / (1 - ICON_FADE)) : 1;
+        const iconAlpha = r > ICON_FADE ? Math.max(0, (1 - r) / (1 - ICON_FADE)) : 1;
+        ctx.globalAlpha = iconAlpha;
+
+        // Every harbour that is drawn is named. The two are one mark, so the
+        // label rides the icon's own fade into the bezel rather than a fade of
+        // its own. Queued outside the branch below rather than inside it, so
+        // that this line survives the day `town.dock` stops being nullable and
+        // that branch goes away.
+        if (town.dock !== null && town.name !== '') {
+          labels.push({ x, y, name: town.name, alpha: iconAlpha });
+        }
 
         if (town.dock) {
           // Filled diamond in a hairline ring: the only actionable thing on the
@@ -991,6 +1156,49 @@ export function createRadar(
           ctx.fill();
         }
       }
+
+      /*
+       * The names, in device pixels and still inside the bezel clip.
+       *
+       * Each one is anchored on the side of its diamond AWAY from the scope's
+       * centre, so it leans out over water the ship has already passed rather
+       * than over the coast the harbour is standing on -- which is the one
+       * piece of terrain a player is reading when they look at a harbour at
+       * all. `textAlign` follows the same sign, so the text grows outward
+       * instead of straddling the anchor.
+       *
+       * A dark halo under every glyph, for the cardinal ring's reason: this is
+       * mint over a lit coastline, and a bare glyph on a beach is unreadable
+       * at exactly the moment it is wanted.
+       */
+      if (labels.length > 0) {
+        const dpr = cssSize > 0 ? (R * 2) / cssSize : 1;
+        const namePx =
+          (cssSize > 0 && cssSize < NAME_SMALL_SCOPE_PX ? NAME_SMALL_CSS_PX : NAME_CSS_PX) * dpr;
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.translate(R, R);
+        ctx.font = `600 ${namePx}px ${CARDINAL_FONT}`;
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2, namePx * 0.18);
+        ctx.strokeStyle = NAME_HALO;
+        ctx.fillStyle = NAME_FILL;
+        for (const label of labels) {
+          // Dead centre has no "away from the centre"; a harbour under the
+          // keel takes the starboard side, which is where the eye already is
+          // on a bow-up plot.
+          const outward = label.x >= 0 ? 1 : -1;
+          ctx.textAlign = outward > 0 ? 'left' : 'right';
+          const tx = (label.x + outward * NAME_GAP) * R;
+          const ty = label.y * R;
+          ctx.globalAlpha = label.alpha;
+          ctx.strokeText(label.name, tx, ty);
+          ctx.fillText(label.name, tx, ty);
+        }
+        ctx.restore();
+      }
+
       ctx.restore();
     }
 
@@ -1409,6 +1617,65 @@ export function createRadar(
       ctx.fillText(CARDINALS[i], x, y);
     }
     ctx.restore();
+
+    // ---- The hull annunciator, on the bezel -------------------------------
+    /*
+     * A warning triangle, and it is the only mark on this instrument that is
+     * about the SHIP rather than about the sea.
+     *
+     * Three states and no more, because an annunciator that reports a
+     * continuous quantity is a gauge, and the panel already has the gauge. It
+     * is outlined while the hull is merely worn -- a cap the player has to
+     * plan around -- and filled once it is failing, because a filled shape is
+     * found by peripheral vision and an outline is not. At the 1% floor it
+     * flashes, on the same 900ms the power block's own alarm keeps.
+     *
+     * Nothing at all at 50% and above. Almost every hour of play happens up
+     * there, and a scope with a permanent light on it is a scope whose lights
+     * stop meaning anything.
+     */
+    const hullPercent = hull.state.percent;
+    if (hullPercent < HULL_MARK_WARN_BELOW) {
+      const critical = hullPercent < HULL_MARK_CRIT_BELOW;
+      const colour = critical ? HULL_CRIT_FILL : HULL_WARN_FILL;
+      const size = HULL_MARK_SIZE;
+
+      ctx.save();
+      if (hullPercent <= HULL_MARK_FLASH_AT) {
+        const wave = 0.5 + 0.5 * Math.cos((alarm / HULL_FLASH_PERIOD) * Math.PI * 2);
+        ctx.globalAlpha = HULL_FLASH_FLOOR + (1 - HULL_FLASH_FLOOR) * wave;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(HULL_MARK_X, HULL_MARK_Y - size);
+      ctx.lineTo(HULL_MARK_X + size * 0.92, HULL_MARK_Y + size * 0.7);
+      ctx.lineTo(HULL_MARK_X - size * 0.92, HULL_MARK_Y + size * 0.7);
+      ctx.closePath();
+      ctx.lineJoin = 'round';
+      if (critical) {
+        ctx.fillStyle = colour;
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = colour;
+        ctx.lineWidth = 2.2 / R;
+        ctx.stroke();
+      }
+
+      // The bar and the dot inside it. On the filled triangle they are cut out
+      // in the scope's own ground rather than drawn in a third colour, so the
+      // mark stays two colours at every size -- at 20 device pixels a third
+      // one is a smudge, not a detail.
+      ctx.strokeStyle = critical ? '#020a12' : colour;
+      ctx.lineWidth = 2 / R;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(HULL_MARK_X, HULL_MARK_Y - size * 0.42);
+      ctx.lineTo(HULL_MARK_X, HULL_MARK_Y + size * 0.14);
+      ctx.moveTo(HULL_MARK_X, HULL_MARK_Y + size * 0.42);
+      ctx.lineTo(HULL_MARK_X, HULL_MARK_Y + size * 0.43);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // ---- Own ship, always dead centre and always pointing up --------------
     // The same shape every raider is drawn with, issued with no transform in

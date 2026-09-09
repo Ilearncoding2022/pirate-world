@@ -1,8 +1,18 @@
-import type { EnergyMode, EnergyState, ShipState, WeatherState, WindState } from './types';
+import type {
+  EnergyMode,
+  EnergyState,
+  HullMode,
+  ShipState,
+  Towns,
+  WeatherState,
+  WindState,
+} from './types';
 import type { Wallet } from './wallet';
 import type { GpuFrameStats } from './postfx';
 import type { SeaAnchorStore } from './seaanchor';
 import type { OverdriveStore } from './overdrive';
+import type { Hull } from './hull';
+import { createStubHull } from './hull';
 import { BATTERY_CAPACITY } from './battery';
 
 /**
@@ -412,6 +422,152 @@ function formatRate(rate: number): string {
 }
 
 /**
+ * The berth's own name in place of the word BERTH, upper-cased.
+ *
+ * Two of the eleven power tags name a place rather than a state, and until
+ * harbours had names the place was simply "BERTH" — which was fine when the
+ * only fact worth reporting was that the ship had arrived somewhere. It is not
+ * fine now: a player running for Rustwharf on a remembered fix wants the panel
+ * to confirm that Rustwharf is what they found.
+ *
+ * The tail of the phrase is taken from `PWR_TAG` rather than written again
+ * here, so CHARGING and CONNECTING stay one string each. Splitting on the
+ * separator is what makes that possible without a second table keyed to the
+ * same two modes — a table that could only ever drift out of step with the one
+ * above it.
+ *
+ * A null name is not an error: `towns.dockAt` is a geometric test and
+ * `energy.mode` is the plant's, and there is exactly one frame at the edge of
+ * a zone where the two can disagree. The word BERTH is the right thing to
+ * print in it.
+ *
+ * Exported for `tests/unit/hull-hud.test.ts`.
+ */
+export function powerTagText(tag: PwrTag, berth: string | null): string {
+  const text = PWR_TAG[tag];
+  if (berth === null || (tag !== 'docked' && tag !== 'mooring')) return text;
+  const separator = text.indexOf(' - ');
+  if (separator < 0) return text;
+  return `${berth.toUpperCase()}${text.slice(separator)}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hull                                                                */
+/* ------------------------------------------------------------------ */
+
+/** Notches in the hull bar. Ten, like the tank's: index.html ships exactly this many. */
+const HULL_SEGMENTS = 10;
+
+/**
+ * The two thresholds the four hull bands are cut at, and the floor.
+ *
+ * These are the panel's copy of numbers `hull.ts` owns for the sim
+ * (`HULL_WORN_BELOW`, `HULL_FAILING_BELOW`, `HULL_MIN`), and the duplication
+ * is deliberate rather than lazy: the sim derives a speed cap and a fishing
+ * gate from them, this file derives a colour and a phrase, and importing the
+ * sim's constants into the HUD would tie the panel's build to the sim's while
+ * saving two lines. They must move together — a panel that says WORN while the
+ * ship is still making its full speed is worse than no panel — and the test
+ * pins both sides at every boundary for exactly that reason.
+ */
+const HULL_WORN_BELOW = 50;
+const HULL_FAILING_BELOW = 25;
+const HULL_FLOOR = 1;
+
+/**
+ * How alarming the hull is, which is a different question from what it is
+ * doing.
+ *
+ * The same split the power block makes, and made here for the same reason: the
+ * modifier on the wrapper is a SEVERITY and the tag beside the bar is a CAUSE.
+ * Seven tags share four colours, so a hull that learns a new thing to say —
+ * a new mode, a new suffix — costs a phrase and not a stylesheet.
+ *
+ * It reads `percent` and nothing else, because severity here genuinely is a
+ * fact about the number: a hull at 20% is failing whether it is wearing,
+ * weathering or being worked on at a berth. What the berth changes is the
+ * tag.
+ *
+ * Exported for `tests/unit/hull-hud.test.ts`.
+ */
+export type HullSeverity = 'sound' | 'worn' | 'failing' | 'critical';
+
+export function hullSeverity(percent: number): HullSeverity {
+  if (percent <= HULL_FLOOR) return 'critical';
+  if (percent < HULL_FAILING_BELOW) return 'failing';
+  if (percent < HULL_WORN_BELOW) return 'worn';
+  return 'sound';
+}
+
+/**
+ * What the tag reads, from the mode and the percent together.
+ *
+ * Neither alone is enough, which is the whole reason this is a function rather
+ * than a `Record` like `PWR_TAG`. The mode says what is happening to the hull
+ * and the percent says what that has cost so far, and the panel is being asked
+ * both at once: "WORN - CAP 10 KN" answers "why is the ship slow" in four
+ * words, and neither half of it can be read off one field.
+ *
+ * Three rules, in the order they are tested:
+ *
+ * 1. **A berth wins outright.** Alongside, the hull is going up at eight
+ *    times the rate it ever comes down, and naming the band it is passing
+ *    through would be reporting a fact that is already stale.
+ * 2. **A full hull says so and stops.** There is no cap to warn about and
+ *    nothing being spent.
+ * 3. **Otherwise the band names the cost and the weather adds the suffix.**
+ *    ` x2` is on the two capped bands and on SOUND's own phrasing because
+ *    doubled wear is the one thing a player can act on — heave to, or run for
+ *    a berth — and it has to be visible before the cap arrives rather than
+ *    after. CRITICAL takes no suffix: at 1% the wear rate has stopped being
+ *    the news.
+ *
+ * Exported for `tests/unit/hull-hud.test.ts`.
+ */
+export function hullTag(mode: HullMode, percent: number): string {
+  if (mode === 'repairing') return 'BERTH - REPAIRING';
+  if (percent >= 100) return 'HULL FULL';
+  const doubled = mode === 'weathering' ? ' x2' : '';
+  if (percent <= HULL_FLOOR) return 'CRITICAL - CAP 1 KN';
+  if (percent < HULL_FAILING_BELOW) return `FAILING - CAP 5 KN${doubled}`;
+  if (percent < HULL_WORN_BELOW) return `WORN - CAP 10 KN${doubled}`;
+  return mode === 'weathering' ? 'SOUND - WEATHERING x2' : 'SOUND - WEARING';
+}
+
+/**
+ * "-0.25 %/min", "+2.00 %/s", "0.00 %/min" — the hull's signed rate.
+ *
+ * The one readout on this panel that does NOT share the power rate's unit, and
+ * the reason is arithmetic rather than taste. `HullState.rate` is percent per
+ * second like the plant's, but the two rates are three orders of magnitude
+ * apart: wear is 0.25 %/MINUTE, which in the power block's `%/s` at two
+ * decimals prints as `-0.00` — a figure that is simultaneously wrong, alarming
+ * and unreadable. Minutes for wear puts a real number on the panel; seconds
+ * for a repair keeps a berth's 2.00 from reading as an absurd 120.
+ *
+ * So the unit is printed beside the figure on every line, every time, rather
+ * than assumed from the row. A player who never notices it switch is a player
+ * for whom both numbers happened to make sense.
+ *
+ * Zero prints unsigned. `formatRate` above signs its zero `+` because a plant
+ * holding station is still doing something; a hull at rest — moored at 100%,
+ * or frozen behind an overlay — is doing nothing at all, and a `+0.00` there
+ * would read as a slow repair.
+ *
+ * Exported for `tests/unit/hull-hud.test.ts`.
+ */
+export function formatHullRate(rate: number): string {
+  if (rate > 0) {
+    const gain = rate.toFixed(2);
+    if (gain !== '0.00') return `+${gain} %/s`;
+  } else if (rate < 0) {
+    const loss = Math.abs(rate * 60).toFixed(2);
+    if (loss !== '0.00') return `-${loss} %/min`;
+  }
+  return '0.00 %/min';
+}
+
+/**
  * Publishes the telemetry panel's height as `--telemetry-h` on the HUD root.
  *
  * The dock hangs under that panel, and nothing in CSS can see where its bottom
@@ -500,6 +656,23 @@ export function createHud(
   wallet: Wallet,
   seaAnchor: SeaAnchorStore,
   overdrive: OverdriveStore,
+  /**
+   * The durability sim. Defaulted to the stub so a caller built before
+   * `hull.ts` has a body — or a test — gets the ship the game shipped with:
+   * 100%, no cap, nothing to say.
+   */
+  hull: Hull = createStubHull(),
+  /**
+   * The world's harbours, for the berth name in the power tag, and for
+   * nothing else.
+   *
+   * Optional because it is a LABEL: a HUD with no town list still reports the
+   * plant correctly, it just says BERTH where it could have said Rustwharf.
+   * `dockAt` is only asked while the plant says the ship is at one, so this
+   * costs 36 dot products on the frames a berth is actually in play and
+   * nothing on the other thousand.
+   */
+  towns?: Towns,
 ): {
   update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void;
   /** Shows or hides the GPU/CPU/draw-call line. Off by default; main.ts calls this from its Backquote listener. */
@@ -548,6 +721,17 @@ export function createHud(
   const writeRsvValue = textWriter(document.getElementById('hud-rsv-value'));
   const writeRsvSegments = segmentWriter(rsvBar, '.rsv__seg');
   const writeRsvAria = attrWriter(rsvBar, 'aria-valuenow');
+
+  // The hull, built exactly as the power block above it is: one modifier on
+  // the wrapper carries the severity and the CSS fans it out to the number,
+  // the bar and the tag, so the three can never end up in different states.
+  const hullBar = document.getElementById('hud-hull-bar');
+  const writeHullState = modifierWriter(document.getElementById('hud-hull'), 'hull');
+  const writeHullValue = textWriter(document.getElementById('hud-hull-value'));
+  const writeHullSegments = segmentWriter(hullBar, '.hull__seg');
+  const writeHullAria = attrWriter(hullBar, 'aria-valuenow');
+  const writeHullMode = textWriter(document.getElementById('hud-hull-mode'));
+  const writeHullRate = textWriter(document.getElementById('hud-hull-rate'));
 
   // The purse pushes; it is not pulled. See the note on createHud above.
   const writeGold = textWriter(document.getElementById('hud-gold'));
@@ -627,7 +811,16 @@ export function createHud(
       writePwrValue(`${percent}%`);
       writePwrAria(percent);
       writePwrSegments(litSegments(clamped, PWR_SEGMENTS));
-      writePwrMode(PWR_TAG[powerTag(energy)]);
+      // The berth's name, and only while there is a berth to name. `mode` is
+      // asked first because it is a field read and `dockAt` is a walk down the
+      // town list: at sea the tag is the same string it always was and this
+      // costs one comparison.
+      const tag = powerTag(energy);
+      const berth =
+        towns !== undefined && (tag === 'docked' || tag === 'mooring')
+          ? (towns.dockAt(ship.position)?.town.name ?? null)
+          : null;
+      writePwrMode(powerTagText(tag, berth));
       writePwrRate(formatRate(energy.rate));
 
       // The backup cell. Hidden outright at zero rather than shown empty: a
@@ -647,6 +840,29 @@ export function createHud(
         writeRsvAria(cellPercent);
         writeRsvSegments(litSegments(cellFrac, RSV_SEGMENTS));
       }
+
+      /*
+       * The hull.
+       *
+       * Never hidden, unlike the cell above it: a ship always has one, and the
+       * whole point of the block is that a player watches it come down. The
+       * bar is `percent` out of 100 and the aria value is the same figure, off
+       * the same field, because `hull.ts` publishes a whole number and there
+       * is nothing left here to round.
+       *
+       * `litSegments` ceils, so the last notch stays lit all the way to the
+       * 1% floor. That is the right lie on this bar and not the tank's: a dark
+       * power bar means the ship cannot move, and a dark hull bar would mean a
+       * sinking the game does not have.
+       */
+      const hullState = hull.state;
+      const hullPercent = hullState.percent;
+      writeHullState(hullSeverity(hullPercent));
+      writeHullValue(`${hullPercent}%`);
+      writeHullAria(String(hullPercent));
+      writeHullSegments(litSegments(hullPercent / 100, HULL_SEGMENTS));
+      writeHullMode(hullTag(hullState.mode, hullPercent));
+      writeHullRate(formatHullRate(hullState.rate));
 
       // A berth and nothing else. `energy.mode` is the one definition of
       // docked in the project -- see `wind.ts`, which shelters against the
