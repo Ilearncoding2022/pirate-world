@@ -26,6 +26,22 @@ import { join } from 'node:path';
 const LABEL = process.env.SMOKE_LABEL ?? 'main';
 const OUT_DIR = join('tests', 'out', LABEL);
 
+/**
+ * Every case loads the SAME world.
+ *
+ * `docs/HARBOURS_PLAN.md`, decision 7: the world is drawn from a random seed
+ * on every page load. That is right for a player and useless for this suite,
+ * which leaves screenshots for the owner to compare against an earlier run --
+ * two runs on two planets are not a comparison. `?seed=` makes exactly one
+ * attempt and THROWS if that seed stops passing its checks, so the pin cannot
+ * quietly degrade into "some world".
+ *
+ * 1337 is DEFAULT_SEED: the seed `world-golden.json` pins and the one
+ * `worldgen.ts` falls back to. If anything ever moves it, the unit tier says
+ * so long before this suite does.
+ */
+const SEED = 'seed=1337';
+
 /** Generous ceilings. They are never reached on a healthy run; they only stop a hang. */
 const HULL_TIMEOUT_MS = 60_000;
 const FRAME_TIMEOUT_MS = 30_000;
@@ -161,7 +177,7 @@ test.describe('game smoke', () => {
   test('boots, sails, turns, zooms, and never logs a shader error', async ({ page }) => {
     const problems = collectConsoleProblems(page);
 
-    await boot(page, '/');
+    await boot(page, `/?${SEED}`);
 
     const idle = await waitForLiveFrame(page);
     expect(idle.meanLuminance, 'idle: centre-60% mean luminance').toBeGreaterThan(6);
@@ -202,7 +218,7 @@ test.describe('game smoke', () => {
     // The low tier is a genuinely different shader: the reflection plugin is
     // never registered, so the water compiles without it. That is the only
     // reason this second load exists.
-    await boot(page, '/?quality=low');
+    await boot(page, `/?quality=low&${SEED}`);
 
     const hasQualityHook = await page.evaluate(() => {
       const w = window as unknown as { __pirateWorld?: { quality?: unknown } };
@@ -235,7 +251,7 @@ test.describe('game smoke', () => {
      * never the attribute, because the attribute was never the thing that was
      * wrong. Playwright's `toBeHidden` is the same question.
      */
-    await boot(page, '/');
+    await boot(page, `/?${SEED}`);
 
     // The panel is shut at boot, so unhide only the OVERLAY. The dev row must
     // stay invisible on its own account, which is exactly what failed before.
@@ -265,7 +281,7 @@ test.describe('game smoke', () => {
   });
 
   test('the dev gold row is visible and mints gold with ?dev', async ({ page }) => {
-    await boot(page, '/?dev');
+    await boot(page, `/?dev&${SEED}`);
 
     await page.evaluate(() => {
       const shop = document.getElementById('shop');
@@ -296,6 +312,40 @@ test.describe('game smoke', () => {
     expect(hudGold, 'HUD gold after one dev click').toBe('10\u2009000');
   });
 
+  test('a world the checks reject still reaches READY on the fallback seed', async ({ page }) => {
+    const problems = collectConsoleProblems(page);
+
+    /*
+     * The rejection loop, end to end, and the only place it can be run at all.
+     *
+     * `worldgen.ts` draws a seed, measures the world it makes, and redraws if
+     * it is bad -- up to WORLD_ATTEMPTS times, then falls back to
+     * DEFAULT_SEED, which passes by construction. The trouble is that no seed
+     * is KNOWN to fail: over 270 measured, every one passed, which is what the
+     * calibration was for and also means the entire recovery path is code
+     * nothing ever executes. `?reject=<n>` forces the first n attempts to be
+     * rejected whatever they measure, exactly so this test can exist. 12 is
+     * WORLD_ATTEMPTS, so every draw is refused and the fallback is what boots.
+     *
+     * What is being proved is that a rejected draw costs time and nothing
+     * else: the page still reaches READY, still renders, and still logs no
+     * shader error. Thirteen worlds' worth of data is built to get there --
+     * height map, islet cull, flood fill and town search, thirteen times -- and
+     * not one land mesh, which is `docs/HARBOURS_PLAN.md`'s Trap 1 and the
+     * whole reason the loop is affordable. The timeout is raised for those
+     * thirteen seconds and for nothing else.
+     */
+    test.setTimeout(180_000);
+    await boot(page, '/?reject=12');
+
+    const stats = await waitForLiveFrame(page);
+    expect(stats.meanLuminance, 'fallback world: centre-60% mean luminance').toBeGreaterThan(6);
+    expect(stats.colours, 'fallback world: distinct colours').toBeGreaterThan(64);
+    await screenshot(page, 'reject-fallback');
+
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+
   test('battle=1 boots into the arena clean', async ({ page }) => {
     const problems = collectConsoleProblems(page);
 
@@ -307,7 +357,7 @@ test.describe('game smoke', () => {
      * orange boat on the hull three seconds in, so the contact, the fade and
      * the arena all happen inside one boot.
      */
-    await boot(page, '/?battle=1');
+    await boot(page, `/?battle=1&${SEED}`);
 
     const world = await waitForLiveFrame(page);
     expect(world.meanLuminance, 'battle=1: world before the contact').toBeGreaterThan(6);
