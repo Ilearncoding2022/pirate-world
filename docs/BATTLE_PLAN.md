@@ -243,7 +243,10 @@ export function createAiBoats(deps: AiBoatsDeps): {
 fixed order (`red`, `orange`): if no live boat of that kind exists, `grace`
 is zero, the ship is not suppressed, and `rng() < P[kind]`, spawn one.
 Always draw the number, even when the spawn is skipped, so the seeded stream
-stays in step. `P_RED = 0.08`, `P_ORANGE = 0.12`: over a ten-minute sail
+stays in step. `P_RED = 0.08`, `P_ORANGE = 0.12` as first written — both have
+moved a long way since, and in opposite directions; see the tuning table at the
+foot of this file and **An orange boat is weather** in `ARCHITECTURE.md`. On
+the original figures, over a ten-minute sail
 that is about five red and seven orange, before suppression.
 
 > **Retuned after shipping (2026-09-07, owner's call): both doubled, to 0.16
@@ -662,7 +665,7 @@ house style of `energy.ts`.
 | Constant | Value | File |
 |---|---|---|
 | `ROLL_PERIOD` | 10 s | aiboats |
-| `P_RED` / `P_ORANGE` | 0.08 / 0.12 — **now 0.16 / 0.24, see The roll** | aiboats |
+| `P_RED` / `P_ORANGE` | 0.08 / 0.12 — **now 0.032 / 0.72, see The roll** | aiboats |
 | `RED_SPAWN_MIN` / `RED_SPAWN_MAX` | 40 / 60 units | aiboats |
 | `ORANGE_SPAWN_MIN` / `ORANGE_SPAWN_MAX` | 30 / 50 units | aiboats |
 | `RED_SPEED` / `ORANGE_SPEED` | 20 / 15 units/s | aiboats |

@@ -26,10 +26,10 @@ the first frame you are handed does not stutter.
 | `D` / `→` / on-screen ▶ | Turn to starboard |
 | Mouse wheel | Zoom the follow camera |
 | `Space` (inside a berth's ring) | Make fast, or cast off again. While made fast the helm is locked |
-| on-screen `[FISH]` | Open the fishing screen — start a session, or read the record |
-| on-screen `[SHOP]` | Open the chandlery — only alongside a berth |
-| on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds |
-| on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time |
+| on-screen `[FISH]` | Open the fishing screen — start a session, or read the record. On the helm pad, beside THRUST |
+| on-screen `[SHOP]` | Open the chandlery — only once you are moored. Under the telemetry panel, because it is a berth's key rather than the ship's |
+| on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds. On the helm pad, under REVERSE |
+| on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time. On the helm pad, over THRUST |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. Up to three a second, and the locker never runs out |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
@@ -319,7 +319,7 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   helm but lose the engines, drifting until the sun comes up.
   **The panel says which of those is happening.** It names the cause in as many
   words — `UNDER WAY - BURN`, `IDLE - SOLAR CHARGING`, `IDLE - MOONGLASS`,
-  `IDLE - NO SUN`, `BERTH - CONNECTING`, `BERTH - CHARGING`, `ON BACKUP CELL`,
+  `IDLE - NO SUN`, `BERTH - MAKE FAST`, `BERTH - CHARGING`, `ON BACKUP CELL`,
   `OVERDRIVE - 4x BURN`, `TANK FULL` — and colours itself by how much trouble
   you are in, which is a different question. The one that matters most is the
   pair at the bottom: a dead ship reads `NO POWER - ADRIFT` in flashing red,
@@ -358,9 +358,17 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   because it charted a coastline that no longer exists. A world that cannot
   fit thirty-six harbours, or that opens on land, is thrown away and another
   is drawn before you ever see it.
+- **The bars tell you they are moving.** The tank, the bought cell and the
+  hull each blink their topmost lit notch once every three seconds while they
+  are draining — and the hull blinks it **twice a second** when weather is
+  eating it at double rate, so you can see a squall start costing you without
+  reading a word. Charging runs a light up the lit notches instead, one every
+  half second. Whole bars flashing still means an emergency and nothing else.
 - **The hull wears out.** A second reserve beside the power one, on the same
   panel and on the same severity colours: cyan while it is sound, ageing
-  through amber to red. It falls a quarter of a percent a minute, twice that in
+  through amber to red. Every bar on that panel now says the same thing with
+  colour — cyan is fine, amber is a warning, red is an emergency — so a low
+  tank no longer looks like a worn hull. It falls a quarter of a percent a minute, twice that in
   a storm, a squall or a fog bank — the panel says `x2` when it is happening.
   A fight costs 5% won or drawn and **15% lost**, and a maelstrom costs the
   same 15%. Below **50%** the ship will not make more than 10 knots whatever
@@ -439,12 +447,16 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the marker visibly drives round it; run west and it stalls. N, E, S and W
   ride the scope's rim and turn with the bow, so reading `E` off the right-hand rim tells you east
   is to starboard; north keeps a blue arrow and a letter twice the size of its
-  neighbours. Latitude, longitude and heading sit above the glass in three
-  matching blocks; the
+  neighbours. Heading, latitude and longitude stand in a column beside the
+  glass, heading first and largest — it is the one number you steer by. The
+  day/night dial sits under the plot and shares its left edge, with the wind and
+  the sky beside it: that ring is what the sky is doing to the light, and those
+  two are what it is doing to the water. The
   wind rides the rim as a warm arrow, signed on its tail with the same gust
   glyph the speed readout uses, so the two marks are legibly one subject.
   Speeds are whole knots — the tenth only ever flickered, and every readout on
-  the panel is spelled out: SPEED, WIND, POWER. The rose that used to sit in
+  the panel is spelled out: SPEED, POWER, HULL. The telemetry panel keeps the
+  ship's own instruments and the scope keeps the world's. The rose that used to sit in
   the middle of the helm pad is gone — at hub size its graduations fell below a
   pixel — and the scope's rim carries the direction instead. The purse rides
   the telemetry panel in brass, the one warm figure on a cold instrument.

@@ -284,7 +284,7 @@ shader.
 | `towns.ts` | `createTowns(heightMap, waterBodies, seaLevel, seed?)`, `BERTH_MAX_ARC`, `POLE_OFFSET_RAD` | settlement placement; a town without a berth is never founded, so every `Town.dock` is non-null; built once. Exactly `HARBOUR_COUNT` (36) of them or the world is REJECTED — the count is no longer a target. The two polar harbours are placed first and outside the random stream, so the other 34 draw the same numbers whether or not a pole was founded. The berth sits at the town's own shoreline, within `BERTH_MAX_ARC`, and the `berthXyz` overlap test is the sole authority for zones not touching — the arc between centres no longer implies it. See **Harbours** |
 | `citylights.ts` | `createCityLights(terrain, heightMap, towns, seed?)` | night-side settlements, lit from the shared list. The lone-outpost scatter is GONE: every cluster of lights on the globe is one of the 36 harbours, which is what makes a light on the night side something you can always tie up at. Per-town lamp counts went up by half to fill the space the 440 outposts left |
 | `docks.ts` | `createDocks(towns)`, `LABEL_FADE_NEAR/FAR` | charging zones on the water + daylight beacons + one name sprite per harbour. `update(dt, env, ship, energy, camera?)` — the camera is what the labels fade against, and WITHOUT it none is ever drawn, because they ship `visible = false`. The sprites set `sizeAttenuation: false` so `LABEL_SCREEN_HEIGHT` is a fraction of the viewport; leave it at its `true` default and all 36 render correctly at a sixth of a millimetre, which is exactly what happened once |
-| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | `update`'s optional sixth argument is the weather: a full storm leaves 5% of the panels and a full fog bank half, moonlight cut by the same factor, and a berth untouched — which is what makes a berth worth running for. burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` and the eleven-rung `EnergyMode` ladder that names what the plant is doing (`overcast` is the weather's own rung); `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
+| `energy.ts` | `createEnergy(towns, battery)`, `DEFEAT_KEEP`, `STALEMATE_COST` | `update`'s optional sixth argument is the weather: a full storm leaves 5% of the panels and a full fog bank half, moonlight cut by the same factor, and a berth untouched — which is what makes a berth worth running for. burn / solar / dock charge, and the bought cell behind them; owns `EnergyState` and the eleven-rung `EnergyMode` ladder that names what the plant is doing (`overcast` is the weather's own rung); `toggleMooring()` is the one door into `docked` and refuses unless `berthReady` says the hull is inside a ring; `spend(level)` is the overlays' withdrawal, `wreck()` the shipwreck's — the main tank keeps `WRECK_KEEP` (25%), the reserve, `rate` and `mode` untouched. `defeat()` / `stalemate()` are the lost and drawn battle's, the only two that reach the backup cell without a purchase; see **AI boats and the battle** |
 | `wind.ts` | `createWind(terrain, heightMap, seed?)`, `COAST_CAP`, `OCEAN_CAP`, `OPEN_SEA_DISTANCE`, `LULL_SPEED`, `CELL_WIND_LIFT` | lull/event weather, floored at `LULL_SPEED` so it never stops and there is no calm state anywhere downstream; owns `WindState`; probes the shared height map for the coast. Also publishes the phase reading `weather.ts` rolls on — `phase`, `phaseTime`, `phaseDuration`, `phaseIndex`, `envelope` — all of which were already locals. `update`'s optional fourth argument is `CellsState.stormAtShip`, a FLOOR on the speed (never the bearing) so a storm always blows: the one coupling from the weather back into the wind, and the reason `weatherCells.update` runs first in the loop |
 | `weathercells.ts` | `createWeatherCells(terrain, heightMap, seed?)`, `cellProfile`, `CELL_CORE` | the drifting weather: a population of `CELL_TARGET` storm and fog cells in a bubble around the ship, each a centre and a travel tangent carried by parallel transport exactly as a hazard's is. Owns `CellsState`, mutated in place; DOM-free, scene-free and seeded, like `wind.ts` and `hazards.ts`. Publishes the winning cell itself as `stormCellAtShip`, not just its numbers, so `weather.ts` can hang a bolt on a centre this sample already agreed on rather than re-deriving one and breaking the tie the other way. Its own PRNG, never the wind's — see **Weather** |
 | `weather.ts` | `createWeather(seed?, pin?)`, `WeatherPin`, `VIS_MIN`, the share constants | the weather AT THE SHIP: squalls rolled off `WindState`'s phases, combined with the cells by `max` BEFORE smoothing. Owns `WeatherState`, including the three the flash carries — `flashLocal`, `flashSeed` and `flashOrigin`, all fixed at the INSTANT of the strike and cleared when it retires, so a cell that drifts or dies mid-flash cannot displace, reshape or unplace a bolt that is already lit. `?weather=` pins the envelopes and switches the squall roll off; cells keep running under a pin |
@@ -319,7 +319,7 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
 | `camera.ts` | `createFollowCamera(aspect)`, `NEAR_DISTANCE`, `NEAR_HEIGHT` | the two chase-framing constants are exported for `fogbank.ts`, which derives its clearing from the fact that this camera sits inside the fog layer — see **The fog bank**. follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | speed, wind, gold, power, the backup cell, and the dock's keys; heading and lat/long live on the radar panel. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
+| `hud.ts` | `createHud(wallet)` | speed, gold, power, the backup cell, the hull, and the mooring notice; wind, sky, heading and the fix live on the radar panel, and the ship's keys on the helm pad. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also owns the three level bars' `flow--*` state and their `is-crest` / `is-sweep` markers (see **What a bar is doing**), and publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
 | `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?, weather?, cells?, chart?)`. The scope's GEOMETRY never changes with the weather — `RADAR_RANGE`, the projection tables and the range rings are fixed — what changes is how much of it has anything in it: beyond `WeatherState.visibility` a pixel is `SCOPE_FOG` if uncharted and the coast dimmed toward it if charted. Cells draw as discs of `radius * strength`, culled on `visibility + radius` so a bank whose centre is off the scope still shows. It is also where the chart is STAMPED, because this is the one place that knows both the visibility and when it last looked; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `horizon.ts` | `limbSin(cameraRadius)`, `sunAppearsSin(cameraRadius)`, `SUN_APPEARS_SIN` | where the DRAWN horizon is, and the elevation the sun's disc clears it at; derived from `GLOBE_RADIUS`, the chase camera's opening framing and `SUN_DISC_RADIANS`, so nothing downstream writes the number down |
@@ -1165,6 +1165,12 @@ hull spends the hazard push and obeys the hazard drive this same frame — and
 the water plugin reads that state later, inside `globe.update`, so the sea on
 the GPU and the sea the hull just climbed are one frame's numbers.
 
+Energy-before-ship earns its place a third time now that a berth takes the
+helm. `ship.ts` reads `energy.mode === 'docked'` to decide whether the hull is
+made fast, so running the plant first means the freeze lands on the frame the
+lock is set rather than the one after it — a made-fast ship that answered the
+helm for one more frame would visibly creep off its berth.
+
 ## TypeScript constraints (tsconfig)
 - `verbatimModuleSyntax`: use `import type { X }` for type-only imports.
 - `erasableSyntaxOnly`: no `enum`, no constructor parameter properties, no namespaces.
@@ -1774,7 +1780,9 @@ Most of this HUD is authored below that: `.readout__key` at 9.5px,
 machine with the floor set they all render at 12px and the typographic
 hierarchy flattens.
 
-That is a user preference and is mostly left alone, with one exception.
+That is a user preference and is mostly left alone, with **two**
+exceptions — and the second one was found the hard way, which is the argument
+for reaching for this pattern sooner.
 `.dbtn__label` has to fit inside its key — `STARBOARD` is nine characters in a
 key as narrow as 42px — so it is sized from `--key-size` and drawn through a
 `transform: scale()`, which is applied after layout and is never clamped. Its
@@ -1782,12 +1790,34 @@ layout box is therefore ten times wider than its ink and reaches over the
 neighbouring keys, which is why it carries `pointer-events: none`. Do not
 "simplify" that back to a plain `font-size`.
 
-The dock's `[FISH]` / `[FISH BOOK]` keys are the counter-example, and they are
-authored at 10px on purpose. They are sized *by* their label rather than the
-label being fitted into them — the key is as wide as its word plus padding —
-so a browser floor raising them to 12px widens two buttons by a few pixels and
+**`.dpad__act__inner` is the second exception, and it was a bug before it
+was a rule.** `[COIL]`, `[FISH]` and `[ANCHOR]` moved onto the helm pad and
+were stretched to a helm key's column, which turned them from buttons sized *by*
+their label into labels fitted *into* a button — the same predicament
+`.dbtn__label` is in, and nobody noticed the pattern had to come with it. They
+were authored at 7.45px; a machine with the floor set served 12.6px and
+`ANCHOR x5` ran off both ends of its button. It was reported as "the text is
+too big", and shrinking it would have done nothing at all: 15% off 7.45 is 6.3,
+which clamps to 12 just the same.
+
+The tell, if this happens again, is a *ratio*. Measuring the report, the glyphs
+were 7.6 CSS px wide against the 4.5 they are drawn for — 1.69x, which is
+12.6/7.45 and not any size anybody chose. Meanwhile `STARBOARD` beside it
+measured exactly right, because it already had the dodge.
+
+It needs a **wrapper** where the helm label needed none: the word and its count
+are two boxes that must stay together, and scaling them separately leaves both
+the right size and the pair ten times too far apart. Everything inside is
+therefore in `em` — margins, and the text shadow's blur — and the group is
+scaled once. `.dock__key`'s absolute `10px` has to be overridden to `inherit`
+inside it, or the wrapper scales a 10px label down to 1px.
+
+The dock's own `[SHOP]` is the counter-example, and it is authored at 10px on
+purpose. It is sized *by* its label — the key is as wide as its word plus
+padding — so a floor raising it to 12px widens one button by a few pixels and
 collides with nothing. The rule is not "never author under 12px"; it is
-**never let a floor break a layout that assumed the smaller size**.
+**never let a floor break a layout that assumed the smaller size**, and a key
+pinned to a column is always such a layout.
 
 A second sizing rule, learned the same way. **Type on a fluid element belongs
 in container units, not pixels.** The scope runs from 118px to 158px, and the
@@ -1795,9 +1825,68 @@ position fix was first placed inside the glass in px: it fitted at 158 and the
 two coordinate blocks collided in the middle at 118 — a live window between the
 desktop layout and the 720px breakpoint, not a hypothetical. A disc also has no
 corners, so the blocks had to be pushed inward to clear the rim, which is what
-made them meet. They now sit above the scope in a grid with equal flexible
-flanks, so the heading is centred on the *panel* rather than merely placed
-between two neighbours of different widths.
+made them meet. A row above the scope was the second attempt and it lasted
+longer, but three blocks sharing one band is the same squeeze in a straight
+line: at the bottom of the clamp the two coordinates met again.
+
+They are in a **column beside the scope** now, HDG first with the big figure,
+then LAT and LON. Each row gets the side column's full width to itself, so
+nothing competes with anything and there is no breakpoint at which two of them
+meet. The lesson generalises past this instrument: when three readings will not
+fit across a fluid width, the fix is usually to stop asking them to share one.
+
+## What a bar is doing
+The telemetry panel carries three levels that move on their own — the tank, the
+bought cell and the hull. The figure says where each one is and the tag says
+why, but neither says it is *moving*, and a player watching for the moment a
+storm starts eating the hull should not have to read two rows of small type to
+catch it.
+
+One vocabulary covers all three, written by `hud.ts` as a `flow--*` modifier on
+the **bar element** (not the block: the hull's bar is not inside the power block
+and wants the same four states): `still`, `drain`, `drain-fast`, `charge`. Two
+markers ride the segments, one notch at a time:
+
+- **`is-crest`** — the highest lit notch, the one the level stands on and so the
+  one a drain is about to take. This is what blinks, once every three seconds
+  while draining. Not the whole bar: `pwr--dead` and `hull--critical` already
+  flash whole bars as alarms, and an ordinary burn must not look like one.
+- **`is-sweep`** — the notch a charging sweep is passing over, moving one notch
+  per 500ms. It wraps at the crest rather than running out over dark notches:
+  it is the bar filling, and sweeping notches the charge has not reached would
+  draw charge that is not there.
+
+The hull under weather gets **two** pulses a second instead of one. A doubled
+beat for the doubled wear rate, so the difference from an ordinary drain is a
+*count* rather than a colour and survives being seen sideways.
+
+Two decisions in the wiring are worth keeping. The power bar reads its flow off
+`rate` **except** in `reserve`, where the main tank is already on the floor and
+every watt is coming out of the cell: the total is falling there and that bar is
+not, so the news belongs to the backup bar and blinking both would say the ship
+is losing charge twice over. And the hull reads its flow off the **rate**, not
+the mode — `hull.ts` publishes 0 at the 1% floor rather than the wear it is no
+longer paying, and a bar blinking over a number that has stopped moving is the
+same lie the rate readout beside it was written to avoid.
+
+Nothing here is load-bearing: every rule is an animation on a marker class, so
+`prefers-reduced-motion` drops the motion and keeps the whole reading.
+
+### Colour names a severity, on every bar
+The hull bar was **brass** for a while, on the reasoning that it is the one
+thing on the panel that is a physical object rather than a flow. That died on
+arithmetic rather than taste: `pwr--warn` is `#ffb445` and `hull--worn` is the
+same `#ffb445`, so the moment the tank fell to mid, the tank went the colour
+brass was meant to be distinctive against — and with the cell taking the plant's
+accent too, that is three warm bars in one column with nothing to say which is
+the hull.
+
+Colour was carrying identity *and* severity and could not do both. It carries
+only severity now, the same ladder on every bar: cyan is fine, amber is a
+warning, orange is failing, red is an emergency. Identity is left to position
+and to the key beside each bar, which are the two things that never change.
+Only the `sound` swatch actually moved — the other three were already the power
+block's own amber, orange and red.
 
 ## The radar
 `radar.ts` paints `#hud-radar`, a 2D canvas, from the height map and the inland
@@ -1925,6 +2014,15 @@ both write `level` and the cell is not `level` — which is what makes it a
 consumable wearing a battery's clothes and the reason a player thinks before
 leaning on it.
 
+The HUD side of it changed on 2026-09-09 and the reason is arithmetic.
+`BATTERY_CAPACITY` is `BATTERY_CELL * BATTERY_CELLS_MAX` — a **whole** tank —
+and the bar had been left at the five half-width notches it was given when a
+cell really did hold half a tank, so a full cell drew as a half-full one. It is
+ten notches on the tank's own scale now, indented under the power bar and
+taking `--pwr-accent` off it, so 55% lights the same notch in both places and
+the cell reads as more of the same charge rather than a second, unrelated
+gauge.
+
 Three consequences worth holding on to:
 
 - **`rate` is over the total**, main tank plus cell. Once `level` is pinned at
@@ -1948,7 +2046,7 @@ ship under way.
 | | |
 |---|---|
 | `dead` / `restart` | no thrust, and whether the rate says it is coming back |
-| `docked` / `mooring` | connected, or inside the ring with the dwell running |
+| `docked` / `mooring` | made fast, or inside the ring and not yet made fast |
 | `reserve` | the main tank is on the floor and the cell is paying |
 | `overdrive` / `burn` | the coil's flat bill, or the ordinary speed-squared draw |
 | `solar` / `moon` / `hotel` | at rest: sun on the panels, moonglass, or neither |
@@ -1966,17 +2064,54 @@ climbing back through the first percent — the tag read EMPTY beside a positive
 rate, which is a plant that has failed rather than one restarting. And a
 Moonglass Array charging at midnight claimed `solar`.
 
-**A berth connects on a dwell, not on a speed.** It used to require the ring
-*and* under 3 kn of ground speed, which was a proxy and wrong at both ends:
-true of a hull drifting quietly across the ring on the wind, false of one that
-had genuinely arrived and not yet lost way. Two seconds inside the ring asks
-the question the ring is drawn to ask. It gives the same protection the speed
-limit did — the zone is 16 units across, so a straight run through it lasts
-1.6 s at the ship's 10 kn top speed — and it drops this file's last reader of
-`groundSpeed`. The clock tracks the *identity* of the berth, so crossing from
-one ring to another restarts it rather than inheriting the time. Anything under
-about 8 kn can now dwell, drifting included: being blown into harbour is an
-arrival, and `wind.ts` shelters what is docked, so the drift ends there.
+### A berth connects on a key press
+Arriving and docking used to be one event. The ring alone did it — first with
+a 3 kn ground-speed test, then with a two-second dwell — and that was fine
+while docking only *gave* things: shore power, a shop, a repair. It stopped
+being fine the moment docking began to **take** something. A made-fast ship
+cannot be steered, and nothing may take the helm away from a player who has not
+asked for it; drifting across a ring would have frozen the ship solid two
+seconds later.
+
+So the two halves are now separate, and `energy.ts` owns both because it
+already owned the ring test:
+
+- **`berthReady`** is the ring's verdict, and since the dwell was dropped it is
+  the ring and nothing else: the hull is inside one. It says the ship *may* be
+  made fast and nothing more.
+- **`mode === 'docked'`** is the helm's, and it is still the single definition
+  every other module means by "at a berth" — shore power, the shop gate, the
+  hull's repair, the wind's shelter, the hazard and raider suppression, and the
+  harbour's discovery all hang off it, unchanged.
+
+`toggleMooring()` is the only door between them and it refuses unless
+`berthReady`. Keeping the ring test and the lock that consumes it in one file
+is the point: a caller able to set the lock without passing the ring would be a
+second opinion about what it means to have arrived.
+
+**The dwell is gone and its job went with it, not away.** Both the speed limit
+and the two seconds existed to stop a ring being collected by crossing it at
+15 kn. That protection now lives in the key press — docking is a deliberate act,
+and nobody presses Space by accident at speed — so the clock was pure delay,
+and worst at exactly the moment it mattered least: a player stopped in the ring
+watching a timer they could not see.
+
+**The freeze is `ship.ts`'s, off the same field.** It tests
+`energy.mode === 'docked'` rather than taking a flag of its own, so a ship that
+is docked and a ship that is held fast cannot come apart. The whole
+implementation is skipping the helm block: that block is where the throttle,
+the wind's push and the hazard's push are all spent, so not running it is all
+three at once. A maelstrom's `drive` still outranks it — the sea taking the
+hull is the truth and a rope is not.
+
+**The lock releases itself if the ring is ever lost.** That is a safety rule
+rather than a behaviour: a made-fast hull cannot steer, so a lock outliving its
+berth would be a ship frozen in open water with no key that does anything.
+
+The HUD carries both states in one notice at the foot of the screen, and the
+made-fast one names the way out in the same breath as the state — being moored
+takes the helm away, and a message that had faded three seconds ago would leave
+a player pressing keys at a ship that will not answer.
 
 Three subtleties worth keeping:
 
@@ -2456,7 +2591,7 @@ the ruleset and `battlescene.ts` is what draws it. Both sims are DOM-free and
 scene-free, which is what makes them the modules the unit tests exercise.
 
 ### An orange boat is weather; a red one is an event
-`P_ORANGE` is 0.24 a roll and `P_RED` is 0.032 — an order of magnitude apart,
+`P_ORANGE` is 0.72 a roll and `P_RED` is 0.032 — more than an order of magnitude apart,
 on a `ROLL_PERIOD` of ten seconds. That gap is the whole shape of meeting a
 raider. An orange boat wanders a track drawn once and never revised: it is
 scenery that can be sailed around, and meeting one is the normal condition of
@@ -2466,7 +2601,12 @@ interruption that arrives every minute is a chore rather than an event.
 
 `P_RED` was cut by four fifths on 2026-09-08 (0.16 to 0.032, the owner's
 call), having been doubled from 0.08 the day before. That puts an aggressive
-raider at roughly one every five minutes of sailing. Both figures are
+raider at roughly one every five minutes of sailing. `P_ORANGE` went the other
+way on 2026-09-09, tripled from 0.24, for the mirror of the same reason: at
+0.24 the sea between harbours read as empty for minutes at a stretch, and
+orange is the colour the player is meant to keep meeting. At 0.72 a roll all
+but always lands, so the rate is governed almost entirely by how long a boat
+lives and by the one-per-colour cap — which is the intent. Both figures are
 ceilings the sea does not deliver in full — the odds are per roll and per
 COLOUR, and a colour already on the water is drawn for and skipped — but the
 correction bites almost entirely on orange, which is far more often already
