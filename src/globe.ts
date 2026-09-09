@@ -19,6 +19,7 @@ import { createTowns } from './towns';
 import { SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
 import { latLonToDir } from './geo';
 import { updateFog } from './fog';
+import { createFogBank } from './fogbank';
 import { createWeatherMap } from './weathermap';
 import { createWaterPatch } from './waterpatch';
 import type { Quality } from './quality';
@@ -113,6 +114,18 @@ export function createGlobe(
   const land = createLand(terrain, heightMap, quality);
   const cityLights = createCityLights(terrain, heightMap, towns);
   const clouds = createClouds();
+  /*
+   * The fog you sail into, as opposed to the haze `updateFog` writes into
+   * every surface shader below. Built here rather than in `main.ts` -- unlike
+   * `rain.ts`, which is a box around the hull and belongs to the scene -- for
+   * the same reason the cloud deck is: it reads `weathermap.ts`, whose one
+   * uniform is merged into its material at construction, and the map is owned
+   * a few lines down.
+   *
+   * `quality.fogSlices` is 0 on the low tier, where the module is ABSENT and
+   * fog is the aerial term alone. Same convention as `main.ts`'s rain.
+   */
+  const fogBank = quality.fogSlices > 0 ? createFogBank(quality.fogSlices) : null;
   // Owned here rather than in `main.ts` because everything that reads it --
   // the water, the land and the cloud deck -- is built here, and its one
   // uniform is merged into their materials at construction.
@@ -126,6 +139,7 @@ export function createGlobe(
   group.add(land.mesh);
   group.add(cityLights.object);
   group.add(clouds.object);
+  if (fogBank) group.add(fogBank.object);
   group.add(createGrid());
   group.add(sky.group);
   group.add(celestial.group);
@@ -164,6 +178,13 @@ export function createGlobe(
       land.update(dt, env);
       cityLights.update(dt, env);
       clouds.update(dt, env, weather);
+      // After the map is baked, like every other consumer of it, and after
+      // the deck for no reason beyond reading in the order the two are drawn.
+      // It takes `ship` because the bank is a cap that follows the hull, and
+      // `cells` because whether it is drawn at all is decided analytically
+      // from the live cells rather than read back off the map -- see
+      // `fogInRange`, and docs/WEATHER_PLAN.md, Trap 3.
+      fogBank?.update(dt, env, ship, weather, cells);
       sky.update(dt, env, weather);
       // After dayNight.update, like every other consumer: it only draws what
       // the sun and moon vectors already say.

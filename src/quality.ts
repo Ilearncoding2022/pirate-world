@@ -96,6 +96,31 @@ export interface QualitySettings {
    * apply to it.
    */
   rainDrops: number;
+  /**
+   * How many slices `fogbank.ts` builds its bank out of, and whether it is
+   * built at all.
+   *
+   * The layer is a stack of concentric caps at sea level and its cost is
+   * almost entirely fill rate: every slice is another pass of a four-octave
+   * fragment shader over whatever part of the frame the bank covers, and
+   * unlike the cloud deck it cannot be faded off near the camera, because the
+   * player is inside it. So this is the one row in the table that a machine
+   * feels immediately when the weather turns.
+   *
+   * 0 means the module is ABSENT rather than idle -- the same convention
+   * `rainDrops` and `reflectionSize` use. On the low tier fog is the aerial
+   * haze alone, which is what fog was everywhere before `fogbank.ts` existed
+   * and is still a legible fog bank; what it is missing is the volume.
+   *
+   * 14 is the full stack (`FOG_SLICE_MAX`, derived there from the layer's
+   * depth over the slice spacing) and nothing above it is worth building.
+   * `fogbank.ts` solves its per-slice alpha from the count, so 9 slices are
+   * as DENSE as 14 -- what the lower count loses is smoothness in the
+   * gradient, not the thickness of the fog.
+   *
+   * A pipeline number, like the rest of this table.
+   */
+  fogSlices: number;
 }
 
 /**
@@ -121,6 +146,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     landDetail: 64,
     landFacetBlend: 0.6,
     rainDrops: 0,
+    fogSlices: 0,
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -133,6 +159,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     landDetail: 80,
     landFacetBlend: 0.8,
     rainDrops: 12000,
+    fogSlices: 9,
   },
   high: {
     pixelRatioCap: 2,
@@ -145,6 +172,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     landDetail: 96,
     landFacetBlend: 0.85,
     rainDrops: 24000,
+    fogSlices: 14,
   },
 };
 
