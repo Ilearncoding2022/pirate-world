@@ -388,8 +388,15 @@ body {
      CHARGING") beside its rate on one line. 283px is that plus the 15% the
      owner asked for, and the tag has more room than it ever had -- the two
      rows that used to be the panel's widest content, WIND and SKY, are over
-     on the scope now. */
-  min-width: 283px;
+     on the scope now.
+
+     Declared as a variable because `#hud-pwr` has to cap itself against the
+     same figure, and the two came apart the moment this one moved: the panel
+     went to 283 and the block stayed at a ceiling worked out from 246, so the
+     bars and their rates sat in a column three quarters of the panel wide with
+     a band of dead glass beside them. */
+  --telemetry-floor: 283px;
+  min-width: var(--telemetry-floor);
 }
 
 .readout {
@@ -1071,8 +1078,41 @@ body {
  */
 .radar__body {
   display: flex;
-  align-items: flex-end;
+  /* `stretch`, so the side column runs the full height of the plot and the
+     dial. What sits where inside it is `.radar__side`'s business: the fix at
+     the top, level with the plot, and the weather at the bottom, level with
+     the dial. */
+  align-items: stretch;
   gap: 12px;
+}
+
+/*
+ * Everything that is not the plot: the fix at the top, the weather at the
+ * bottom, and the panel's own height between them.
+ *
+ * `space-between` rather than a gap, so the weather stays pinned to the dial's
+ * bottom edge however tall the plot happens to be at this viewport -- both are
+ * on the same clamp, and a fixed gap would have drifted off it.
+ */
+.radar__side {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1 1 auto;
+  min-width: 118px;
+}
+
+.radar__fixes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* The fix and the weather read as one column of instruments, so they share the
+   readout's row shape: key left, figure right, baselines lined up. */
+.radar__row {
+  padding: 0;
+  gap: 10px;
 }
 
 /*
@@ -1186,49 +1226,21 @@ body {
 }
 
 /* ---------------------------------------------------------------------
-   Radar head — LAT, heading, LON, in a row above the scope
+   The fix — HDG, LAT and LON, in the column beside the scope
 
-   These lived inside the disc for one revision and came back out. Two
-   reasons, both structural rather than cosmetic: the scope is a circle, so
-   its "corners" are outside it and the blocks had to be pushed toward the
-   middle to stay in; and the disc is fluid from 118px to 158px, at the low
-   end of which the two coordinates met in the centre. Out here they have the
-   panel's whole width, the plot has its glass back, and nothing has to be
-   re-checked at each breakpoint.
+   Third home and, on the evidence, the right one. They started inside the
+   disc, where the scope's being a circle meant its "corners" are outside it
+   and the blocks had to be shoved toward the middle to stay in. They moved to
+   a row above it, where three blocks shared one narrow band and the two
+   coordinates met in the centre at the bottom of the disc's 118px clamp. They
+   are in a COLUMN now, which is the shape that was never tried: each row gets
+   the side column's full width to itself, so nothing is competing with
+   anything and there is no breakpoint at which two of them meet.
+
+   HEADING leads and keeps the big figure. It is the one number here a player
+   steers by; LAT and LON are where that steering has got them so far, and
+   they are read far less often than they are glanced past.
    ------------------------------------------------------------------- */
-
-/*
- * Three columns with equal flexible flanks, so the heading is centred on the
- * PANEL and not merely placed between its neighbours -- LAT and LON are
- * different widths, and under space-between that difference would show up as
- * an off-centre heading directly under a centred title.
- *
- * All three cells are now built the same way -- key over value, centred -- so
- * `.radar__fix` and `.radar__hdg` differ only in the size of their figure.
- */
-.radar__head {
-  align-self: stretch;
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 10px;
-}
-
-.radar__fix {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.2;
-}
-
-.radar__head > .radar__fix:first-child {
-  justify-self: start;
-}
-
-.radar__head > .radar__fix:last-child {
-  justify-self: end;
-}
-
 .radar__fix-key {
   font-size: 8px;
   letter-spacing: 0.18em;
@@ -1245,14 +1257,6 @@ body {
   text-shadow: 0 0 10px rgba(255, 79, 216, 0.35);
   white-space: nowrap;
 }
-
-.radar__hdg {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  line-height: 1.2;
-}
-
 
 /* ---------------------------------------------------------------------
    Heading — the middle block of the radar head
@@ -1807,18 +1811,15 @@ kbd {
   .panel--telemetry {
     min-width: 0;
   }
-  /* Only the radar needs a cap; nothing else on the HUD is a fixed disc. */
-  .radar {
+  /* The COLUMN, not the two things in it. Both are `width: 100%` of this and
+     that is what keeps their left borders one border; capping them separately
+     -- which is what this rule used to do -- would have left them agreeing
+     here by coincidence and free to stop agreeing at the next retune. */
+  .radar__col {
     width: 104px;
   }
-  .timedial {
-    width: 104px;
-  }
-  /* The head row is what sets the panel's width now, so it is what has to
-     come in when the panel does. */
-  .radar__head {
-    gap: 6px;
-  }
+  /* The fix column beside the plot is what sets the panel's width now, so it
+     is what has to come in when the panel does. */
   .radar__fix-key {
     font-size: 7px;
     letter-spacing: 0.14em;
@@ -4677,13 +4678,18 @@ body.in-battle .dbtn--right {
    name, and the HUD would change shape as a side effect of arriving.
 
    The cap is the POWER block's, not the panel's, because the power block is
-   the widest thing in it: 216px is `.panel--telemetry`'s 246px floor less
-   its 14px padding either side and its 1px borders, so the panel keeps
-   exactly the width it has always had and the tag ellipsises inside it.
+   the widest thing in it: the panel's floor less its 14px padding either side
+   and its 1px borders, so the panel keeps exactly the width it is given and
+   the tag ellipsises inside it.
+
+   Off `--telemetry-floor` rather than typed out, because it was typed out once
+   -- as 216px, from a floor of 246 -- and then the floor moved and this did
+   not. The bars underneath it are what showed it: they fill this block, so a
+   stale ceiling here is a power bar that stops short of its own panel.
    ------------------------------------------------------------------- */
 
 #hud-pwr {
-  max-width: 216px;
+  max-width: calc(var(--telemetry-floor) - 30px);
 }
 
 #hud-pwr-mode {

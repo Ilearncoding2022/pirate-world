@@ -299,26 +299,6 @@
              the column exists -- the dial's left border lines up with the
              scope's because neither is centred against the panel any more,
              and the panel is now wider than both. -->
-        <div class="radar__head">
-          <div class="radar__fix">
-            <span class="radar__fix-key">LAT</span>
-            <span class="radar__fix-val" id="hud-lat">00.0&deg; N</span>
-          </div>
-          <!-- Label over value, the same stack LAT and LON use either side of
-               it. It read value-then-label for as long as it sat above a
-               compass rose that gave the number its context; with the rose
-               gone it is one of three coordinate blocks and should be built
-               like the other two. -->
-          <div class="radar__hdg">
-            <span class="radar__fix-key">HDG</span>
-            <span class="hdg__value" id="hud-heading">000&deg;</span>
-          </div>
-          <div class="radar__fix">
-            <span class="radar__fix-key">LON</span>
-            <span class="radar__fix-val" id="hud-lon">000.0&deg; E</span>
-          </div>
-        </div>
-
         <div class="radar__body">
         <div class="radar__col">
         <div class="radar">
@@ -345,6 +325,31 @@
              than against the plot.
 
              Both rows keep their ids, so hud.ts is untouched by the move. -->
+        <div class="radar__side">
+        <!-- The fix, moved down out of a row above the plot and into the
+             column beside it. HEADING leads and is the big figure: it is the
+             one number here a player steers by, and the other two are where
+             that steering has got them so far.
+
+             They read key-then-value across a row now, like every other
+             instrument on this HUD, rather than value-under-label. The stacked
+             form existed because three blocks had to share one narrow row over
+             the disc; in a column of their own there is no such squeeze. -->
+        <div class="radar__fixes">
+          <div class="readout radar__row">
+            <span class="radar__fix-key">HDG</span>
+            <span class="hdg__value" id="hud-heading">000&deg;</span>
+          </div>
+          <div class="readout radar__row">
+            <span class="radar__fix-key">LAT</span>
+            <span class="radar__fix-val" id="hud-lat">00.0&deg; N</span>
+          </div>
+          <div class="readout radar__row">
+            <span class="radar__fix-key">LON</span>
+            <span class="radar__fix-val" id="hud-lon">000.0&deg; E</span>
+          </div>
+        </div>
+
         <div class="radar__wx">
           <!-- True wind. The arrow is bow-relative, matching the bow-up scope
                rather than the north-up compass, so it points where the wind is
@@ -372,6 +377,7 @@
             <span class="readout__key">SKY</span>
             <span class="readout__val" id="hud-wx">CLEAR</span>
           </div>
+        </div>
         </div>
         </div>
       </section>
