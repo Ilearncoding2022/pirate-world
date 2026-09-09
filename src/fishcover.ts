@@ -2,6 +2,8 @@ import type { Energy } from './energy';
 import type { GovernorStore } from './governor';
 import type { ChumDrumStore } from './chumdrum';
 import type { BarbedHeadsStore } from './barbedheads';
+import type { Hull } from './hull';
+import { HULL_FAILING_BELOW } from './hull';
 
 /**
  * fishcover.ts — the fishing activity's cover screen.
@@ -34,6 +36,15 @@ import type { BarbedHeadsStore } from './barbedheads';
 
 export interface FishCoverDeps {
   readonly energy: Energy;
+  /**
+   * The hull. Read for `canFish` alone, and only to arm or dim START FISHING.
+   *
+   * Optional and defaulted to a sound hull, on the Step 0 convention every
+   * other hull consumer follows (docs/HARBOURS_PLAN.md): a caller that says
+   * nothing gets the screen exactly as it was before durability existed, so
+   * `main.ts` wires this at integration and nothing breaks before then.
+   */
+  readonly hull?: Hull;
   /** The Efficiency Governor. Read for the price on START FISHING's own label. */
   readonly governor: GovernorStore;
   /** The Chum Drum locker. This screen is the only place one is ever armed. */
@@ -166,8 +177,12 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
   const barbed = createToggle(barbedButton, barbedStockEl);
 
   let open = false;
-  /** Write-through cache on the gate, the same pattern `hud.ts` uses. */
-  let lastAffordable: boolean | null = null;
+  /**
+   * Why START FISHING is currently dim, or null when it is armed. The
+   * write-through cache on the gate, the same pattern `hud.ts` uses, kept on
+   * the REASON rather than on the boolean -- see `refresh`.
+   */
+  let lastReason: string | null | undefined = undefined;
   /** Write-through cache on the price label, since the Governor's tier can move. */
   let lastCostLabel: string | null = null;
 
@@ -193,11 +208,41 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
 
     const state = deps.energy.state;
     const affordable = state.level + state.reserve >= sessionCost;
-    if (affordable !== lastAffordable) {
-      lastAffordable = affordable;
-      start.disabled = !affordable;
-      if (affordable) start.removeAttribute('title');
-      else start.setAttribute('title', `Needs ${Math.round(sessionCost * 100)}% power`);
+    /*
+     * The hull gate, and it is a second gate rather than a term in the first.
+     *
+     * Below 25% the ship cannot fish at all (docs/HARBOURS_PLAN.md, decision
+     * 15): there is no price that buys past it, which is exactly what makes
+     * it different from the power gate above and why it cannot be folded into
+     * `affordable`.
+     *
+     * Read every frame with everything else in `refresh`, and that matters
+     * here more than it does for the power: this screen freezes the world, so
+     * the hull cannot move while it is up — but a player who opened it at a
+     * berth is being repaired, and watching START FISHING come alive as the
+     * hull crosses 25 is the clearest possible statement of the rule.
+     */
+    const canFish = deps.hull?.state.canFish ?? true;
+    // Named in precedence order, and the hull wins when both are true. Power
+    // comes back on its own — the sun, a berth, a bought cell — so "needs 50%
+    // power" is a wait; a hull under 25% is a repair, and telling a player to
+    // wait for something that will never happen is the worse of the two
+    // failures. `fishing.ts`'s FISH AGAIN reads the same three lines.
+    const reason = !canFish
+      ? `Hull under ${HULL_FAILING_BELOW}%`
+      : !affordable
+        ? `Needs ${Math.round(sessionCost * 100)}% power`
+        : null;
+    const armed = reason === null;
+    // Diffed on the REASON and not on `armed`, because the two gates can hand
+    // over to each other without the button ever coming alive in between: a
+    // ship that is dim for power and then falls under 25% would otherwise
+    // keep a tooltip naming a gate it has already cleared.
+    if (reason !== lastReason) {
+      lastReason = reason;
+      start.disabled = !armed;
+      if (reason === null) start.removeAttribute('title');
+      else start.setAttribute('title', reason);
     }
 
     chum.sync(deps.chumDrum.count);
@@ -227,7 +272,10 @@ export function createFishCover(deps: FishCoverDeps): FishCover {
      * the screen redecorating itself for no reason they can see.
      */
     overlay.classList.toggle(HARBOUR_CLASS, deps.energy.state.mode === 'docked');
-    lastAffordable = null;
+    // `undefined` rather than `null`, because `null` is now a real reading on
+    // this cache -- it is what "armed, no tooltip" looks like -- and only the
+    // third state can mean "never painted".
+    lastReason = undefined;
     lastCostLabel = null;
     // Both toggles reset to off on every open — see the file comment on why
     // an armed choice never survives to a later visit.

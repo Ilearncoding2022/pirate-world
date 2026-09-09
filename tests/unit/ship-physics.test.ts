@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
 import type { Material } from 'three';
 import { createShip, MAX_FORWARD, MODEL_SCALE } from '../../src/ship';
+import { createHull } from '../../src/hull';
 import type {
   HazardState,
   InputState,
@@ -254,6 +255,72 @@ describe('ship-physics', () => {
     }
     expect(ship.state.speed).toBeCloseTo(13, 1);
     expect(ship.state.speed).toBeGreaterThan(MAX_FORWARD);
+  });
+
+  it('a hull cap overrides Trim & Sheathing, and an uncapped hull does not', () => {
+    /*
+     * docs/HARBOURS_PLAN.md's decision 14, as arithmetic rather than as a
+     * promise: the caps ignore every upgrade. `propulsion.maxForward` is
+     * where BOTH Trim & Sheathing and an Overdrive Coil already live, so one
+     * `Math.min` against the hull overrides both and there is no way to buy
+     * the cap back.
+     *
+     * The hulls are real `createHull`s rather than hand-built states, so a
+     * change to which percent lands in which band is caught here too: 10%
+     * is a failing hull and 100% is a sound one, and if either stopped being
+     * true this case would stop testing what it says it does.
+     */
+    const dt = 1 / 60;
+    const thrust = input({ forward: true });
+    const canThrust = energy(true);
+    // Trim & Sheathing Mk III, in trim.ts's own terms.
+    const trimmed: PropulsionState = { maxForward: 13, anchored: false };
+
+    const failing = createHull(10);
+    expect(failing.state.speedCap).toBe(5);
+    const capped = createShip(createStubTerrain(), undefined, 1, undefined, failing);
+    for (let i = 0; i < 30 / dt; i++) {
+      capped.update(dt, thrust, canThrust, NO_WIND, undefined, undefined, trimmed);
+    }
+    // Not 13, and not the 10 the base hull makes either: the closed-form top
+    // speed is the cap, because `accel` is derived from it.
+    expect(capped.state.speed).toBeCloseTo(5, 1);
+
+    const sound = createHull(100);
+    expect(sound.state.speedCap).toBe(Infinity);
+    const free = createShip(createStubTerrain(), undefined, 1, undefined, sound);
+    for (let i = 0; i < 30 / dt; i++) {
+      free.update(dt, thrust, canThrust, NO_WIND, undefined, undefined, trimmed);
+    }
+    // `Math.min(13, Infinity)` is 13: a sound hull is the ship the player
+    // bought, and `Infinity` is why the cap cannot silently undo an upgrade.
+    expect(free.state.speed).toBeCloseTo(13, 1);
+  });
+
+  it('a hull cap holds astern too, and never lets the wind past it', () => {
+    const dt = 1 / 60;
+    const canThrust = energy(true);
+    const trimmed: PropulsionState = { maxForward: 13, anchored: false };
+
+    // Astern is capped by the same number rather than by MAX_REVERSE (7):
+    // the `accel` line is `effMaxForward * DRAG`, so a hull capped at 5
+    // terminates at -5 and the reverse clamp never gets a look in.
+    const ship = createShip(createStubTerrain(), undefined, 1, undefined, createHull(10));
+    for (let i = 0; i < 20 / dt; i++) {
+      ship.update(dt, input({ backward: true }), canThrust, NO_WIND, undefined, undefined, trimmed);
+    }
+    expect(ship.state.speed).toBeCloseTo(-5, 1);
+
+    // The wind is added to the ground velocity AFTER the engine integrates
+    // and is deliberately not capped, so a gale still carries a broken hull
+    // faster than its own engine could. That is the one mercy in the rule.
+    const blown = createShip(createStubTerrain(), undefined, 1, undefined, createHull(10));
+    const gale: WindState = { ...NO_WIND, speed: 6, along: 6, across: 0 };
+    for (let i = 0; i < 30 / dt; i++) {
+      blown.update(dt, input({ forward: true }), canThrust, gale, undefined, undefined, trimmed);
+    }
+    expect(blown.state.speed).toBeCloseTo(5, 1);
+    expect(blown.state.groundSpeed).toBeGreaterThan(blown.state.speed + 5);
   });
 
   it('a Sea Anchor refuses thrust and kills way in about a second', () => {

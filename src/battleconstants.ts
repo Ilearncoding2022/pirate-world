@@ -56,7 +56,23 @@ export const ARENA_OMEGA = ARENA_SPEED / ARENA_R0;
  */
 export const THROTTLE_GAIN = 0.5;
 
-/** Hits that end a hull's fight. */
+/**
+ * Hits that end the AI's fight. Three, as it always was.
+ *
+ * It used to be BOTH sides' number, and the value has not moved -- only its
+ * meaning has. The player's threshold is read off `hull.ts` at the moment of
+ * contact and is 3, 2 or 1 (docs/HARBOURS_PLAN.md, decision 19), so it
+ * travels on the `Combatant` rather than living here; `battle.ts` settles each
+ * side against its own. This constant is now the raider's alone, and the AI
+ * has no hull of its own by design -- the durability system is the player's
+ * problem, not a stat block for the world.
+ *
+ * It is still the DEFAULT for `createBattleSim`'s `playerHitsToLose` and the
+ * default the rules card and the player's pip strip fall back to, so a caller
+ * that knows nothing about hulls -- every unit case in
+ * `tests/unit/battle.test.ts` bar one, and `?battle=1` before `main.ts` is
+ * wired -- gets the fight exactly as it was.
+ */
 export const HITS_TO_LOSE = 3;
 
 /**

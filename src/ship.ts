@@ -23,6 +23,20 @@ import type {
   Terrain,
   WindState,
 } from './types';
+/*
+ * TYPE-ONLY, and it has to stay that way.
+ *
+ * `hull.ts` derives `HULL_REPAIR_RATE` from `energy.ts`'s `DOCK_NET_RATE` at
+ * module scope, and `energy.ts` reads `MAX_FORWARD` out of this file. A VALUE
+ * import here would close that into a real cycle — energy -> ship -> hull ->
+ * energy — and the first module of the three to be entered decides whether it
+ * crashes: a test file that imports `energy.ts` first suspends it at its own
+ * import statement, so `hull.ts`'s top-level `DOCK_NET_RATE * 100` reads a
+ * `const` still in its temporal dead zone and throws. A type import is erased
+ * and cannot, which is why the hull below is defaulted to `null` rather than
+ * to `createStubHull()`: taking the default would be the value import.
+ */
+import type { Hull } from './hull';
 import { SEA_ANCHOR_DRAG } from './seaanchor';
 import { GLOBE_RADIUS, dirToLatLon, latLonToDir, normalizeHeadingDeg, tangentFrame } from './geo';
 import { createShipFx } from './shipfx';
@@ -559,12 +573,19 @@ function loadHull(
  *   the ship neither waits for a reader nor behaves differently with one --
  *   it exists so the loading screen can report the boot's longest stage
  *   honestly instead of animating a guess over it.
+ * @param hull the durability reserve, read once a frame for its `speedCap`
+ *   and for nothing else. Optional, and `null` means "no ceiling", which is
+ *   the game exactly as it was before durability existed -- so every existing
+ *   call site, `tests/unit/ship-physics.test.ts` included, is unchanged. See
+ *   the type-only import at the top of this file for why the default is a
+ *   `null` rather than `createStubHull()`.
  */
 export function createShip(
   terrain: Terrain,
   start?: { latDeg: number; lonDeg: number; headingDeg?: number },
   maxAnisotropy = 1,
   onHullProgress?: (fraction: number) => void,
+  hull: Hull | null = null,
 ): Ship {
   const startLat = start?.latDeg ?? 0;
   const startLon = start?.lonDeg ?? 0;
@@ -826,11 +847,32 @@ export function createShip(
       if (input.left) turnInput -= 1;
       if (input.right) turnInput += 1;
 
-      // The hull's top speed for this one frame -- MAX_FORWARD, or higher
-      // with Trim & Sheathing bought or an Overdrive Coil burning. See
-      // `types.ts`'s `PropulsionState` for who builds this and why it is
-      // never a sum of both.
-      const effMaxForward = propulsion.maxForward;
+      /*
+       * The hull's top speed for this one frame -- MAX_FORWARD, or higher
+       * with Trim & Sheathing bought or an Overdrive Coil burning, and then
+       * cut to whatever a worn hull will stand. See `types.ts`'s
+       * `PropulsionState` for who builds the first figure and why it is never
+       * a sum of both.
+       *
+       * The `min` is what makes docs/HARBOURS_PLAN.md's decision 14 true
+       * rather than a promise: BOTH upgrades are already inside
+       * `propulsion.maxForward`, so one comparison overrides both and there
+       * is no way to buy back the cap. A worn hull is a ship with its
+       * Navigation shelf switched off.
+       *
+       * Two things it deliberately does not touch. The wind is added to
+       * `groundSpeed` after the engine has integrated, below, and is NOT
+       * capped -- a gale can still carry a broken ship home faster than its
+       * own engine could, which is the one mercy in the rule. And reverse
+       * falls out of it for free rather than being clamped by it: the `accel`
+       * line below is `effMaxForward * DRAG`, so astern terminates at
+       * `-effMaxForward` and MAX_REVERSE only bites when that is deeper than
+       * the 7 kn it stands for.
+       */
+      const effMaxForward = Math.min(
+        propulsion.maxForward,
+        hull === null ? Infinity : hull.state.speedCap,
+      );
 
       const speedFrac = clamp(Math.abs(state.speed) / effMaxForward, 0, 1);
       const turnRate = TURN_RATE * (TURN_MIN_SCALE + (1 - TURN_MIN_SCALE) * speedFrac);

@@ -41,12 +41,40 @@ export interface BattleResult {
   readonly gold: number;
   /** The backup cell as it stands AFTER the defeat, in main-tank fractions. */
   readonly reserve: number;
+  /**
+   * Whole percent of hull the fight cost, POSITIVE, and already knocked off.
+   *
+   * `main.ts` calls `hull.damage()` before it fills this in, the same
+   * ordering the gold and the plant already follow there, so the card is
+   * still a receipt rather than an instruction. 5 for a win or a stand-off,
+   * 15 for a defeat.
+   *
+   * Optional, and 0 or absent prints no hull line at all. That is not only
+   * for the streams that have not wired it yet: a hull already on its floor
+   * cannot lose another point, and a card claiming `HULL -15%` over a bar
+   * that did not move would be exactly the lie the receipt rule exists to
+   * prevent.
+   */
+  readonly hull?: number;
 }
 
 export interface BattleUi {
   /** True from `open()` until CONTINUE. A live getter, never a stored boolean. */
   readonly isOpen: boolean;
-  open(kind: AiBoatKind): void;
+  /**
+   * Raises the overlay for a fight against `kind`.
+   *
+   * `playerHitsToLose` is `hull.state.hitsToLose`, sampled once at contact by
+   * `main.ts` and handed to `createBattleSim`, `battlecover.ts` and this file
+   * from that one read. The player's pip strip is built to it: three pips
+   * beside a sim that ends the fight on one would be the instrument lying
+   * about the only thing the player is really watching. The FOE's strip stays
+   * at `HITS_TO_LOSE` — the raider has no hull of its own.
+   *
+   * Defaulted, so a caller that knows nothing about hulls gets the fight as
+   * it was.
+   */
+  open(kind: AiBoatKind, playerHitsToLose?: number): void;
   close(): void;
   /** This tick's player intent: the fire edge plus the two throttle keys. */
   input(raw: InputState): BattleInput;
@@ -193,6 +221,33 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   const continueBtn: HTMLButtonElement = continueEl;
 
   /**
+   * The hull line, built here rather than in `index.html`.
+   *
+   * Every other element on this card is markup. This one is not, and the
+   * reason is ownership rather than taste: docs/HARBOURS_PLAN.md splits
+   * `index.html` between the streams by SECTION and gives the BATTLE block to
+   * nobody, so a fifth line in it would be an edit no stream is allowed to
+   * make. Creating it costs one element once, next to the pips this file
+   * already creates for the same reason, and it lands in the same place with
+   * the same class the power line uses — `battle__power` is exactly the
+   * "quiet second line under the gold" this needs, and it brings the
+   * `[hidden] { display: none }` rule with it, which the UA sheet alone does
+   * not reliably win. Inventing a `battle__hull` rule would mean a
+   * `style.css` edit that is also not this stream's to make, so that class
+   * rides along as a hook and nothing else: C or D can give it a colour of
+   * its own later without touching this file.
+   *
+   * Inserted directly AFTER the gold line, so the card reads money, hull,
+   * power: the two figures every fight moves, then the one only a defeat
+   * drains.
+   */
+  const hullLine = document.createElement('p');
+  hullLine.className = 'battle__power battle__hull';
+  hullLine.id = 'battle-hull';
+  hullLine.hidden = true;
+  goldLine.insertAdjacentElement('afterend', hullLine);
+
+  /**
    * One side of the strip: its pips and its own write-through cache.
    *
    * Built once and mutated in place, never rebuilt, for the reason `main.ts`'s
@@ -200,34 +255,60 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
    * and a pair of fresh objects per frame is a collection pause in the middle
    * of an aiming problem. Same pattern as `hud.ts`'s caches.
    *
-   * The pips are built from HITS_TO_LOSE rather than typed three times into
-   * the markup, because the count IS the rule: three pips beside a sim that
-   * ended a fight on two would be an instrument lying about the only thing the
-   * player is really watching.
+   * The pips are built from the count rather than typed three times into the
+   * markup, because the count IS the rule: three pips beside a sim that ended
+   * a fight on two would be an instrument lying about the only thing the
+   * player is really watching. That was already true when both sides ran on
+   * HITS_TO_LOSE; it is load-bearing now that the player's side does not, and
+   * it is why `buildSide` takes a number and why the player's strip is REBUILT
+   * on every `open` rather than once at wiring time.
    *
    * There used to be a ROUNDS figure beside them, and it went with the locker
    * it counted. A readout that never moves teaches the player to stop looking
    * at the strip, which is where the hits and the foe's fuse live.
    */
   interface Side {
-    readonly pips: readonly HTMLElement[];
+    pips: readonly HTMLElement[];
     /** Last painted, so an unchanged frame touches no DOM at all. */
     hits: number;
   }
 
-  function buildSide(pipHost: HTMLElement): Side {
+  /**
+   * (Re)fills `side` with `count` pips, and only when the count has moved.
+   *
+   * The guard is what keeps this off the per-frame path and off the ordinary
+   * fight: a player whose hull has not crossed a band since the last raider
+   * gets the same three elements back, and `replaceChildren` is not called at
+   * all. `hits` goes to -1 whenever the strip is rebuilt, because the fresh
+   * pips are unlit and the cache would otherwise claim they were painted.
+   */
+  function fillSide(side: Side, host: HTMLElement, count: number): void {
+    if (side.pips.length === count) return;
     const pips: HTMLElement[] = [];
-    for (let i = 0; i < HITS_TO_LOSE; i++) {
+    for (let i = 0; i < count; i++) {
       const pip = document.createElement('span');
       pip.className = 'bside__pip';
       pips.push(pip);
     }
-    pipHost.replaceChildren(...pips);
-    return { pips, hits: -1 };
+    host.replaceChildren(...pips);
+    side.pips = pips;
+    side.hits = -1;
   }
 
-  const youSide = buildSide(youPipsEl);
-  const foeSide = buildSide(foePipsEl);
+  function buildSide(pipHost: HTMLElement, count: number): Side {
+    const side: Side = { pips: [], hits: -1 };
+    fillSide(side, pipHost, count);
+    return side;
+  }
+
+  const youPips: HTMLElement = youPipsEl;
+  // The player's opening strip is the unmodified three, and every `open`
+  // resets it to whatever that fight's hull allows.
+  const youSide = buildSide(youPips, HITS_TO_LOSE);
+  // The foe's is built once and never rebuilt: the raider has no hull of its
+  // own by design (docs/HARBOURS_PLAN.md, Out of scope), so its threshold is
+  // the constant and cannot move.
+  const foeSide = buildSide(foePipsEl, HITS_TO_LOSE);
 
   /** Whether the prompt is currently down. Null until the first paint. */
   let lastPromptHidden: boolean | null = null;
@@ -349,11 +430,16 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   /* Surface                                                           */
   /* ---------------------------------------------------------------- */
 
-  function openOverlay(kind: AiBoatKind): void {
+  function openOverlay(kind: AiBoatKind, playerHitsToLose: number = HITS_TO_LOSE): void {
     if (open) return;
     open = true;
     decided = false;
     pressed = false;
+
+    // Before anything else on the strip: this fight's pips are the hull's
+    // number, and the caches below are reset on the assumption the strip they
+    // describe is the one that is about to be painted.
+    fillSide(youSide, youPips, playerHitsToLose);
 
     // The raider's own colour, carried on the root so one class paints the
     // FOE side of the strip, the card's rule and the FIRE key's glow together.
@@ -519,6 +605,27 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     goldLine.textContent =
       res.gold > 0 ? '+' + amount + ' GOLD' : res.gold < 0 ? '-' + amount + ' GOLD' : 'NO GOLD LOST';
     goldLine.classList.toggle('battle__gold--down', res.gold < 0);
+
+    /*
+     * What the fight cost the hull, under the gold and above the power.
+     *
+     * Always negative in the wording, because there is no outcome that mends
+     * a hull: a win costs 5 and a defeat 15, and the card's job is to say
+     * that the price of winning was still a price. Rounded, since `main.ts`
+     * hands over whole percent and a float would be a rounding error printed
+     * as a repair bill.
+     *
+     * Hidden at 0 or absent. See `BattleResult.hull`: a hull already on its
+     * floor loses nothing, and a line claiming otherwise would be the one
+     * kind of lie this card is written to never tell.
+     */
+    const hullCost = Math.round(res.hull ?? 0);
+    if (hullCost > 0) {
+      hullLine.textContent = 'HULL -' + hullCost + '%';
+      hullLine.hidden = false;
+    } else {
+      hullLine.hidden = true;
+    }
 
     /*
      * The power line, and only on the two outcomes that cost power.

@@ -1,4 +1,6 @@
 import type { Energy } from './energy';
+import type { Hull } from './hull';
+import { HULL_FAILING_BELOW } from './hull';
 import type { FishBookStore } from './fishbook';
 import type { HarpoonStore } from './harpoons';
 import { HARPOON_PER_SESSION_MAX } from './harpoons';
@@ -44,6 +46,20 @@ export const SESSION_COST = 0.5;
 
 export interface FishingDeps {
   readonly energy: Energy;
+  /**
+   * The hull. Read for `canFish` alone, and only to arm or dim FISH AGAIN.
+   *
+   * The session itself is never interrupted by it: the hull's clock does not
+   * tick while this card is up (docs/HARBOURS_PLAN.md, decision 12), so a
+   * session started above 25% cannot fall under it mid-cast. The only gate is
+   * the one on going round again, which is the same gate `fishcover.ts` puts
+   * on going round the first time.
+   *
+   * Optional and defaulted to a sound hull, on the Step 0 convention every
+   * other hull consumer follows: a caller that says nothing gets the card
+   * exactly as it was before durability existed.
+   */
+  readonly hull?: Hull;
   readonly wallet: Wallet;
   readonly book: FishBookStore;
   /** The spare-harpoon locker. Read at the start of every session, debited as
@@ -214,7 +230,12 @@ export function createFishing(deps: FishingDeps): Fishing {
   let lastClock = '';
   let lastShots = '';
   let lastGold = '';
-  let lastAgainDisabled: boolean | null = null;
+  /**
+   * Why FISH AGAIN is currently dim, or null when it is armed; `undefined`
+   * means never painted. Kept on the REASON rather than on the boolean --
+   * see `refreshAgain`, and note that `null` is a real reading here.
+   */
+  let lastAgainReason: string | null | undefined = undefined;
 
   function write(el: HTMLElement, text: string, cache: string): string {
     if (text === cache) return cache;
@@ -265,11 +286,25 @@ export function createFishing(deps: FishingDeps): Fishing {
     const state = deps.energy.state;
     const sessionCost = deps.governor.sessionCost;
     const affordable = state.level + state.reserve >= sessionCost;
-    if (lastAgainDisabled === !affordable) return;
-    lastAgainDisabled = !affordable;
-    again.disabled = !affordable;
-    if (affordable) again.removeAttribute('title');
-    else again.setAttribute('title', `Needs ${Math.round(sessionCost * 100)}% power`);
+    // The hull's own gate, the same three lines `fishcover.ts` puts on START
+    // FISHING and in the same precedence: below 25% there is no price that
+    // buys another session (docs/HARBOURS_PLAN.md, decision 15), and the hull
+    // names itself first because power comes back on its own and a hull does
+    // not.
+    const canFish = deps.hull?.state.canFish ?? true;
+    const reason = !canFish
+      ? `Hull under ${HULL_FAILING_BELOW}%`
+      : !affordable
+        ? `Needs ${Math.round(sessionCost * 100)}% power`
+        : null;
+    // Diffed on the reason rather than on the boolean, so a card that is dim
+    // for power and then dim for the hull swaps its tooltip instead of
+    // keeping the first one it was given.
+    if (lastAgainReason === reason) return;
+    lastAgainReason = reason;
+    again.disabled = reason !== null;
+    if (reason === null) again.removeAttribute('title');
+    else again.setAttribute('title', reason);
   }
 
   /* ---------------------------------------------------------------- */
@@ -318,7 +353,7 @@ export function createFishing(deps: FishingDeps): Fishing {
     pressed = false;
     summaryShown = false;
     summary.hidden = true;
-    lastAgainDisabled = null;
+    lastAgainReason = undefined;
     paintChrome(sim.state);
     return true;
   }
@@ -414,7 +449,7 @@ export function createFishing(deps: FishingDeps): Fishing {
     catches.replaceChildren(...rows);
     total.textContent = '+' + formatGold(sessionGold) + ' GOLD';
     summary.hidden = false;
-    lastAgainDisabled = null;
+    lastAgainReason = undefined;
     refreshAgain();
     // The summary is the only part of the card that takes a keystroke of its
     // own, so it gets the focus rather than leaving it on whatever the page
