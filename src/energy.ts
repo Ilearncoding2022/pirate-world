@@ -52,11 +52,11 @@ export interface Energy {
    * Returns the state it left the ship in: true for made fast.
    *
    * The one door into `docked`, and it REFUSES unless `state.berthReady` says
-   * the ring's dwell has run out. That refusal is the whole reason this lives
-   * here rather than as a boolean in `main.ts`: the dwell clock, the readiness
-   * it produces and the lock that consumes it are one rule, and a caller that
-   * could set the lock without passing the clock would be a second definition
-   * of what it means to have arrived.
+   * the hull is inside a berth's ring. That refusal is the whole reason this
+   * lives here rather than as a boolean in `main.ts`: the ring test, the
+   * readiness it produces and the lock that consumes it are one rule, and a
+   * caller that could set the lock without passing the ring would be a second
+   * definition of what it means to have arrived.
    *
    * Safe to call at any time -- at sea it does nothing and reports false.
    */
@@ -261,28 +261,6 @@ const SOLAR_PEAK = 1 / SOLAR_FULL_SECONDS + IDLE_DRAIN;
  */
 const DOCK_RATE = 1 / DOCK_FULL_SECONDS + IDLE_DRAIN;
 
-/**
- * Seconds the ship has to stay inside a berth's ring before it connects.
- *
- * This replaced a speed limit, and it enforces the same rule in the terms the
- * player can actually see. The old test asked "are you under 3 kn": true of a
- * ship that had stopped, but also true of one drifting quietly across the ring
- * on the wind, and false of one that had genuinely arrived and not yet lost
- * way. A dwell asks the question the ring is drawn to ask -- are you staying?
- *
- * Two seconds is the number because of what it excludes. The zone is 16 units
- * across, so at 15 kn a straight run through it lasts 1.07 s and at 10 kn
- * 1.6 s: nothing on a passage can collect a berth by crossing it, which is the
- * whole job the speed limit was doing. Anything slower than about 8 kn can
- * dwell, drifting included, and that is deliberate -- being blown into harbour
- * and moored is an arrival, not an exploit, and `wind.ts` shelters what is
- * docked so the drift ends there anyway.
- *
- * Timed against wall clock rather than distance, so a ship holding station
- * inside the ring qualifies however it is holding it.
- */
-const DOCK_DWELL_SECONDS = 2;
-
 /*
  * The two speeds, and which one each rule here uses.
  *
@@ -296,11 +274,14 @@ const DOCK_DWELL_SECONDS = 2;
  *     still deploys its panels. That is the entire point of running out of
  *     charge in a wind: you are not stranded, you are being carried somewhere
  *     while you recover.
- *   - The berth test is on NEITHER any more. It is a dwell: see
- *     DOCK_DWELL_SECONDS. A ring cannot be collected by crossing it because
- *     crossing it does not take two seconds, which is the same protection the
- *     old ground-speed test gave without having to pick between the two
- *     speeds at all.
+ *   - The berth test is on NEITHER, and on no clock either. It is the ring
+ *     and a key press: see `berthReady` in `update`. There was a two-second
+ *     dwell here for a while, and before that a 3 kn speed limit, and both
+ *     existed to stop a ring being collected by crossing it at speed. Neither
+ *     is needed now that arriving does not dock anything on its own -- the
+ *     helm has to press Space, and nobody presses Space by accident at 15 kn.
+ *     The protection moved from a clock the player could not see to an act
+ *     they perform, which is where it should have been all along.
  */
 
 /**
@@ -472,11 +453,6 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
    */
   let moored = false;
 
-  /** Seconds spent continuously inside `dwellBerth`. See DOCK_DWELL_SECONDS. */
-  let dwell = 0;
-  /** The ring the clock is counting for, or null when the ship is in none. */
-  let dwellBerth: Dock | null = null;
-
   function update(
     dt: number,
     ship: ShipState,
@@ -509,38 +485,33 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     // is over four times the best the sun ever manages, so the sum would beat
     // the berth alone by a couple of seconds over a whole charge -- and it
     // would make the rate on the HUD unreadable back to a single cause.
-    // The dwell clock. It counts only while the ship is inside one particular
-    // ring, and it is the identity of the berth that is tracked rather than
-    // merely "inside something": two zones cannot overlap (`towns.ts` rejects
-    // a berth that would), so leaving one and entering another is a new
-    // arrival and starts the two seconds again.
     const berth = towns.dockAt(ship.position);
-    if (berth === null || berth !== dwellBerth) {
-      dwellBerth = berth;
-      dwell = 0;
-    }
-    if (berth !== null) dwell += dt;
 
     /*
      * The two halves of arriving, since the Space lock (2026-09-09).
      *
-     * `berthReady` is the ring's own verdict: the hull is inside one and has
-     * been for the dwell. It says the ship MAY be made fast and nothing more.
-     * `docked` is the helm's, and it is the one every other module means when
-     * it asks whether the ship is at a berth -- shore power, the shop gate,
-     * the hull's repair, the wind's shelter, the hazard and raider suppression
-     * and the harbour's discovery all hang off it.
+     * `berthReady` is the ring's own verdict, and since 2026-09-09 it is the
+     * ring and nothing else: the hull is inside one. It says the ship MAY be
+     * made fast and nothing more. `docked` is the helm's, and it is the one
+     * every other module means when it asks whether the ship is at a berth --
+     * shore power, the shop gate, the hull's repair, the wind's shelter, the
+     * hazard and raider suppression and the harbour's discovery all hang off
+     * it.
      *
-     * The clock alone used to be enough. It is not any more, because being
-     * docked now takes the helm away from the player, and nothing may do that
-     * without being asked: drifting across a ring would otherwise freeze the
-     * ship solid two seconds later.
+     * There was a two-second dwell in front of this, and it is gone (owner's
+     * call). It was there to stop a ring being collected by crossing it at
+     * speed, back when crossing a ring was all it took to dock. That job now
+     * belongs to the key press: docking is a deliberate act, and a clock in
+     * front of a deliberate act is only a delay. What it cost was the case it
+     * was worst at -- a player who has stopped in the ring and is waiting on a
+     * timer they cannot see, which is the exact moment the offer should be on
+     * screen.
      *
      * The release is unconditional and comes first. A lock is only ever valid
      * against the berth it was set in, so losing the ring drops it -- see the
      * note on `moored`.
      */
-    const berthReady = berth !== null && dwell >= DOCK_DWELL_SECONDS;
+    const berthReady = berth !== null;
     if (!berthReady) moored = false;
     const docked = berthReady && moored;
     state.berthReady = berthReady;
@@ -651,10 +622,12 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
      * actually doing, so reading it as an ordinary burn would leave the
      * player to explain a rate the speed does not account for.
      *
-     * `mooring` sits BELOW `burn` on purpose. The dwell clock counts whatever
-     * the hull is doing, drifting arrivals included, but a ship motoring
-     * through the ring is burning and calling that CONNECTING would be the
-     * same class of lie the old EMPTY tag told.
+     * `mooring` sits BELOW `burn` on purpose. The ring admits whatever the
+     * hull is doing, drifting arrivals included, but a ship motoring through
+     * it is burning and calling that MAKE FAST would be the same class of lie
+     * the old EMPTY tag told. The offer is still open to that ship -- Space
+     * works at any speed inside the ring, and the notice at the foot of the
+     * screen says so off `berthReady` rather than off this ladder.
      */
     if (!state.canThrust) state.mode = state.rate > 0 ? 'restart' : 'dead';
     else if (docked) state.mode = 'docked';

@@ -455,7 +455,7 @@ const PWR_LOW_LEVEL = 0.25;
  * at a berth. The shop gate is not allowed to turn off because the tank
  * filled up.
  */
-type PwrTag = EnergyMode | 'full' | 'ready';
+type PwrTag = EnergyMode | 'full';
 
 /**
  * The tank is at its ceiling and something is holding it there.
@@ -466,13 +466,17 @@ type PwrTag = EnergyMode | 'full' | 'ready';
  * paying for something reads negative within a frame of the ceiling.
  */
 function powerTag(energy: EnergyState): PwrTag {
-  // Alongside with the dwell run out and the helm not yet committed. It sits
-  // ABOVE the full-tank test, unlike every other tag here, because it is the
-  // one reading that asks the player for something: a ship that arrived on a
-  // full tank would otherwise read TANK FULL and never mention the berth it
-  // is sitting in. `docked` is not tested here at all -- once made fast the
-  // mode says so on its own.
-  if (energy.berthReady && energy.mode === 'mooring') return 'ready';
+  // Alongside, and the helm not yet committed. It sits ABOVE the full-tank
+  // test, unlike every other tag here, because it is the one reading that asks
+  // the player for something: a ship that arrived on a full tank would
+  // otherwise read TANK FULL and never mention the berth it is sitting in.
+  // `docked` is not tested here at all -- once made fast the mode says so on
+  // its own.
+  //
+  // It carried a separate `ready` name while the ring had a dwell in front of
+  // it, to tell "still counting" from "yours to take". With the dwell gone the
+  // two collapsed into one state and so did the tag.
+  if (energy.mode === 'mooring') return 'mooring';
   return energy.level >= 1 && energy.rate >= 0 ? 'full' : energy.mode;
 }
 
@@ -492,8 +496,7 @@ const PWR_TAG: Record<PwrTag, string> = {
   dead: 'NO POWER - ADRIFT',
   restart: 'NO THRUST - RESTARTING',
   docked: 'BERTH - CHARGING',
-  mooring: 'BERTH - CONNECTING',
-  ready: 'BERTH - MAKE FAST',
+  mooring: 'BERTH - MAKE FAST',
   reserve: 'ON BACKUP CELL',
   overdrive: 'OVERDRIVE - 4x BURN',
   burn: 'UNDER WAY - BURN',
@@ -587,7 +590,7 @@ function formatRate(rate: number): string {
  */
 export function powerTagText(tag: PwrTag, berth: string | null): string {
   const text = PWR_TAG[tag];
-  if (berth === null || (tag !== 'docked' && tag !== 'mooring' && tag !== 'ready')) return text;
+  if (berth === null || (tag !== 'docked' && tag !== 'mooring')) return text;
   const separator = text.indexOf(' - ');
   if (separator < 0) return text;
   return `${berth.toUpperCase()}${text.slice(separator)}`;
@@ -1031,8 +1034,7 @@ export function createHud(
       // notice below. `berthReady` is in the test as well as the three tags
       // because the notice outlives the tag: a ship made fast on a full tank
       // reads TANK FULL up here and still has to name the berth down there.
-      const nearBerth =
-        tag === 'docked' || tag === 'mooring' || tag === 'ready' || energy.berthReady;
+      const nearBerth = tag === 'docked' || tag === 'mooring' || energy.berthReady;
       const berth =
         towns !== undefined && nearBerth
           ? (towns.dockAt(ship.position)?.town.name ?? null)

@@ -49,6 +49,13 @@
     monospace;
 
   --hud-pad: clamp(10px, 1.6vw, 22px);
+  /* One helm key. The original scaled by 0.75, so the whole pad shrinks as one
+     piece, and the source of truth for three separate things: the pad's own
+     grid, the key label's font size (`.dbtn__label`), and how far the mooring
+     notice has to sit above the pad on a narrow screen. It lives up here
+     rather than on `.dpad` for that third one -- `.moor` is not inside the pad
+     and cannot read a variable declared on it. */
+  --key-size: clamp(42px, 4.5vw, 55.5px);
 }
 
 * {
@@ -626,9 +633,20 @@ body {
 
 /* Tighter tracking than the other keys on the panel, because the tag now
    carries a phrase rather than a word and 0.22em of it would not fit beside
-   the rate at any sane panel width. */
+   the rate at any sane panel width.
+
+   30% off the old 9px (owner's call, 2026-09-09), and the same cut is applied
+   to `.hull__tag` and to both of their small-viewport sizes, so the two status
+   lines stay the one family they are read as. It is the CAUSE line, and the
+   figure beside it and the bar above it are what the eye actually goes to;
+   this can afford to be the smallest thing in the block.
+
+   Well under the 12px minimum-font-size floor some browsers enforce -- see
+   **HUD text sizing** in docs/ARCHITECTURE.md. That is the existing bargain
+   for most of this HUD and not a new problem: on such a machine the tag renders
+   at 12px and this block flattens, exactly as `.readout__key` already does. */
 .pwr__tag {
-  font-size: 9px;
+  font-size: 6.3px;
   letter-spacing: 0.1em;
   color: var(--pwr-accent);
   text-shadow: 0 0 9px var(--pwr-glow);
@@ -985,12 +1003,19 @@ body {
   box-shadow: 0 0 22px rgba(255, 180, 69, 0.14), 0 0 18px rgba(3, 12, 22, 0.7);
 }
 
-/* Clear of the helm keys once the viewport is too narrow to sit beside them.
-   The pad is bottom-LEFT and about 100px tall at this width, so the notice
-   steps above it rather than under a thumb. */
+/* Clear of the helm keys once the viewport is too narrow for the notice to sit
+   beside them. The pad is bottom-LEFT; below this width the centred notice
+   overlaps it, so it steps above instead of under a thumb.
+
+   Measured off the pad rather than guessed, because the pad's height is two
+   key rows and its keys scale with the viewport: `26px` is its own bottom
+   offset, `2 * var(--key-size)` its helm rows, `71px` the two ship keys, their
+   margins and the three row gaps, and `8px` the gap left between the two. A
+   hard number here was right for exactly one viewport and one pad layout, and
+   the pad has now changed shape twice. */
 @media (max-width: 720px) {
   .moor {
-    bottom: calc(var(--hud-pad) + 116px);
+    bottom: calc(var(--hud-pad) + 26px + 2 * var(--key-size) + 79px);
     font-size: 9.5px;
     letter-spacing: 0.1em;
   }
@@ -1196,22 +1221,23 @@ body {
  */
 .dpad {
   position: absolute;
-  bottom: calc(var(--hud-pad) + 4px);
+  /* Lifted clear of the bottom edge (owner's call, 2026-09-09). The pad grew
+     a row underneath it when [ANCHOR] moved in, and 4px of margin under a key
+     a thumb has to reach past is not enough on a phone held one-handed. */
+  bottom: calc(var(--hud-pad) + 26px);
   left: var(--hud-pad);
   display: grid;
-  /* Key size is the original scaled by 0.75, so the whole control shrinks as
-     one piece.
-
-     One source of truth: the label size below is derived from --key-size, so
-     the longest word cannot outgrow its key at any viewport width. */
-  --key-size: clamp(42px, 4.5vw, 55.5px);
   /* The throttle's own gap, and the whole of "much closer": thrust and reverse
      are the two ends of one axis, so they are spaced to be rocked between
      rather than aimed at separately. The columns keep the wider gap, because
      port and starboard ARE separate aims and a mis-hit there costs a heading. */
   --stack-gap: 3px;
   grid-template-columns: repeat(3, var(--key-size));
-  grid-template-rows: repeat(2, var(--key-size));
+  /* Four rows now, and only the middle two are the helm's: [COIL] rides above
+     THRUST and [ANCHOR] below REVERSE, each in a row sized by its own content
+     rather than to a key. The helm keeps its two square rows exactly as it
+     had them, so nothing about the throttle's reach changed. */
+  grid-template-rows: auto var(--key-size) var(--key-size) auto;
   column-gap: 7.875px;
   row-gap: var(--stack-gap);
   place-items: stretch;
@@ -1346,19 +1372,90 @@ body {
  */
 .dbtn--up {
   grid-column: 2;
-  grid-row: 1;
+  grid-row: 2;
 }
 .dbtn--left {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 3;
 }
 .dbtn--down {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 3;
 }
 .dbtn--right {
   grid-column: 3;
+  grid-row: 3;
+}
+
+/* ---------------------------------------------------------------------
+   The three ship keys, on the helm pad's grid
+
+   [FISH], [ANCHOR] and [COIL] lived in the dock under the telemetry panel
+   until 2026-09-09. They are things the SHIP does, and the pad is where the
+   ship is driven from, so they are here now and the dock keeps only [SHOP]
+   — the one key that is a BERTH's rather than the ship's.
+
+   They keep `.dock__btn`, which owns their glass, their brackets, their
+   count and all four disabled colours. Nothing below re-states any of that:
+   these rules only place them and shrink them, so a change to how a dock key
+   looks still reaches all four keys.
+   ------------------------------------------------------------------- */
+
+.dpad__act {
+  height: 24px;
+  padding: 0 7px;
+  /* Softer than the helm's 9px, because these are half the height and the
+     same radius on a 24px box reads as a lozenge rather than a key. */
+  border-radius: 6px;
+}
+
+/* Sized down from the dock's 10px to fit a 42px column at the pad's smallest.
+   The tracking goes with it: 0.18em is a fifth of FISH's width again, and the
+   brackets have to fit inside the column too. */
+.dpad__act .dock__key {
+  font-size: 7.5px;
+  letter-spacing: 0.06em;
+}
+
+.dpad__act .dock__count {
+  margin-left: 3px;
+}
+
+/* Over THRUST and under REVERSE, centred on the throttle's own column.
+   Both are free to overhang into columns 1 and 3, which are empty in these
+   two rows — sizing them to the column instead would have cost ANCHOR its
+   count at the pad's smallest width. */
+.dpad__act--coil {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: center;
+  align-self: end;
+  margin-bottom: 4px;
+}
+
+.dpad__act--anchor {
+  grid-column: 2;
+  grid-row: 4;
+  justify-self: center;
+  align-self: start;
+  margin-top: 4px;
+}
+
+/*
+ * Beside THRUST, in the corner the pad never used.
+ *
+ * `align-self: start` is the whole of "the top borders line up": the row is a
+ * key tall and this button is not, so without it the button would centre in
+ * the row and sit a dozen pixels low. It stretches to the column instead of
+ * hugging its word, because a key that is not as wide as the column it is in
+ * would not read as being in the pad at all — and FISH is short enough to fit
+ * one at every width.
+ */
+.dpad__act--fish {
+  grid-column: 3;
   grid-row: 2;
+  justify-self: stretch;
+  align-self: start;
 }
 
 /* ---------------------------------------------------------------------
@@ -1446,7 +1543,7 @@ kbd {
     height: 6px;
   }
   .pwr__tag {
-    font-size: 8px;
+    font-size: 5.6px;
     letter-spacing: 0.06em;
   }
   .pwr__rate {
@@ -3845,6 +3942,7 @@ kbd {
 body.in-battle .panel--telemetry,
 body.in-battle .panel--radar,
 body.in-battle .moor,
+body.in-battle .dpad__act,
 body.in-battle .dock {
   display: none;
 }
@@ -4223,7 +4321,7 @@ body.in-battle .dbtn--right {
 /* The power tag's tracking and one size down, because this pair sits under a
    bar that is already the second one in the block. */
 .hull__tag {
-  font-size: 8.5px;
+  font-size: 5.95px;
   letter-spacing: 0.1em;
   color: var(--hull-accent);
   text-shadow: 0 0 9px var(--hull-glow);
@@ -4383,7 +4481,7 @@ body.in-battle .dbtn--right {
     height: 5px;
   }
   .hull__tag {
-    font-size: 7.5px;
+    font-size: 5.25px;
     letter-spacing: 0.06em;
   }
   .hull__rate {

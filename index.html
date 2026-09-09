@@ -275,27 +275,21 @@
            replace the file. The gold readout goes in the telemetry panel
            above, between the WIND and POWER rows. -->
       <!-- HUD DOCK -->
-      <!-- The two things the ship can do that are not steering it. Styled as
-           the helm keys are, and for the same reason: everything on this HUD
-           that can be pressed looks like a key, so anything that looks like a
-           key can be pressed.
+      <!-- What is left of the dock: [SHOP], and only [SHOP].
+           
+           It held four keys until 2026-09-09. Three of them -- [FISH],
+           [ANCHOR] and [COIL] -- moved down into the helm pad, because all
+           three are things the SHIP does and the pad is where the ship is
+           driven from; see the D-PAD block below. [SHOP] stayed because it is
+           the one key here that is not the ship's at all: it is a thing a
+           BERTH can do, dead everywhere else, and it belongs beside the panel
+           that tells you whether you are at one rather than under the thumb
+           that steers.
 
-           [FISH] opens the activity's cover screen, and the two ways into the
-           activity -- a session and the record -- are buttons on that. It
-           carries no power gate any more: it opens a menu, and a menu must not
-           be locked by the price of one thing on it. START FISHING over there
-           holds that gate, which is where the charge is actually made. -->
+           It ships disabled for that reason -- the world opens at sea -- and
+           hud.ts reads that shipped state back rather than assuming it, the
+           same contract the rest of the panel keeps. -->
       <nav class="dock" aria-label="Ship activities">
-        <div class="dock__row">
-          <button id="btn-fish" class="dbtn dock__btn" type="button" aria-label="Fishing">
-            <span class="dock__key">FISH</span>
-          </button>
-        </div>
-        <!-- Under [FISH] rather than beside it, because it is not a thing the
-             ship can do: it is a thing a BERTH can do, and it is dead
-             everywhere else. It ships disabled for that reason -- the world
-             opens at sea -- and hud.ts reads that shipped state back rather
-             than assuming it, the same contract the rest of the panel keeps. -->
         <div class="dock__row">
           <button
             id="btn-shop"
@@ -306,37 +300,6 @@
             title="Only alongside a berth"
           >
             <span class="dock__key">SHOP</span>
-          </button>
-        </div>
-        <!-- Two Navigation consumables, the first things in the chandlery a
-             player actually PRESSES rather than merely owns. Both ship
-             disabled -- a new ship has stowed neither -- and both carry a
-             stock count `hud.ts` writes from `seaanchor.ts`/`overdrive.ts`,
-             the same live-count pattern the backup cell's HUD row uses. -->
-        <div class="dock__row">
-          <button
-            id="btn-anchor"
-            class="dbtn dock__btn"
-            type="button"
-            aria-label="Deploy Sea Anchor"
-            disabled
-            title="None stowed"
-          >
-            <span class="dock__key">ANCHOR</span>
-            <span class="dock__count" id="hud-anchor-count"></span>
-          </button>
-        </div>
-        <div class="dock__row">
-          <button
-            id="btn-overdrive"
-            class="dbtn dock__btn"
-            type="button"
-            aria-label="Engage Overdrive Coil"
-            disabled
-            title="None stowed"
-          >
-            <span class="dock__key">COIL</span>
-            <span class="dock__count" id="hud-overdrive-count"></span>
           </button>
         </div>
       </nav>
@@ -408,6 +371,47 @@
            near enough to rock a thumb between. style.css owns the geometry;
            the order here is the reading order of the pad. -->
       <nav class="dpad" aria-label="Helm controls">
+        <!-- The three ship keys, laid on the pad's own grid around the helm.
+             [COIL] over THRUST and [ANCHOR] under REVERSE because that is what
+             each one does to the throttle -- the coil pushes it past its stop,
+             the anchor kills it -- so the pad reads as one speed control with
+             its two extremes at its two ends. [FISH] beside THRUST, in the
+             corner the pad never used.
+
+             They keep `dock__btn`, which is where their glass, their brackets
+             and their disabled colours live; `dpad__act` only resizes them to
+             fit here. Both counts keep their ids, so hud.ts and main.ts are
+             untouched by the move. -->
+        <button
+          id="btn-overdrive"
+          class="dbtn dock__btn dpad__act dpad__act--coil"
+          type="button"
+          aria-label="Engage Overdrive Coil"
+          disabled
+          title="None stowed"
+        >
+          <span class="dock__key">COIL</span>
+          <span class="dock__count" id="hud-overdrive-count"></span>
+        </button>
+        <button
+          id="btn-fish"
+          class="dbtn dock__btn dpad__act dpad__act--fish"
+          type="button"
+          aria-label="Fishing"
+        >
+          <span class="dock__key">FISH</span>
+        </button>
+        <button
+          id="btn-anchor"
+          class="dbtn dock__btn dpad__act dpad__act--anchor"
+          type="button"
+          aria-label="Deploy Sea Anchor"
+          disabled
+          title="None stowed"
+        >
+          <span class="dock__key">ANCHOR</span>
+          <span class="dock__count" id="hud-anchor-count"></span>
+        </button>
         <button id="btn-up" class="dbtn dbtn--up" type="button" aria-label="Thrust">
           <span class="dbtn__glyph">&#9650;</span>
           <span class="dbtn__label">Thrust</span>

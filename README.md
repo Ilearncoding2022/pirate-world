@@ -25,7 +25,7 @@ the first frame you are handed does not stutter.
 | `A` / `←` / on-screen ◀ | Turn to port |
 | `D` / `→` / on-screen ▶ | Turn to starboard |
 | Mouse wheel | Zoom the follow camera |
-| `Space` (alongside a berth) | Make fast, or cast off again. Only once the ring's two seconds are up; while made fast the helm is locked |
+| `Space` (inside a berth's ring) | Make fast, or cast off again. While made fast the helm is locked |
 | on-screen `[FISH]` | Open the fishing screen — start a session, or read the record |
 | on-screen `[SHOP]` | Open the chandlery — only alongside a berth |
 | on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds |
@@ -336,10 +336,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the South, in every world there will ever be. The berth is at the town's own
   shoreline now rather than out in a cove, so the ring and the lights read as
   one harbour instead of two things near each other. Each has a lit ring on the
-  water under a beacon mast. Stay inside the ring for two seconds and the berth
-  offers itself; drive through it and it does not, which is the whole rule.
-  Then **press `Space` to make fast** — arriving is no longer the same thing as
-  docking. A notice at the foot of the screen carries the offer and, once you
+  water under a beacon mast. Cross into the ring and the berth offers itself at
+  once — there is no waiting. Then **press `Space` to make fast**: arriving is
+  not the same thing as docking, and the key press is the whole rule. A notice at the foot of the screen carries the offer and, once you
   have taken it, the fact that the helm is locked and `Space` is the way out.
   Being made fast is what connects shore power, opens `[SHOP]`, mends the hull
   and shelters the ship, and it holds the hull dead still: no helm, no
