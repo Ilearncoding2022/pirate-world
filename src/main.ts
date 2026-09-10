@@ -32,14 +32,14 @@ import { createQuality } from './quality';
 import { WORLD_ATTEMPTS, generateWorld } from './worldgen';
 import { createReflection } from './reflection';
 import { createWaterReflectPlugin } from './waterreflect';
-import { createHazards } from './hazards';
+import { createHazards, CREST_SPEED_REF } from './hazards';
 import { createWaterHazardPlugin } from './waterhazard';
 import { createBlackout } from './blackout';
 import { createAiBoats } from './aiboats';
 import { createAiHulls } from './aihulls';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
-import { CALM, ROUGH } from './battlesea';
+import { CALM, LIVE, ROUGH, SWAY_MAX, SWAY_MIN } from './battlesea';
 import { createBattleUi } from './battleui';
 import { createBattleCover } from './battlecover';
 import { createMenu, formatBearing, formatDistance } from './menu';
@@ -58,9 +58,12 @@ import type {
   PropulsionState,
   QuestOffer,
   ShipState,
+  Hazard,
+  WeatherState,
 } from './types';
 import type { QuestLineInput } from './hud';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
+import { findRingCentre, RING_CLEARANCE } from './battlering';
 import { HARBOUR_NAMES } from './harbournames';
 import { OVERDRIVE_MAX_FORWARD } from './overdrive';
 
@@ -912,18 +915,25 @@ async function startGame(): Promise<void> {
    */
   const forcedCalm = battleParams.get('calm') === '1';
   const forcedRough = battleParams.get('rough') === '1';
-  /**
-   * How much storm makes a fight rough.
-   *
-   * Half. Above it the sea outside is visibly running and a flat arena would
-   * read as a different ocean; below it the crests would be arriving out of a
-   * sky that has not earned them.
-   */
-  const BATTLE_STORM_GATE = 0.5;
   function battleSeaFor(): typeof CALM {
     if (forcedCalm) return CALM;
     if (forcedRough) return ROUGH;
-    return weather.state.storm > BATTLE_STORM_GATE ? ROUGH : CALM;
+    /*
+     * LIVE rather than the old storm-gated choice between CALM and ROUGH.
+     *
+     * That gate existed to decide whether the ARENA should raise crests of
+     * its own, and the question is gone: the fight is on the globe's water
+     * now, so whether the sea under the ring is running is decided by the
+     * weather actually running there, frame by frame, rather than sampled
+     * once at contact and imitated. `?calm=1` and `?rough=1` still force the
+     * two old seas, because the gunner's pinned comparison is measured on
+     * them and that measurement has to stay reproducible.
+     *
+     * The flotsam is the reason this is LIVE and not CALM: rafts are debris
+     * in the water rather than a claim about what the water is doing, and
+     * they are what the withdrawn shoals were replaced by.
+     */
+    return LIVE;
   }
 
   /**
@@ -1082,6 +1092,13 @@ async function startGame(): Promise<void> {
       playerHullHome = ship.object.parent;
       contactHullHome = contactHull ? contactHull.parent : null;
       battleScene.enter(ship.object, contactHull, solarElevation());
+      placeRing(ship.state.position);
+      // No funnel may open inside the ring for as long as the fight is up.
+      // The clearance is the ring the fight OPENS on rather than the one it
+      // is currently squeezed to, so a maelstrom cannot be raised into the
+      // water the boats are about to be driven through either.
+      hazards.barMaelstroms(ringCentre, RING_CLEARANCE);
+      scene.add(battleScene.props);
       inArena = true;
       // With the arena. The world's instruments are hidden from here rather
       // than from `open()` so the change happens on a screen that is already
@@ -1090,6 +1107,130 @@ async function startGame(): Promise<void> {
       // See the `body.in-battle` block in `style.css` for what goes and why.
       document.body.classList.add('in-battle');
     });
+  }
+
+  /*
+   * Where the ring is, and the one transform that puts a flat arena on a
+   * sphere.
+   *
+   * `battle.ts` does its arithmetic in metres east and metres north on a
+   * plane, and it keeps doing exactly that: this is the only place the two
+   * geometries meet. The props group is given the basis (east, up, north) at
+   * the ring's centre, so a combatant at arena (x, z) lands at
+   * `centre * R + east * x + north * z` and a prop at y = 0 lands at sea
+   * level -- and the camera, which is a child of that group, is carried onto
+   * the globe with everything it is framing.
+   *
+   * (east, up, north) is right-handed as `geo.ts` builds it -- `east` is
+   * `cross(north, up)`, so `cross(east, up)` is `north` again -- which is
+   * what stops the arena arriving mirrored, with every angle running the
+   * wrong way round the circle.
+   */
+  const _ringUp = new THREE.Vector3();
+  const _ringNorth = new THREE.Vector3();
+  const _ringEast = new THREE.Vector3();
+  /** The ring's centre as a unit direction, live for as long as a fight is up. */
+  const ringCentre = new THREE.Vector3(0, 0, 1);
+
+  /*
+   * The open sea's shove, and the one place a real crest reaches into a fight.
+   *
+   * `hazards.ts` runs its crests through the ring like any other water -- the
+   * ring is not shelter and is deliberately not made into any -- but a wave
+   * the player can watch coming has to DO something when it arrives, or it is
+   * scenery rolling through a duel. The rule is the one `battlesea.ts` always
+   * used for its own crests, applied to the real ones: the frame a crest's
+   * line crosses a hull, that hull is shoved along the crest's travel.
+   *
+   * Amplitude is mapped onto SWAY_MIN..SWAY_MAX off the crest's own SPEED
+   * rather than passed through as a world height, and that is not a detail.
+   * `battlesea.ts`'s keel clamp is written against one pulse peaking at
+   * SWAY_MAX (6) inside a ring that floors at ARENA_R_MIN (8); handing it a
+   * raw amplitude would invalidate that argument silently. Speed rather than
+   * height because it is the same thing the open sea's own push is derived
+   * from -- see PUSH_PEAK in `hazards.ts` -- so a wave that hits the hull
+   * hard outside a fight hits it hard inside one.
+   */
+  /*
+   * The fight's quality floor, which docs/ROADMAP.md states as a design rule
+   * rather than as a nicety: "set a quality floor for step 1 (fog capped,
+   * minimum ambient light) so a fight is never unreadable".
+   *
+   * The old arena did not need one. It passed `applyAerial` a weather of
+   * zero and lit itself off a graded copy of the sun, so a fight was legible
+   * by construction whatever the sky outside was doing -- and `battlescene.ts`
+   * used to have to explain that a white-out over a twenty-unit ring hides
+   * the target. Putting the fight in the live world hands all of that back:
+   * the fog is the real fog now, and the reason it was excluded has not gone
+   * away, it has become this function's job.
+   *
+   * A CAP and not a switch. Weather still reaches a fight -- a storm still
+   * darkens the water, rain still falls, and a squall arriving mid-duel is
+   * exactly the continuity this whole change is for -- it simply may not
+   * close the visibility past the point where the other hull stops being a
+   * target. The two ceilings are the readable half of each range.
+   */
+  const BATTLE_FOG_CAP = 0.35;
+  const BATTLE_RAIN_CAP = 0.5;
+
+  function battleWeather(wx: WeatherState): WeatherState {
+    if (wx.fog <= BATTLE_FOG_CAP && wx.rain <= BATTLE_RAIN_CAP) return wx;
+    return {
+      ...wx,
+      fog: Math.min(wx.fog, BATTLE_FOG_CAP),
+      rain: Math.min(wx.rain, BATTLE_RAIN_CAP),
+    };
+  }
+
+  const _shoveDir = new THREE.Vector3();
+  /** Which crests have already shoved which hull, so none shoves twice. */
+  const shoved = new WeakMap<Hazard, number>();
+  const SHOVE_PLAYER = 1;
+  const SHOVE_AI = 2;
+
+  function crestShoves(hull: THREE.Object3D, which: 'player' | 'ai', bit: number): void {
+    for (const h of hazards.state.live) {
+      if (h.kind === 'maelstrom') continue;
+      if (((shoved.get(h) ?? 0) & bit) !== 0) continue;
+      // The hull's world position, as a unit direction, so the crest's own
+      // frame can be measured against it exactly as `hazards.ts` does.
+      hull.getWorldPosition(_shoveDir);
+      _shoveDir.normalize();
+      const u = _shoveDir.dot(h.east) * GLOBE_RADIUS;
+      const v = _shoveDir.dot(h.north) * GLOBE_RADIUS;
+      // Inside the crest's own footprint: along its length, and within the
+      // half-width that `hazards.ts`'s own contact test uses.
+      if (Math.abs(u) > h.extent || Math.abs(v) > h.halfWidth) continue;
+      shoved.set(h, (shoved.get(h) ?? 0) | bit);
+      // The crest's travel, brought into the arena plane: `north` is where it
+      // is going, and the plane's axes are east and north at the ring.
+      const x = h.north.dot(_ringEast);
+      const z = h.north.dot(_ringNorth);
+      const speed = Math.min(1, h.speed / CREST_SPEED_REF);
+      battleSim.shove(which, x, z, SWAY_MIN + (SWAY_MAX - SWAY_MIN) * speed);
+    }
+  }
+
+  function placeRing(contact: THREE.Vector3): void {
+    // The result is read for its side effect on `ringCentre`; `fitted` is
+    // deliberately not acted on. A fallback ring in a tight inlet is still a
+    // fight, and refusing to stage one there would strand the player in a
+    // contact that can never resolve.
+    findRingCentre(globe.heightMap, terrain.seaLevel, contact, ringCentre);
+    _ringUp.copy(ringCentre);
+    tangentFrame(_ringUp, _ringNorth, _ringEast);
+    const props = battleScene.props;
+    // Written as a basis rather than through Euler angles or a lookAt: the
+    // three columns ARE the mapping, and any other spelling of it is a place
+    // for a handedness bug to hide.
+    props.matrixAutoUpdate = false;
+    props.matrix.makeBasis(_ringEast, _ringUp, _ringNorth);
+    props.matrix.setPosition(
+      _ringUp.x * GLOBE_RADIUS,
+      _ringUp.y * GLOBE_RADIUS,
+      _ringUp.z * GLOBE_RADIUS,
+    );
+    props.updateMatrixWorld(true);
   }
 
   /**
@@ -1153,6 +1294,8 @@ async function startGame(): Promise<void> {
     blackout.run(() => {
       if (playerHullHome) playerHullHome.add(ship.object);
       if (contactHull && contactHullHome) contactHullHome.add(contactHull);
+      scene.remove(battleScene.props);
+      hazards.barMaelstroms(null, 0);
       battleScene.exit();
       if (contactBoat) aiBoats.remove(contactBoat);
       contactBoat = null;
@@ -1768,10 +1911,49 @@ async function startGame(): Promise<void> {
       // freezes with the rest of the world and a storm cannot quietly pass
       // while the player reads a menu.
       energy.update(dt, restingSnapshot(), env, overdriveActive, moonNightFraction, weather.state);
+
+      /*
+       * The world keeps running underneath the fight, which is the whole of
+       * docs/ROADMAP.md step 1 and the reason any of this moved.
+       *
+       * These are the same calls, in the same order, that the sailing branch
+       * makes: the cells before the wind because a squall floors it, the
+       * weather after the wind because a squall is rolled off this frame's
+       * phase, the hazards after the weather because their odds are this
+       * frame's storm. A fight is now a place in the world rather than a
+       * place instead of it -- the sun moves, the sky turns, the sea runs.
+       *
+       * Four things deliberately do NOT run here, and each is the pause
+       * contract rather than an oversight. `ship.update`, because the hull is
+       * halted and `battle.ts` is steering it. `records.hull.update` and
+       * `quests.update`, which docs/ARCHITECTURE.md's pause contract puts in
+       * the sailing branch alone, so a deadline cannot run out and a hull
+       * cannot wear while the player is fighting rather than sailing. And
+       * `aiBoats.update`, because the other raiders would otherwise close on
+       * a ship that cannot steer, and `aiHulls.update` would take back the
+       * very hull this fight has borrowed.
+       */
+      weatherCells.update(dt, ship.state, energy.state);
+      wind.update(dt, ship.state, energy.state, weatherCells.state.stormAtShip);
+      weather.update(dt, wind.state, weatherCells.state);
+      hazards.update(
+        dt,
+        ship.state,
+        energy.state,
+        wind.state,
+        1 + STORM_ODDS_GAIN * weather.state.storm,
+      );
+
       // Only once the arena is actually on screen. Through the first fade the
       // world is still what is being drawn, and a fight that had started
       // behind it would be a second of shooting the player never saw.
-      if (inArena) battleSim.update(dt, battleUi.input(controls.input));
+      if (inArena) {
+        battleSim.update(dt, battleUi.input(controls.input));
+        // After the sim, so the hulls are where this tick put them before the
+        // sea is asked whether a crest is over either of them.
+        crestShoves(ship.object, 'player', SHOVE_PLAYER);
+        if (contactHull) crestShoves(contactHull, 'ai', SHOVE_AI);
+      }
       // The frame the fight is decided, and only that frame. The card prints
       // what was actually paid, so the money has to move before it is raised;
       // see `settleOutcome`.
@@ -1785,19 +1967,36 @@ async function startGame(): Promise<void> {
       battleScene.update(dt, battleSim.state);
       battleUi.update(battleSim.state);
       hud.update(ship.state, energy.state, wind.state, weather.state);
-      // Redrawn but not advanced, for the frozen branch's reason: `env` is not
-      // rewritten during a fight, so this repaints the same reading, and a
-      // canvas resized behind the overlay that is never drawn into is blank.
+
+      /*
+       * The world's own draw, on the fight's camera.
+       *
+       * `globe.update` is what advances `env` -- the sun, the day factor, the
+       * sky -- so it is what makes "the clock is still running" true on
+       * screen rather than only in the sim. It is handed the FIGHT's camera
+       * because it frames and sizes things against one, and last frame's
+       * chase camera is not the one this frame is drawn through.
+       */
+      const battleWx = battleWeather(weather.state);
+      globe.update(dt, env, wind.state, battleWx, weatherCells.state, ship.state, battleScene.camera);
+      rain?.update(dt, ship.state, wind.state, battleWx, battleScene.camera);
+      lightning.update(dt, ship.state, weather.state);
+      // Before postFx.render, for the sailing branch's reason: it renders
+      // into its own cube target and has to give the renderer back.
+      reflection.update(dt, ship.state.position, renderer, scene);
+      docks.update(dt, env, ship.state, energy.state, battleScene.camera);
       timeDial?.update(ship.state, env);
-      // The one thing this branch cannot share with the frozen one. That
-      // branch renders the world at dt 0 to hold a still frame; this renders a
-      // different scene through a different camera, and it renders it LIVE --
-      // the arena is the game while it is up.
-      postFx.render(
-        dt,
-        inArena ? battleScene.scene : scene,
-        inArena ? battleScene.camera : view.camera,
-      );
+      /*
+       * One scene now, and that is the change.
+       *
+       * This used to render `battleScene.scene` -- a second Scene with its own
+       * flat sea, its own sun and its own sky -- through a camera that lived
+       * in it. The props hang in the WORLD scene now and the camera is a child
+       * of them, so the fight is drawn on the globe's water, under the globe's
+       * sky, in the globe's weather. `view.camera` still covers the first fade,
+       * when the world is what is on screen and the ring is not yet placed.
+       */
+      postFx.render(dt, scene, inArena ? battleScene.camera : view.camera);
       // Not optional, and for the frozen branch's reason: `zoomDelta`
       // accumulates from the wheel whether anything reads it or not.
       controls.endFrame();

@@ -1,10 +1,8 @@
 import {
   BoxGeometry,
   Color,
-  DirectionalLight,
   DoubleSide,
   Group,
-  HemisphereLight,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
@@ -12,7 +10,6 @@ import {
   PlaneGeometry,
   PointLight,
   RingGeometry,
-  Scene,
   ShaderMaterial,
   SphereGeometry,
   Vector3,
@@ -27,12 +24,9 @@ import {
   ARENA_CREST_HEIGHT,
   CREST_GRID,
   CREST_VERTEX,
-  SEA_VERTEX,
   crestFragment,
-  seaFragment,
 } from './battlewave';
 import { CREST_MAX, FLOTSAM_COUNT_MAX } from './battlesea';
-import { GLOBE_RADIUS } from './geo';
 import { SUN_APPEARS_SIN } from './horizon';
 import { HULL_OFFSET } from './ship';
 
@@ -80,7 +74,6 @@ import { HULL_OFFSET } from './ship';
  * camera turning with the player at seventeen degrees a second for a minute is
  * the kind of motion that makes people put the game down.
  */
-const SEA_EXTENT = 300;
 const CAMERA_FOV = 50;
 const CAMERA_POSITION = new Vector3(0, 26, 34);
 
@@ -119,17 +112,9 @@ const BOB_PHASE_STEP = Math.PI;
  * argument: a fight at dusk has to be lit like the dusk it interrupted, or
  * the fade into the arena reads as a cut to a different time of day.
  */
-const KEY_LOW = 1.15;
-const KEY_HIGH = 2.05;
 const HORIZON_TINT = new Color('#ff7c3c');
 const GOLDEN_TINT = new Color('#ffc27e');
 const NOON_TINT = new Color('#fff4e4');
-const SKY_NIGHT = new Color('#24365c');
-const SKY_DAY = new Color('#bfe4ff');
-const GROUND_NIGHT = new Color('#0c1017');
-const GROUND_DAY = new Color('#4a4030');
-const HEMI_NIGHT = 0.16;
-const HEMI_DAY = 0.34;
 
 /**
  * Where the key comes from, horizontally: up and to the left of the camera,
@@ -208,6 +193,21 @@ const BALL_HEIGHT = 0.6;
  * They are drawn flat on the water a hair above it, so they read as a
  * disturbance of the surface rather than as an object floating on it.
  */
+/**
+ * The boundary ring's band width as a fraction of its radius, its height
+ * above the water, its colour and its opacity.
+ *
+ * Thin, because it is a line on the sea and not a wall: at ARENA_R_MIN it is
+ * under half a world unit through. Lifted a little further off the water than
+ * a splash is, because the sea it now lies on has real waves in it and a ring
+ * at 0.05 would be swallowed by the first crest that ran under it -- the
+ * ordinary sea peaks at DISPLACE_AMPLITUDE, 0.3, in a full gale.
+ */
+const BOUNDARY_WIDTH = 0.02;
+const BOUNDARY_Y = 0.45;
+const BOUNDARY_COLOR = 0xffb347;
+const BOUNDARY_OPACITY = 0.5;
+
 const MAX_SPLASHES = 6;
 const SPLASH_LIFE = 0.7;
 const SPLASH_R0 = 0.35;
@@ -442,7 +442,22 @@ const RAFT_PIECES: ReadonlyArray<{
 ];
 
 export interface BattleScene {
-  readonly scene: Scene;
+  /**
+   * Everything the fight draws, in FLAT ARENA COORDINATES: metres east in x,
+   * metres north in z, up in y, centred on the ring.
+   *
+   * `main.ts` adds this to the world scene and gives it the one transform
+   * that puts the arena's plane on the globe's tangent plane at the ring --
+   * which is the whole of how a fight in flat metres happens on a sphere. No
+   * prop in this module knows the difference, and `battle.ts` still does its
+   * arithmetic in the plane it was written for.
+   */
+  readonly props: Group;
+  /**
+   * The fight's camera, parented INTO `props`, so it is carried onto the
+   * globe by the same transform as everything it is looking at and needs no
+   * mapping of its own.
+   */
   readonly camera: PerspectiveCamera;
   /** Takes both hulls in. `sunElevation` is `dot(ship.up, env.sunDirection)` at contact. */
   enter(playerHull: Object3D, aiHull: Object3D | null, sunElevation: number): void;
@@ -468,32 +483,55 @@ function smoothstep(edge0: number, edge1: number, x: number): number {
  *   **Post-processing** in docs/ARCHITECTURE.md.
  */
 export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt'>): BattleScene {
-  const scene = new Scene();
-  scene.name = 'arena';
+  // Everything this module owns hangs off one group, so `adopt` is one call
+  // and the two borrowed hulls -- which are adopted by whoever owns them --
+  // are plainly not part of it. It is also the seam the whole fight now hangs
+  // on: `main.ts` puts this group on the globe and nothing inside it has to
+  // learn that it moved.
+  const root = new Group();
+  root.name = 'arena-props';
 
   const camera = new PerspectiveCamera(CAMERA_FOV, 1, 0.1, 2000);
   camera.position.copy(CAMERA_POSITION);
   camera.lookAt(0, 0, 0);
+  // A CHILD of the props, not a loose camera. Three then carries it onto the
+  // tangent plane with everything else, so a camera that was framed against a
+  // flat arena is framed against the same arena lying on the globe -- and the
+  // fixed shot this module was designed around survives the move exactly.
+  root.add(camera);
 
-  // Everything this module owns hangs off one group, so `adopt` is one call
-  // and the two borrowed hulls -- which are adopted by whoever owns them --
-  // are plainly not part of it.
-  const root = new Group();
-  root.name = 'arena-props';
-  scene.add(root);
+  /*
+   * There are no lights and no sea in here any more, and their absence is the
+   * point of this whole file's change.
+   *
+   * The arena used to be a second world: its own flat sea, its own key light
+   * and hemisphere rigged to imitate the elevation the world had at contact,
+   * and its own sky-coloured background. All of it existed to reproduce, for
+   * ninety seconds, a sea and a sky the game already had running -- and the
+   * module comment used to have to insist that none of it was a second
+   * opinion about what the ocean looks like.
+   *
+   * It is not a second world now. The props hang in the world scene, over the
+   * globe's own water, under the globe's own sun and weather, so the light in
+   * here IS the light out there rather than a graded copy of it. See
+   * docs/ROADMAP.md, "The fight, in the live world".
+   */
 
-  /* ---- lights ---- */
+  /* ---- the sea: none. The globe's own water is under the ring now. ---- */
 
-  const hemi = new HemisphereLight(SKY_DAY.getHex(), GROUND_DAY.getHex(), HEMI_DAY);
-  hemi.name = 'arena-hemi';
-  root.add(hemi);
-
-  const key = new DirectionalLight(NOON_TINT.getHex(), KEY_HIGH);
-  key.name = 'arena-key';
-  root.add(key);
-
-  /* ---- the sea ---- */
-
+  /*
+   * The palette block the arena's sea plane used to own, kept because the
+   * crest meshes below still shade against it.
+   *
+   * Those crests are DORMANT in a live-world fight -- `main.ts` builds every
+   * fight with `waves: false` now, because the sea under the ring is the
+   * game's own and a second set of flat crest meshes drawn over real water
+   * would be two seas disagreeing in the same twenty metres. The meshes and
+   * this block are left standing rather than deleted: docs/ROADMAP.md stages
+   * that deletion at step 3, once the fight has been played in the live world
+   * and the ring itself is up for discussion, and a dormant path is cheaper
+   * to delete later than to reconstruct.
+   */
   const seaUniforms = {
     uTime: { value: 0 },
     uDayFactor: { value: 1 },
@@ -505,29 +543,8 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
     uHorizon: { value: new Color(SEA_HORIZON) },
     uShallow: { value: new Color(SEA_SHALLOW) },
     uFoam: { value: new Color(SEA_FOAM) },
-    // One shared object, owned by `fog.ts` and last written by the world's
-    // own `globe.update` before the contact froze it. Nothing in the battle
-    // branch updates it, which is exactly right: the weather the fight is
-    // fought in is the weather it interrupted.
     ...fogUniforms,
   };
-
-  // One quad. Every wave in here is a per-pixel normal, so there is nothing
-  // for a subdivided plane to displace and no reason to pay for its vertices.
-  const sea = new Mesh(
-    new PlaneGeometry(SEA_EXTENT, SEA_EXTENT, 1, 1),
-    new ShaderMaterial({
-      uniforms: seaUniforms,
-      vertexShader: SEA_VERTEX,
-      fragmentShader: seaFragment(quality.waveChop),
-    }),
-  );
-  sea.name = 'arena-sea';
-  sea.rotation.x = -Math.PI / 2;
-  // It is the floor of everything and is drawn first; nothing here is ever
-  // outside it, so the frustum test is pure cost.
-  sea.frustumCulled = false;
-  root.add(sea);
 
   /* ---- cannonballs ---- */
 
@@ -564,6 +581,38 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
 
   // Authored at unit radius and scaled, so one geometry serves every ring at
   // every point in its life.
+  /*
+   * The ring itself, drawn on the water at last.
+   *
+   * It was never a mesh before, and it did not need to be: the arena was an
+   * empty plane and the only two things on it were the hulls, so the circle
+   * they travelled read plainly off their own motion. On the real ocean, with
+   * an archipelago behind it and the globe's own sea running under it, a
+   * boundary nobody has drawn is a boundary the player has to infer from two
+   * moving dots. docs/ROADMAP.md names this in the same breath as dropping
+   * the cut: "the ring becomes a visible constraint drawn on the sea".
+   *
+   * Authored at unit radius and SCALED to `state.radius` every frame, so it
+   * closes in as the fight does and the shrinking is something the player can
+   * see coming rather than something they discover by being squeezed.
+   */
+  const boundary = new Mesh(
+    new RingGeometry(1 - BOUNDARY_WIDTH, 1, 96),
+    new MeshBasicMaterial({
+      color: BOUNDARY_COLOR,
+      transparent: true,
+      opacity: BOUNDARY_OPACITY,
+      // Flat on the water, and never writing depth: a ring that occluded
+      // through its own transparent middle would cut the far hull in half.
+      depthWrite: false,
+      side: DoubleSide,
+    }),
+  );
+  boundary.name = 'arena-boundary';
+  boundary.rotation.x = -Math.PI / 2;
+  boundary.position.y = BOUNDARY_Y;
+  root.add(boundary);
+
   const ringGeometry = new RingGeometry(0.82, 1, 28);
   const splashes: Splash[] = [];
   for (let i = 0; i < MAX_SPLASHES; i++) {
@@ -853,15 +902,17 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
   }
 
   return {
-    scene,
+    props: root,
     camera,
 
     enter(player: Object3D, ai: Object3D | null, sunElevation: number): void {
       playerHull = player;
       aiHull = ai;
       elapsed = 0;
-      scene.add(player);
-      if (ai !== null) scene.add(ai);
+      // Into the PROPS, so both hulls ride the same transform onto the globe
+      // as the ring they are circling inside.
+      root.add(player);
+      if (ai !== null) root.add(ai);
 
       /*
        * The sine of the sun's elevation at the ship, graded exactly as
@@ -878,7 +929,6 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
        */
       const elevation = Math.min(1, Math.max(-1, sunElevation));
       const dayFactor = smoothstep(SUN_APPEARS_SIN, 0.22, elevation);
-      const height = smoothstep(SUN_APPEARS_SIN, 0.42, elevation);
 
       const sunColor = HORIZON_TINT.clone()
         .lerp(GOLDEN_TINT, smoothstep(SUN_APPEARS_SIN, 0.0, elevation))
@@ -891,30 +941,15 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
         .multiplyScalar(Math.sqrt(Math.max(0, 1 - elevation * elevation)))
         .setY(elevation);
 
-      key.position.copy(direction).multiplyScalar(GLOBE_RADIUS);
-      key.color.copy(sunColor);
-      key.intensity = KEY_LOW + (KEY_HIGH - KEY_LOW) * height;
-
-      hemi.intensity = HEMI_NIGHT + (HEMI_DAY - HEMI_NIGHT) * dayFactor;
-      hemi.color.copy(SKY_NIGHT).lerp(SKY_DAY, dayFactor);
-      hemi.groundColor.copy(GROUND_NIGHT).lerp(GROUND_DAY, dayFactor);
-
+      // No key and no hemisphere to write any more: the world's own rig is
+      // lighting these props, which is the entire point of the move. What the
+      // grading is still used for is the dormant crest palette below, and a
+      // fight that ever re-enables those wants them lit like the sky it is
+      // under rather than like noon.
       seaUniforms.uSunDirection.value.copy(direction);
       seaUniforms.uSunColor.value.copy(sunColor);
       seaUniforms.uDayFactor.value = dayFactor;
       seaUniforms.uTime.value = 0;
-
-      // The world's own haze colour, and the reason nothing but a sliver of
-      // it is ever seen: the frustum points below the horizontal, so the sea
-      // fills the frame at any ordinary aspect. It is encoded here because
-      // the clear is not a material and nothing downstream converts it --
-      // `postfx.ts`'s final blit is a plain copy and only materials
-      // self-encode -- so a linear colour would clear a stop too dark.
-      const background = new Color()
-        .copy(fogUniforms.uFogColorNight.value)
-        .lerp(fogUniforms.uFogColorDay.value, dayFactor)
-        .convertLinearToSRGB();
-      scene.background = background;
 
       // Last fight's balls, rings and flashes, in case `exit` was never
       // reached: a fight always starts on an empty sea.
@@ -924,6 +959,11 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
     update(dt: number, state: BattleState): void {
       elapsed += dt;
       seaUniforms.uTime.value = elapsed;
+
+      // The ring closes with the fight. One scale on one mesh, read straight
+      // off the sim rather than re-derived, so what is drawn is the boundary
+      // `battle.ts` is actually holding the boats to.
+      boundary.scale.set(state.radius, state.radius, 1);
 
       // The arena camera is only alive under the battle branch and `main.ts`'s
       // resize handler knows nothing about it, so it takes its own aspect from

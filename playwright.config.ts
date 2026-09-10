@@ -100,7 +100,24 @@ const PREVIEW_PORT = 4173;
 
 export default defineConfig({
   testDir: './tests/smoke',
-  timeout: 60_000,
+  /*
+   * 90 s, raised from 60.
+   *
+   * The battle case is what moved it. A fight used to render a second, empty
+   * scene -- one flat plane, two hulls and a handful of spheres -- and now
+   * renders the live world it is being fought in: globe water, the
+   * displacement patch, the reflection cube, the cloud deck and the weather,
+   * all of it on a software rasteriser. It came in at 50 s against this
+   * budget before that change and 66 s after, which is not a regression to
+   * chase so much as the honest cost of drawing the world instead of an
+   * empty room, paid on a renderer that is roughly a hundred times slower
+   * than the one a player has.
+   *
+   * It is NOT a statement about frame rate on real hardware, and must not be
+   * read as one: docs/TESTING.md's note on this tier is that SwiftShader is
+   * for looking at what is drawn, never for how fast.
+   */
+  timeout: 90_000,
   fullyParallel: false,
   workers: 1,
   retries: 0,

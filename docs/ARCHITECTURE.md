@@ -268,7 +268,7 @@ shader.
 | `waveconstants.ts` | `SWELL_WAVELENGTH`, `WAVE_WAVELENGTH`, `CHOP_WAVELENGTH`, `AXIS_WAVE`, `AXIS_CHOP`, `DISPLACE_AMPLITUDE`, `freq`, `freqNumber`, `vec3Literal` | the one source both `waterglsl.ts` (GPU) and `wavefield.ts` (CPU) read, so the two wave fields can never numerically drift apart — see **The wave field** |
 | `waterglsl.ts` | `WATER_UNIFORMS`, `waterWavefield`, `waterDepth`, `WATER_LIGHTING_HEAD`/`_TAIL`, `waterFoam`, `WATER_FOAM_TAIL`, `WATER_OUTPUT` | the water fragment shader, as named chunks `water.ts` assembles; see **Shader notes** for the plugin hook seams between them |
 | `fogglsl.ts` | `FOG_GLSL` (`applyAerial` contract) | aerial-perspective blend toward the atmosphere colour, thickened at grazing angles and weakened with camera altitude, capped at `FOG_MAX_AMOUNT`; called from water and land. The BANK's share of it ramps in over `FOG_BANK_ONSET` (70 units) so the near field belongs to `fogbank.ts`'s geometry and this term keeps the far — see **The fog bank** |
-| `fog.ts` | `fogUniforms`, `updateFog(env, weather?)` | owns the seven uniforms `applyAerial` reads; called from `globe.update` before water and land. `uFogMax` is a uniform whose resting value is the constant `FOG_MAX_AMOUNT` used to be; `uFogBankColor` and `uFogStormColor` are the two endpoints weather fades the distance toward, and they pull opposite ways — a bank whitens, a downpour darkens. Deliberately does NOT rewrite the day/night colours: `battlescene.ts` merges this same object and `globe.update` does not run during a fight, so anything written here would freeze into the arena's haze |
+| `fog.ts` | `fogUniforms`, `updateFog(env, weather?)` | owns the seven uniforms `applyAerial` reads; called from `globe.update` before water and land. `uFogMax` is a uniform whose resting value is the constant `FOG_MAX_AMOUNT` used to be; `uFogBankColor` and `uFogStormColor` are the two endpoints weather fades the distance toward, and they pull opposite ways — a bank whitens, a downpour darkens. Deliberately does NOT rewrite the day/night colours. That restraint was originally about the arena freezing them for the length of a fight; `globe.update` runs during a fight now, so the freezing argument is gone, but the constant-uniform arrangement is kept because the greying belongs per fragment inside `applyAerial` rather than baked into a shared colour |
 | `weathermap.ts` | `createWeatherMap()`, `bakeWeatherMap(cells, data, w, h)`, `WEATHERMAP_GLSL`, `weatherMapUniforms`, `MAP_WIDTH/HEIGHT/HZ` | the live cells baked into a 512×256 RGBA8 equirect texture at 4 Hz: R storm, G fog, B a lightning flag, `NoColorSpace`. Data, not colour, in `wakemap.ts`'s sense. `WEATHERMAP_GLSL` declares `uWeatherMap` itself and is pasted after `HEIGHTMAP_GLSL`, whose `dirToEquirect` it reuses. Read by the water, the land and the cloud deck; read by nothing that decides a number — see **Weather** |
 | `fogbank.ts` | `createFogBank(slices)`, `fogInRange(ship, weather?, cells?)`, `sliceOpacity(n)` | the fog you sail INTO: a stack of concentric spherical caps at sea level, following the ship, carrying a four-octave simplex field. `update(dt, env, ship, weather?, cells?)`. Built by `globe.ts` and gated on `quality.fogSlices`, which is 0 on the low tier where the module is ABSENT rather than idle. See **The fog bank** |
 | `simplexglsl.ts` | `SIMPLEX_GLSL` | Ashima's 3D simplex noise, once. Lived inside `clouds.ts` until `fogbank.ts` needed the same field at sea level; declares no uniforms, and defines `mod289`/`permute`/`taylorInvSqrt`, so a shader must not paste it twice |
@@ -298,9 +298,10 @@ shader.
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the gun's cadence, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
 | `battleconstants.ts` | `ARENA_R`, `ARENA_R_MIN`, `ARENA_SHRINK`, `ARENA_OMEGA`, `THROTTLE_GAIN`, `HITS_TO_LOSE`, `FIRE_COOLDOWN`, `BALL_SPEED`, `HIT_RADIUS`, `BATTLE_TIMEOUT` | the numbers the cannon fight is built out of, split out of `battle.ts` by the rework so that `battleai.ts` and `battlesea.ts` can read the ring's dimensions without importing the module that imports them. No logic, only tuning decisions with the reasoning attached; `battle.ts` re-exports the lot so every existing importer keeps working. The AI's own constants deliberately do NOT live here — they describe a gunner rather than an arena, and sit in `battleai.ts` |
 | `battleai.ts` | `createBattleAi(rng)`, `BattleAi`, `AiView`, `AI_LAG`, `AI_HELM_PERIOD`, `AI_HELM_COIN`, `AI_FUSE`, `AI_SOLUTION_TOLERANCE` | the enemy gunner and the enemy helm, and nothing else: it knows nothing of the sea, the ring's shrink or the locker's bookkeeping. A two-second delay line (`observe` records every tick, `throttle`/`gun` read it `AI_LAG` later, so every decision is aimed at the player of two seconds ago), a coin flip in one helm decision in four, and a fuse that commits a shot `AI_FUSE` before it fires — which is what makes it dodgeable. Decisions 1, 2 and 4 of `docs/BATTLE_REWORK_PLAN.md` |
-| `battlesea.ts` | `createBattleSea(rng, options)`, `BattleSea`, `BattleSeaState`, `SwayTarget`, `CALM`, `ROUGH`, the crest/sway/flotsam constants, `FOUL_SECONDS` | the two seeded systems that put something in the arena, each switched independently by `BattleOptions`: up to `CREST_MAX` crests at once, each a finite length of a line perpendicular to one of the four cardinal directions, rolling across the ring at its own speed and shoving the hulls it actually passes over as a closed-form pulse (nothing to integrate, so nothing that can go unstable at a capped `dt`); and a fleet of three to six flotsam rafts, each its own size and speed, that swallow a ball crossing them and foul a hull they touch for `FOUL_SECONDS`. `CALM` turns both off and is what every unit case measuring the gunner is pinned against; `ROUGH` is the shipping default. Decisions 5 and 7 |
+| `battlesea.ts` | `createBattleSea(rng, options)`, `BattleSea`, `BattleSeaState`, `SwayTarget`, `CALM`, `ROUGH`, the crest/sway/flotsam constants, `FOUL_SECONDS` | the two seeded systems that put something in the arena, each switched independently by `BattleOptions`: up to `CREST_MAX` crests at once, each a finite length of a line perpendicular to one of the four cardinal directions, rolling across the ring at its own speed and shoving the hulls it actually passes over as a closed-form pulse (nothing to integrate, so nothing that can go unstable at a capped `dt`); and a fleet of three to six flotsam rafts, each its own size and speed, that swallow a ball crossing them and foul a hull they touch for `FOUL_SECONDS`. `CALM` turns both off and is what every unit case measuring the gunner is pinned against; `ROUGH` is the arena's old default; `LIVE` — rafts but no crests — is what a fight in the world is built with, because the sea under the ring is the globe's own and the shoves come from its crests through `shove`. Decisions 5 and 7 |
 | `bounty.ts` | `WIN_TIERS`, `rollWinGold(rng)`, `lossGold(purse)`, `rollDrawGold(rng, purse)`, `LOSS_SHARE`/`LOSS_MIN`/`LOSS_MAX`, `DRAW_SWING` | data and pure functions for the three gold outcomes; every roll takes the caller's `rng` |
-| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the arena: a SECOND `Scene` with its own sea, lights, fixed camera, cannonballs, splashes and the wall of water crossing the ring. It is not the globe water and must never import `water.ts`; see **AI boats and the battle** |
+| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the fight's props: a `Group` in FLAT ARENA COORDINATES holding the boundary ring, the cannonballs, the splashes, the flashes and the rafts, plus the camera parented into it. No longer a second `Scene`, and no longer owns a sea, lights or a sky: `main.ts` adds the group to the WORLD scene and gives it the one transform that lays the arena's plane on the globe's tangent plane at the ring. See **The fight happens in the world** |
+| `battlering.ts` | `findRingCentre(heightMap, seaLevel, contact)`, `ringFits`, `RING_CLEARANCE` | where a fight may be staged. A raider can catch the player a cable off a headland, and `battle.ts` puts both hulls on a circle it assumes is water; on the globe that has to be earned. Samples the DISC — not the rim — on a three-unit polar grid, and slides the ring to the nearest clear water when the contact point will not do. Reports whether it actually found one |
 | `battlewave.ts` | `SEA_VERTEX`, `seaFragment(fine)`, `CREST_VERTEX`, `crestFragment(fine)`, `ARENA_CREST_HEIGHT`, `CREST_GRID` | the arena's water as GLSL, split out of `battlescene.ts` the way `hazardcrest.ts` was split out of `waterhazard.ts`. Compiles `waterglsl.ts`'s ridged field on a plane, `hazardfield.ts`'s crest profile as shared characters and `hazardcrest.ts`'s art constants, so the fight is fought on the same wave the world raises — see **The arena sea is not the globe water, but it is the same wave** |
 | `battlecover.ts` | `createBattleCover(deps)`, `BattleCover`, `COUNTDOWN` | the card a fight is DECLARED on: the plate, the rules in one sentence off `FIRE_COOLDOWN`/`HITS_TO_LOSE`, and the three-second count into the arena. A card over a FROZEN world, unlike `battleui.ts` — see **The beat before a fight**. Counts on the wall clock, not on `dt` |
 | `battleui.ts` | `createBattleUi(deps)`, `BattleUi`, `BattleResult` | the fight's overlay: the rounds-and-hits strip, the FIRE key, the Space capture and the result card; `isOpen` is a LIVE GETTER, on the pause contract's terms |
@@ -731,40 +732,77 @@ Discovery is stamped with `WeatherState.visibility`, not with `RADAR_RANGE`,
 which is what makes fog cost something lasting: a coast passed in thick
 weather is not charted and has to be passed again.
 
-### The arena takes the storm and never the fog
+### The fight happens in the world
 
-A fight is a second `Scene` with its own flat sea nowhere on the globe, so
-there is no map sample to take in there — an equirectangular lookup at a
-position that is not a place would be meaningless. What the arena has instead
-is the AT-SHIP envelope: `fog.ts`'s uniform block is shared into the arena's
-materials and was last written by `globe.update` before the contact froze the
-world, so `uRainHere` is the storm that was over the ship at the moment of the
-ram. `battlewave.ts` passes `vec2(uRainHere, 0.0)` to `applyAerial`.
+A fight used to be a second `Scene` with its own flat sea nowhere on the globe,
+its own sun rigged to imitate the elevation at contact, and its own sky. All of
+it existed to reproduce, for ninety seconds, a sea and a sky the game already
+had running, and this section used to be a list of the compromises that forced:
+no map sample, because a position that is not a place cannot be looked up; an
+at-ship fog envelope frozen at the moment of the ram; a storm let in and a bank
+kept out.
 
-**The storm comes in and the fog does not**, and the second half is a decision
-rather than an omission (2026-09-08, owner's call). A storm's haze darkens the
-air, and a fight in foul weather should look like one. A bank whitens it — and
-this camera sits close over a twenty-unit ring, so fog thick enough to read as
-fog would hide the enemy hull. That is not a harder fight, it is an unreadable
-one.
+**None of that applies now.** `battlescene.ts` owns a `Group` of props in flat
+arena coordinates and nothing else; `main.ts` adds it to the world scene and
+gives it the basis `(east, up, north)` at the ring's centre, so a combatant at
+arena `(x, z)` lands at `centre * R + east * x + north * z` and a prop at
+`y = 0` lands at sea level. The camera is a child of that group, so the fixed
+shot the arena was designed around is carried onto the globe with everything it
+frames. `battle.ts` still does every calculation in flat metres and has not
+changed a line for any of it. See docs/ROADMAP.md, "The fight, in the live
+world", whose step 1 this is.
 
-The branch that built the weather passed `vec2(0.0)` here and gave the arena
-nothing, on the reasoning that a fight is not a place. That reasoning still
-holds for the map and is why there is no map sample; it stopped holding for
-the at-ship envelope once the arena started raising the world's own wave.
+What that buys is the thing the roadmap wanted and not a graphical upgrade: the
+clock runs. `weatherCells.update`, `wind.update`, `weather.update`,
+`hazards.update` and `globe.update` all run on the battle branch now, so the
+sun moves, a squall can arrive mid-duel, and the sea under the ring is the sea
+that was running outside it.
 
-The other thing that reaches a fight is `battlesea.ts`'s CALM/ROUGH switch,
-decided once when the cover card opens — `?calm=1` and `?rough=1` override it.
-`fog.ts` is careful not to write the day/night fog colours during a fight for
-the same freezing reason: `globe.update` does not run in there, so a colour
-written mid-fight would stick for the length of it.
+Four things deliberately do not run, and each is the pause contract rather than
+an oversight: `ship.update`, because the hull is halted and `battle.ts` is
+steering it; `records.hull.update` and `quests.update`, which stay in the
+sailing branch so a deadline cannot expire and a hull cannot wear while the
+player is fighting rather than sailing; and `aiBoats.update`, because the other
+raiders would otherwise close on a ship that cannot steer, and `aiHulls.update`
+would reclaim the very hull the fight has borrowed.
+
+**The two seas.** `battlesea.ts` still owns the sway, the rafts and the fouling,
+but a live-world fight is built with `LIVE` — rafts, no crests of its own. A
+second set of flat crest meshes drawn across the globe's water would be two seas
+disagreeing inside the same twenty metres. The shoves come from the REAL crests
+instead: `main.ts` watches `hazards.ts`'s waves and calls `battleSim.shove` when
+one crosses a hull, through the identical pulse channel the arena's own crests
+used. Amplitude is mapped onto `SWAY_MIN..SWAY_MAX` off the crest's speed rather
+than passed through as a world height, because `clampKeel`'s argument is that
+one pulse peaks at 6 inside a ring that floors at 8, and a raw amplitude would
+invalidate it silently.
+
+**Maelstroms are barred from the ring and crests are not.** `hazards.barMaelstroms`
+keeps a funnel from opening inside a circle the player is not allowed to leave —
+a duel should be decided by the duel, not by the hull being captured mid-broadside.
+A crest is the opposite case and is let through: it shoves, the shove is
+survivable, and a front crossing the ring is weather that can be seen coming.
+
+**The quality floor.** The reason fog was excluded from a fight has not gone
+away; it has become `main.ts`'s `battleWeather`, which caps `fog` and `rain` at
+the readable half of their ranges for the length of a fight. A storm still
+darkens the water and rain still falls — it simply may not close the visibility
+past the point where the other hull stops being a target. The roadmap states
+this as a design rule rather than a nicety.
+
+`battlewave.ts` and `battlescene.ts`'s crest meshes are left standing but
+dormant. docs/ROADMAP.md stages their deletion at step 3.
 
 ### What the weather does NOT reach
 
-The fishing card, and the frozen-overlay and battle branches of the frame
-loop, where neither `weatherCells.update` nor `weather.update` is called —
-the weather freezes with the rest of the world, exactly as the wind does, so a
-storm cannot quietly pass while the player reads a menu.
+The fishing card and the frozen-overlay branch of the frame loop, where
+neither `weatherCells.update` nor `weather.update` is called — the weather
+freezes with the rest of the world, exactly as the wind does, so a storm cannot
+quietly pass while the player reads a menu.
+
+The battle branch used to be in that list and no longer is: see **The fight
+happens in the world** above. A fight is a place in the world now rather than a
+place instead of it, so the weather runs through one.
 
 ### Dev queries
 
@@ -2934,6 +2972,14 @@ therefore hang still in the arena; animating them would need `shipfx.ts` to
 learn to tick without a hull update, and that is out of scope.
 
 ### The arena sea is not the globe water, but it is the same wave
+
+> **Dormant.** A fight is staged on the globe's own water now and
+> `battlescene.ts` builds no sea plane at all, so nothing below is on screen
+> during a fight. It is left standing because `battlewave.ts` is still
+> compiled and the crest meshes still exist, both switched off rather than
+> deleted — docs/ROADMAP.md stages that deletion at step 3. See **The fight
+> happens in the world**.
+
 `battlewave.ts` builds the arena's plane and its crest, and it **must never
 import `water.ts` or `waterpatch.ts`**. The globe's water is a full sphere at
 `GLOBE_RADIUS` carrying a depth ramp, an inland mask, a foam pass, a wake map,

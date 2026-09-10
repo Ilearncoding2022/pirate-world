@@ -77,12 +77,32 @@ export interface BattleSea {
    * none. The raft it meets is sunk.
    */
   strike(ax: number, az: number, bx: number, bz: number): { x: number; z: number } | null;
+  /** Shove one hull along `(x, z)`. See the implementation for the contract. */
+  shove(
+    which: 'player' | 'ai',
+    x: number,
+    z: number,
+    amplitude: number,
+    elapsed: number,
+  ): void;
 }
 
 /** Every system off. The sea a gunner is measured on, and what `?calm=1` asks for. */
 export const CALM: BattleOptions = { waves: false, flotsam: false };
 
-/** Every system on. The sea the game is played on. */
+/**
+ * Rafts, but no crests of the arena's own.
+ *
+ * What a fight in the live world is built with. The sea under the ring is the
+ * game's own now, so a second set of flat crest meshes drawn across it would
+ * be two seas disagreeing inside the same twenty metres -- and the shove that
+ * matters comes from the REAL waves instead, through `shove`. The flotsam
+ * stays: it is debris in the water rather than a claim about what the water
+ * is doing, and it is what the withdrawn shoals were replaced by.
+ */
+export const LIVE: BattleOptions = { waves: false, flotsam: true };
+
+/** Every system on. The sea the ARENA was played on. */
 export const ROUGH: BattleOptions = { waves: true, flotsam: true };
 
 const TWO_PI = Math.PI * 2;
@@ -364,30 +384,52 @@ function segmentCircleEntry(
 interface SwayPulse {
   /** Start a fresh pulse, replacing whatever was running outright. */
   trigger(axis: ArenaCrest['axis'], amplitude: number, at: number): void;
+  /** The same, along any direction in the arena plane. Need not be unit. */
+  triggerAlong(x: number, z: number, amplitude: number, at: number): void;
   /** This tick's displacement, arena units, in world (x, z). */
   advance(elapsed: number): { x: number; z: number };
 }
 
 function createSwayPulse(): SwayPulse {
-  let axis: ArenaCrest['axis'] | null = null;
+  /*
+   * A DIRECTION rather than one of the four named axes, which is the one
+   * change that lets the open sea shove a hull in here.
+   *
+   * The arena's own crests only ever ran along the compass points, so an
+   * axis name was the whole of what a pulse needed. A crest raised by
+   * `hazards.ts` runs wherever the wind put it, and rounding that to the
+   * nearest cardinal would turn a wave the player can watch coming into a
+   * shove from somewhere adjacent to where it came from. `trigger` still
+   * takes the name and converts, so nothing that used to call it changed.
+   */
+  let dirX = 0;
+  let dirZ = 0;
+  let live = false;
   let amplitude = 0;
   let start = 0;
   return {
     trigger(a, amp, at) {
-      axis = a;
+      const v = AXIS_VECTOR[a];
+      this.triggerAlong(v.x, v.z, amp, at);
+    },
+    triggerAlong(x, z, amp, at) {
+      const len = Math.hypot(x, z);
+      if (len < 1e-6) return;
+      dirX = x / len;
+      dirZ = z / len;
+      live = true;
       amplitude = amp;
       start = at;
     },
     advance(elapsed) {
-      if (axis === null) return { x: 0, z: 0 };
+      if (!live) return { x: 0, z: 0 };
       const t = elapsed - start;
       if (t > SWAY_DECAY_HORIZON) {
-        axis = null;
+        live = false;
         return { x: 0, z: 0 };
       }
       const raw = amplitude * (t / SWAY_TAU) * Math.exp(1 - t / SWAY_TAU);
-      const v = AXIS_VECTOR[axis];
-      return { x: raw * v.x, z: raw * v.z };
+      return { x: raw * dirX, z: raw * dirZ };
     },
   };
 }
@@ -605,6 +647,35 @@ export function createBattleSea(
     }
   }
 
+  /**
+   * Shove one hull along `(x, z)`, as if a wave had just passed under it.
+   *
+   * The way the OPEN SEA reaches into a fight. `main.ts` watches the real
+   * crests `hazards.ts` is running and calls this when one crosses a hull,
+   * so a front the player watched bearing down on the ring is the front that
+   * throws their aim -- rather than a second, invisible set of crests raised
+   * inside the arena to imitate the sea outside it.
+   *
+   * It is the SAME channel the arena's own crests use, on purpose. The pulse
+   * shape, its decay, the one-pulse-per-hull rule and the keel clamp are all
+   * unchanged and all still apply, so a shove from the ocean is bounded by
+   * SWAY_MAX exactly as one from an arena crest was -- which is what keeps
+   * `clampKeel`'s argument (one pulse peaks at 6, the ring floors at 8)
+   * standing. The caller maps a real crest's height and speed onto
+   * SWAY_MIN..SWAY_MAX rather than passing a world amplitude through, for
+   * that reason.
+   */
+  function shove(
+    which: 'player' | 'ai',
+    x: number,
+    z: number,
+    amplitude: number,
+    elapsed: number,
+  ): void {
+    const pulse = which === 'player' ? playerPulse : aiPulse;
+    pulse.triggerAlong(x, z, amplitude, elapsed);
+  }
+
   function update(
     dt: number,
     elapsed: number,
@@ -660,18 +731,30 @@ export function createBattleSea(
         if (c.at > ARENA_R0 + CREST_MARGIN) state.crests.splice(i, 1);
       }
 
-      // One pulse per hull however many crests are running: a hull caught by
-      // a second wave inside the first one's decay is thrown by the new one
-      // outright rather than by the sum, which is what keeps the shove
-      // bounded by SWAY_MAX no matter how busy the sea gets. The keel clamp
-      // below is a floor and not a substitute for that.
-      const pv = playerPulse.advance(elapsed);
-      player.swayX = pv.x;
-      player.swayZ = pv.z;
-      const av = aiPulse.advance(elapsed);
-      ai.swayX = av.x;
-      ai.swayZ = av.z;
     }
+
+    /*
+     * Outside the `wavesOn` gate, and that is deliberate.
+     *
+     * The pulses used to advance only while the arena raised its own crests,
+     * which was correct while the arena's crests were the only thing that
+     * could ever trigger one. A live-world fight switches those off and takes
+     * its shoves from the real sea instead (`shove`, below), so a decay that
+     * ran only under `wavesOn` would leave a hull shoved by an ocean crest
+     * stuck at the displacement it was shoved to, for ever.
+     *
+     * One pulse per hull however many waves are running: a hull caught by a
+     * second wave inside the first one's decay is thrown by the new one
+     * outright rather than by the sum, which is what keeps the shove bounded
+     * by SWAY_MAX no matter how busy the sea gets -- and that bound is what
+     * the keel clamp below is written against.
+     */
+    const pv = playerPulse.advance(elapsed);
+    player.swayX = pv.x;
+    player.swayZ = pv.z;
+    const av = aiPulse.advance(elapsed);
+    ai.swayX = av.x;
+    ai.swayZ = av.z;
 
     // ---- Keel clearance, on whatever sway is now standing ------------
     clampKeel(player, radius);
@@ -730,5 +813,5 @@ export function createBattleSea(
     return point;
   }
 
-  return { state: state as BattleSeaState, update, strike };
+  return { state: state as BattleSeaState, update, strike, shove };
 }

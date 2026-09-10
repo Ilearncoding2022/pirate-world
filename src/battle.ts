@@ -112,6 +112,16 @@ export interface BattleSim {
   /** Live, mutated in place for the length of one fight. */
   readonly state: BattleState;
   update(dt: number, input: BattleInput): void;
+  /**
+   * Shove a hull along `(x, z)` in the arena plane, as a wave would.
+   *
+   * The one way in from outside the sim, and it is a pass-through to
+   * `battlesea.ts`'s own channel rather than a second mechanism: a fight in
+   * the live world takes its shoves from the real crests `hazards.ts` runs,
+   * and this is how they arrive. `elapsed` is the sim's own clock, so the
+   * caller does not have to keep one.
+   */
+  shove(which: 'player' | 'ai', x: number, z: number, amplitude: number): void;
 }
 
 interface MutableCombatant extends Combatant {
@@ -398,5 +408,9 @@ export function createBattleSim(
     settle();
   }
 
-  return { state: state as BattleState, update };
+  function shove(which: 'player' | 'ai', x: number, z: number, amplitude: number): void {
+    sea.shove(which, x, z, amplitude, state.elapsed);
+  }
+
+  return { state: state as BattleState, update, shove };
 }

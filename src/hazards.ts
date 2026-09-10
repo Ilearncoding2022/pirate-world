@@ -127,6 +127,23 @@ export interface Hazards {
   force(kind: HazardKind, centre: Vector3, north: Vector3): void;
   /** A random point of reachable open ocean, clear of land and of every berth. */
   pickRespawn(): Vector3;
+  /**
+   * Bar MAELSTROMS from within `radius` of `centre`, or clear the bar with
+   * `null`. Crests are untouched and go on rolling through.
+   *
+   * There is exactly one caller and one reason: a fight. A duel is decided by
+   * the duel, and a funnel opening under a ring the player is not allowed to
+   * leave would end one by a rule the fight never had -- the hull is captured
+   * and the run is over, mid-broadside. A crest is the opposite case and is
+   * deliberately let through: it shoves, the shove is survivable, and a front
+   * crossing the ring is weather the player can see coming and steer for.
+   *
+   * A bar and not a shelter. Nothing here removes a funnel that is ALREADY
+   * running when the bar goes up: `hazards.ts` does not take back water it
+   * has raised, and a fight that began beside an open maelstrom began beside
+   * one. It only stops a new one being raised there.
+   */
+  barMaelstroms(centre: Vector3 | null, radius: number): void;
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,7 +364,7 @@ const SPAWN_TRIES = 24;
  */
 const CREST_SPEED_MIN = 2;
 const CREST_SPEED_MAX = 10.8;
-const CREST_SPEED_REF = 6;
+export const CREST_SPEED_REF = 6;
 
 /**
  * How far a crest travels in an untouched life, world units, and the seconds
@@ -1152,6 +1169,16 @@ export function createHazards(deps: HazardsDeps): Hazards {
       // The centre first: the cheapest test, and the one that rejects most.
       if (!isOpenWater(_candidate)) continue;
       if (nearBerth(_candidate, extent + BERTH_MARGIN + largestBerthRadius())) continue;
+      // A fight's ring, on the same terms as a berth and for a related
+      // reason: both are places the hull cannot simply sail out of. Crests
+      // are exempt -- see `barMaelstroms`.
+      if (
+        kind === 'maelstrom' &&
+        barCentre !== null &&
+        arcDistance(_candidate, barCentre) < barRadius + extent
+      ) {
+        continue;
+      }
 
       // The heading, and with it the frame the footprint is measured in.
       if (kind === 'maelstrom') {
@@ -1190,6 +1217,18 @@ export function createHazards(deps: HazardsDeps): Hazards {
    * test one comparison per berth and errs outward, which is the safe side of
    * a rule about not putting a wall of water in a charging zone.
    */
+  /**
+   * Where maelstroms may not be raised, and how far around it. Null whenever
+   * nothing is asking, which is every frame outside a fight.
+   */
+  let barCentre: Vector3 | null = null;
+  let barRadius = 0;
+
+  function barMaelstroms(centre: Vector3 | null, radius: number): void {
+    barCentre = centre === null ? null : centre.clone().normalize();
+    barRadius = radius;
+  }
+
   let berthRadius = -1;
   function largestBerthRadius(): number {
     if (berthRadius >= 0) return berthRadius;
@@ -1731,5 +1770,5 @@ export function createHazards(deps: HazardsDeps): Hazards {
     return latLonToDir(SPAWN_LAT_DEG, SPAWN_LON_DEG).normalize();
   }
 
-  return { state: state as HazardState, update, reset, force, pickRespawn };
+  return { state: state as HazardState, update, reset, force, pickRespawn, barMaelstroms };
 }

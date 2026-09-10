@@ -243,7 +243,29 @@ strategy: race the terminator west, or stop and let it pass over.
   `energy.ts` is what every other cost in the game is balanced against. Build it
   behind a URL flag and measure a full session before committing.
 
-### 4. The fight, in the live world
+### 4. The fight, in the live world — **step 1 and step 2 done**
+
+**Built.** The cut is dropped: `battlescene.ts` owns a `Group` of props in flat
+arena coordinates, `main.ts` adds it to the world scene and lays it on the
+globe's tangent plane at the ring, and the camera is parented into that group.
+The world's clock runs through a fight — cells, wind, weather, hazards and
+`globe.update` all tick — so the sun moves and a squall can arrive mid-duel.
+The ring is drawn on the sea and shrinks with the sim. `battlering.ts` keeps a
+fight off the coast, sampling the disc rather than the rim. Step 2 came almost
+free with it: the sea under the ring IS the world's, so the wind sets the
+crests and a storm darkens the water without anything being fed anywhere, and
+the arena's own crests are switched off (`LIVE`) in favour of shoves from the
+real ones. The quality floor is `main.ts`'s `battleWeather`, capping fog and
+rain for the length of a fight.
+
+Still open: **step 3**, replacing flotsam with real debris and only then
+considering dropping the ring — and the deletion of `battlewave.ts` and
+`battlescene.ts`'s crest meshes, which are switched off but still compiled.
+And the frame-rate evidence the staging asks for: the browser tier's battle
+case went from 50 s to 66 s under SwiftShader, which is the cost of drawing the
+world instead of an empty room on a software rasteriser and says nothing about
+a real GPU. Nobody has played it on one yet.
+
 
 The reason to do this is not realism. It is **continuity**. The distinctive
 thing about this game is a small, continuous, always-running planet, and every
@@ -775,8 +797,11 @@ because it looks good on a store page rather than because it improves the game.
 9. **Fish by latitude, depth and time**, then **latitude as a power
    gradient**. Two cheap changes that make the globe matter, in that order
    because the second needs a power-panel string the first does not.
-10. **The fight in the live world, step 1 only**: the ring kept, the cut
-    dropped. Steps 2 and 3 wait for evidence that step 1 held its frame rate.
+10. ~~**The fight in the live world, step 1 only**~~ **Steps 1 and 2 done.**
+    The ring is kept and drawn, the cut is dropped, and the world's clock runs
+    through a fight. Step 3 — real debris, and then whether the ring survives
+    at all — still waits, and now so does the one piece of evidence the
+    staging actually asked for: a frame-rate reading from real hardware.
 11. **The Battle tab** from `SHOP_PLAN.md`, now that its blocker is gone.
 12. **World generation in a Worker**, using the split that already exists.
 13. **Trickle charge under way**, behind a URL flag and measured over a full
