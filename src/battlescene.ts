@@ -75,7 +75,40 @@ import { HULL_OFFSET } from './ship';
  * the kind of motion that makes people put the game down.
  */
 const CAMERA_FOV = 50;
-const CAMERA_POSITION = new Vector3(0, 26, 34);
+/** Matches `camera.ts`'s chase camera, which frames this same globe. */
+const CAMERA_FAR = 6000;
+/*
+ * 19 up and 52 back, where the arena used 26 and 34.
+ *
+ * The old pose was built for an opaque flat plane and does not survive
+ * contact with a real ocean. Two things go wrong with it at once, and both
+ * are geometry rather than shading:
+ *
+ * **No sky.** 26 up and 34 back is 37 degrees below horizontal, and the
+ * vertical half-FOV is 25, so the top of the frame sits 12 degrees below the
+ * horizontal. From 26 units up the horizon is only 8.5 degrees down, so it
+ * falls ABOVE the top of the frame and never appears. What filled the top of
+ * the picture instead was space past the planet's limb -- black with stars,
+ * in the middle of the afternoon, over a lit sea.
+ *
+ * **No water.** Looking 37 degrees down is looking 53 degrees off the
+ * surface normal, where the Fresnel term hands back almost no reflection and
+ * the sea is drawn as what is under it. Over the shallow shelf a fight
+ * usually finds, that is the sea floor, in hard polygonal facets. The old
+ * arena's plane had nothing under it and could not show this.
+ *
+ * 19 and 52 is 20 degrees below horizontal. The top of the frame is then 5
+ * degrees ABOVE the horizontal and the horizon is 10 degrees below it, so
+ * about a third of the picture is sky and the sea is seen at a grazing angle
+ * that reflects it -- which is the same arrangement `camera.ts` arrives at
+ * for the chase view, and the reason the ocean reads as ocean there.
+ *
+ * The ring pays for it in foreshortening: 40 units across becomes about 14 of
+ * frame height rather than 24. That is the honest trade and it is the right
+ * way round -- a duel that reads as two ships on a sea beats a diagram of two
+ * ships on a circle, and the circle is no longer drawn either.
+ */
+const CAMERA_POSITION = new Vector3(0, 19, 52);
 
 /**
  * Height of a hull's transform above the water, world units.
@@ -193,21 +226,6 @@ const BALL_HEIGHT = 0.6;
  * They are drawn flat on the water a hair above it, so they read as a
  * disturbance of the surface rather than as an object floating on it.
  */
-/**
- * The boundary ring's band width as a fraction of its radius, its height
- * above the water, its colour and its opacity.
- *
- * Thin, because it is a line on the sea and not a wall: at ARENA_R_MIN it is
- * under half a world unit through. Lifted a little further off the water than
- * a splash is, because the sea it now lies on has real waves in it and a ring
- * at 0.05 would be swallowed by the first crest that ran under it -- the
- * ordinary sea peaks at DISPLACE_AMPLITUDE, 0.3, in a full gale.
- */
-const BOUNDARY_WIDTH = 0.02;
-const BOUNDARY_Y = 0.45;
-const BOUNDARY_COLOR = 0xffb347;
-const BOUNDARY_OPACITY = 0.5;
-
 const MAX_SPLASHES = 6;
 const SPLASH_LIFE = 0.7;
 const SPLASH_R0 = 0.35;
@@ -454,11 +472,15 @@ export interface BattleScene {
    */
   readonly props: Group;
   /**
-   * The fight's camera, parented INTO `props`, so it is carried onto the
-   * globe by the same transform as everything it is looking at and needs no
-   * mapping of its own.
+   * The fight's camera. Stands on its own in world space -- see `placeCamera`.
    */
   readonly camera: PerspectiveCamera;
+  /**
+   * Put the camera on the ring, given the ring's centre in world space and
+   * its tangent basis. Called once when a fight opens; the shot is fixed, so
+   * there is nothing to update per frame.
+   */
+  placeCamera(origin: Vector3, east: Vector3, up: Vector3, north: Vector3): void;
   /** Takes both hulls in. `sunElevation` is `dot(ship.up, env.sunDirection)` at contact. */
   enter(playerHull: Object3D, aiHull: Object3D | null, sunElevation: number): void;
   update(dt: number, state: BattleState): void;
@@ -491,14 +513,44 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
   const root = new Group();
   root.name = 'arena-props';
 
-  const camera = new PerspectiveCamera(CAMERA_FOV, 1, 0.1, 2000);
+  /*
+   * The depth range is the WORLD camera's, not the arena's old one.
+   *
+   * 2000 was ample for a fight in an empty room: the whole scene was a
+   * 300-unit plane and a handful of props, and nothing could ever be further
+   * away than the plane's own corner. Pointed at the globe it clips -- the sky
+   * dome, the cloud deck and the far limb all sit past it, and what that looks
+   * like is the sky ending in a hard band above the horizon.
+   *
+   * `camera.ts` uses 0.1 to 6000 for the same globe, so this uses 0.1 to 6000.
+   * The near plane matters more than the far one for depth precision and is
+   * identical, so nothing about the water/land seam changes with it.
+   */
+  const camera = new PerspectiveCamera(CAMERA_FOV, 1, 0.1, CAMERA_FAR);
+  /*
+   * NOT a child of `props`, and that is load-bearing rather than a style
+   * choice.
+   *
+   * Parenting it there is the obvious thing to do -- the props already carry
+   * the transform that lays the arena on the globe, so a camera inside them
+   * is placed for free and the fixed shot survives the move with no
+   * arithmetic. It was written that way first, and the world rendered WRONG
+   * through it: no sky at all, a black starfield over a lit afternoon sea,
+   * and water so transparent the sea floor showed through it in facets.
+   *
+   * It was isolated by elimination. Pose, field of view, aspect, near and far
+   * planes, layer masks, frustum test, and the sky dome's own visibility and
+   * day factor were all confirmed identical to the chase camera's, on a live
+   * frame, through the debug hook. Rendering the SAME pose through an
+   * unparented camera then drew the world correctly. Parenting is the only
+   * variable left standing.
+   *
+   * So the camera is placed explicitly instead. `placeCamera` does the same
+   * arithmetic the transform would have -- it is four lines -- and an
+   * unparented camera is what every other camera in this project is.
+   */
   camera.position.copy(CAMERA_POSITION);
   camera.lookAt(0, 0, 0);
-  // A CHILD of the props, not a loose camera. Three then carries it onto the
-  // tangent plane with everything else, so a camera that was framed against a
-  // flat arena is framed against the same arena lying on the globe -- and the
-  // fixed shot this module was designed around survives the move exactly.
-  root.add(camera);
 
   /*
    * There are no lights and no sea in here any more, and their absence is the
@@ -582,36 +634,24 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
   // Authored at unit radius and scaled, so one geometry serves every ring at
   // every point in its life.
   /*
-   * The ring itself, drawn on the water at last.
+   * The ring is NOT drawn, and that is the owner's call (2026-09-10) rather
+   * than an omission.
    *
-   * It was never a mesh before, and it did not need to be: the arena was an
-   * empty plane and the only two things on it were the hulls, so the circle
-   * they travelled read plainly off their own motion. On the real ocean, with
-   * an archipelago behind it and the globe's own sea running under it, a
-   * boundary nobody has drawn is a boundary the player has to infer from two
-   * moving dots. docs/ROADMAP.md names this in the same breath as dropping
-   * the cut: "the ring becomes a visible constraint drawn on the sea".
+   * It briefly was. The argument for drawing it was that on an empty plane
+   * the circle read plainly off the two hulls' motion, and over a real
+   * coastline it no longer did. The argument against, once it was on screen,
+   * is the stronger one: a hard orange annulus a hundred and sixty units
+   * across, laid flat over the globe's own water, is the most conspicuous
+   * thing in the frame and it reads as a piece of interface dropped onto the
+   * sea rather than as anything in the world -- which is the exact continuity
+   * this whole move was made to buy back.
    *
-   * Authored at unit radius and SCALED to `state.radius` every frame, so it
-   * closes in as the fight does and the shrinking is something the player can
-   * see coming rather than something they discover by being squeezed.
+   * The ring itself is untouched. `battle.ts` still holds both boats to it
+   * and still closes it at ARENA_SHRINK; the constraint is exactly as real as
+   * it was. Only the annulus is gone. If it needs to come back it should come
+   * back as something the sea could plausibly contain -- a band of chop, a
+   * line of foam -- and not as a drawn circle.
    */
-  const boundary = new Mesh(
-    new RingGeometry(1 - BOUNDARY_WIDTH, 1, 96),
-    new MeshBasicMaterial({
-      color: BOUNDARY_COLOR,
-      transparent: true,
-      opacity: BOUNDARY_OPACITY,
-      // Flat on the water, and never writing depth: a ring that occluded
-      // through its own transparent middle would cut the far hull in half.
-      depthWrite: false,
-      side: DoubleSide,
-    }),
-  );
-  boundary.name = 'arena-boundary';
-  boundary.rotation.x = -Math.PI / 2;
-  boundary.position.y = BOUNDARY_Y;
-  root.add(boundary);
 
   const ringGeometry = new RingGeometry(0.82, 1, 28);
   const splashes: Splash[] = [];
@@ -905,6 +945,20 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
     props: root,
     camera,
 
+    placeCamera(origin: Vector3, east: Vector3, up: Vector3, north: Vector3): void {
+      camera.position
+        .copy(origin)
+        .addScaledVector(east, CAMERA_POSITION.x)
+        .addScaledVector(up, CAMERA_POSITION.y)
+        .addScaledVector(north, CAMERA_POSITION.z);
+      // `up` first, or `lookAt` rolls the shot: on a globe the world's +Y is
+      // not the local vertical, and a camera that took Three's default would
+      // sit level only at one point on the planet.
+      camera.up.copy(up);
+      camera.lookAt(origin);
+      camera.updateMatrixWorld(true);
+    },
+
     enter(player: Object3D, ai: Object3D | null, sunElevation: number): void {
       playerHull = player;
       aiHull = ai;
@@ -960,10 +1014,6 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
       elapsed += dt;
       seaUniforms.uTime.value = elapsed;
 
-      // The ring closes with the fight. One scale on one mesh, read straight
-      // off the sim rather than re-derived, so what is drawn is the boundary
-      // `battle.ts` is actually holding the boats to.
-      boundary.scale.set(state.radius, state.radius, 1);
 
       // The arena camera is only alive under the battle branch and `main.ts`'s
       // resize handler knows nothing about it, so it takes its own aspect from

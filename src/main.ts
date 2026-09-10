@@ -1129,6 +1129,7 @@ async function startGame(): Promise<void> {
   const _ringUp = new THREE.Vector3();
   const _ringNorth = new THREE.Vector3();
   const _ringEast = new THREE.Vector3();
+  const _ringOrigin = new THREE.Vector3();
   /** The ring's centre as a unit direction, live for as long as a fight is up. */
   const ringCentre = new THREE.Vector3(0, 0, 1);
 
@@ -1231,6 +1232,10 @@ async function startGame(): Promise<void> {
       _ringUp.z * GLOBE_RADIUS,
     );
     props.updateMatrixWorld(true);
+    // The camera stands outside the props and is placed from the same frame.
+    // See `battlescene.ts`'s note on why it is not simply parented in.
+    _ringOrigin.copy(_ringUp).multiplyScalar(GLOBE_RADIUS);
+    battleScene.placeCamera(_ringOrigin, _ringEast, _ringUp, _ringNorth);
   }
 
   /**
@@ -1985,6 +1990,19 @@ async function startGame(): Promise<void> {
       // into its own cube target and has to give the renderer back.
       reflection.update(dt, ship.state.position, renderer, scene);
       docks.update(dt, env, ship.state, energy.state, battleScene.camera);
+      /*
+       * The wake, which the sailing branch runs and this one used to skip.
+       *
+       * It is not decoration: `wakemap.ts` renders into a target the water
+       * shader SAMPLES, so a branch that never ticks it leaves whatever the
+       * hull last drew frozen into the sea for the length of the fight --
+       * a stationary foam streak lying across the water beside the ring.
+       *
+       * The hull is halted, so what this actually does during a fight is let
+       * the wake the player arrived on fade out properly, which is what the
+       * water should look like once way is off the ship.
+       */
+      wake.update(dt, ship.state, env, renderer);
       timeDial?.update(ship.state, env);
       /*
        * One scene now, and that is the change.

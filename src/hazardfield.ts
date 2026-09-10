@@ -150,15 +150,20 @@ export const MAELSTROM_RADIUS = 10;
  * than as a dark patch from the chase camera, which looks along the surface
  * rather than down onto it.
  *
- * That last sentence was the goal at 3.0 and 3.0 did not meet it. Against
- * `MAELSTROM_RADIUS` = 10 it is a hole twenty units across and three deep: a
- * saucer, at 15% depth to width, and from a camera looking ALONG the surface
- * a saucer presents almost no profile at all. Every attempt to buy the
- * descent back in shading -- darkening by depth, occluding the throat's sky,
- * spiralling the normal -- made it a better-looking saucer, because the
- * gradient the eye follows down a funnel has to exist in the geometry before
- * a shader can find it. Doubled to 6.0, i.e. 30% depth to width, which is
- * about a ship's length of drop and reads as water going somewhere.
+ * That last sentence was the goal at 3.0 and 3.0 did not meet it, so it was
+ * doubled to 6.0 -- and the doubling was chasing the wrong fault. None of
+ * either depth was reaching the screen: the sphere's own flat water shell was
+ * drawn over the hole and depth-killed every pixel inside it, so 3.0 and 6.0
+ * photographed identically, as a foam ring on flat sea. `waterpatch.ts`'s
+ * PATCH_CULL_HALF is the fix for that, and it is what makes any of this
+ * number visible at all.
+ *
+ * With the hole actually drawn, 6.0 is more than the shape needs: 30% depth
+ * to width is a shaft, and from the chase camera the far wall climbs high
+ * enough to read as a crater rather than as water turning. 4.0 -- 20% depth
+ * to width, a hole twenty units across and four deep -- keeps the descent the
+ * eye can follow down and gives back the openness. Still well past the 15%
+ * that made it a saucer, and still about two thirds of a hull length of drop.
  *
  * Three things this deliberately does NOT change. The lip stays 0.35: a
  * higher rim on a deeper bowl reads as a crater. `MAELSTROM_RADIUS` stays 10,
@@ -166,7 +171,7 @@ export const MAELSTROM_RADIUS = 10;
  * the same polynomial, so parity is untouched -- this is one constant, and
  * both ports read it.
  */
-export const FUNNEL_DEPTH = 6.0;
+export const FUNNEL_DEPTH = 4.0;
 export const RIM_HEIGHT = 0.35;
 
 /**

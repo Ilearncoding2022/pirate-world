@@ -107,7 +107,8 @@ interesting ones because no single stream could have seen them.
    the profile the hull rides. That got the gradient onto the screen and it
    still read as a saucer, because at `FUNNEL_DEPTH` 3.0 against a radius of
    10 it WAS a saucer: 15% depth to width, seen from a camera looking along
-   the surface. `FUNNEL_DEPTH` is now 6.0. One constant, both ports read it,
+   the surface. `FUNNEL_DEPTH` is now 4.0, and the sphere's shell is cut away
+   under the patch so the hole is drawn at all. One constant, both ports read it,
    parity unmoved at 0/255.
 2. **The doughnut was a compound of two independent widenings.** P widened the
    height's lip 1.5x for the polygonal-ring problem; M widened its art copy a

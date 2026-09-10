@@ -63,15 +63,17 @@ const PATCH_POLYGON_OFFSET_UNITS = -4;
  * BIAS -- a few units in the depth buffer -- and it is enough to stop the
  * skirt z-fighting the shell it fades into, which is all it was ever asked
  * to do. It is nothing at all against a maelstrom, which pushes this patch
- * SIX WORLD UNITS below that shell: every pixel of the funnel's inside is
+ * SEVERAL WORLD UNITS below that shell: every pixel of the funnel's inside is
  * then behind the sphere's own flat water along the view ray, and the depth
  * test throws it away. The funnel drew its foam ring and its spiral onto a
  * surface that was never allowed to descend, which is exactly how a 20-unit
  * hole reads as a decal on flat sea from the deck.
  *
  * A crest never showed the fault because a crest goes UP, where nothing is
- * in front of it. That is why doubling FUNNEL_DEPTH from 3.0 to 6.0 bought
- * nothing on screen: both depths were behind the same shell.
+ * in front of it. That is why raising FUNNEL_DEPTH from 3.0 to 6.0 bought
+ * nothing on screen: both depths were behind the same shell, and photographed
+ * identically. The number is 4.0 now, chosen against a hole that can actually
+ * be seen -- see `hazardfield.ts`.
  *
  * Inset from the patch's own half-extent rather than equal to it, and the
  * margin is not decoration. The patch's vertices are projected onto the
