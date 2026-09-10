@@ -635,6 +635,54 @@ function crestEnd(h: Hazard, sign: number): Vector3 {
   return step(h.centre, h.east.clone().multiplyScalar(sign), h.extent);
 }
 
+describe('hazards — the ring a fight is fought in', () => {
+  /*
+   * `barMaelstroms` keeps a funnel from opening inside a duelling circle the
+   * player is not allowed to leave. A duel should be decided by the duel, not
+   * by the hull being captured mid-broadside.
+   *
+   * Both halves are asserted, and the second is the one worth having: crests
+   * are deliberately NOT barred. A wave shoves, the shove is survivable, and
+   * a front crossing the ring is weather that can be seen coming — so a bar
+   * that quietly stopped the waves too would take the sea out of a fight that
+   * was moved onto the real ocean precisely to have one.
+   */
+  const ship = stationaryShip();
+  const energy = energyState('drain');
+  const dt = 0.1;
+
+  function runFor(seconds: number, hazards: ReturnType<typeof makeHazards>) {
+    const kinds = new Set<HazardKind>();
+    for (let i = 0; i < seconds / dt; i++) {
+      hazards.update(dt, ship, energy, wind, 3);
+      for (const h of hazards.state.live) kinds.add(h.kind);
+    }
+    return kinds;
+  }
+
+  it('raises no maelstrom inside a barred ring, and goes on raising crests', () => {
+    const hazards = makeHazards();
+    // The whole neighbourhood the spawn rolls into, so no funnel can be
+    // placed anywhere a fight would see it.
+    hazards.barMaelstroms(ship.position, 200);
+    const kinds = runFor(3000, hazards);
+
+    expect(kinds.has('maelstrom')).toBe(false);
+    // The bar is about funnels alone. If this ever goes quiet the bar has
+    // stopped being a bar and started being shelter.
+    expect(kinds.has('wave')).toBe(true);
+  });
+
+  it('raises maelstroms again once the bar is lifted', () => {
+    const hazards = makeHazards();
+    hazards.barMaelstroms(ship.position, 200);
+    expect(runFor(600, hazards).has('maelstrom')).toBe(false);
+
+    hazards.barMaelstroms(null, 0);
+    expect(runFor(3000, hazards).has('maelstrom')).toBe(true);
+  });
+});
+
 describe('hazards — a crest breaks on the shore', () => {
   it('keeps the stretch still over water and loses the part that met land', () => {
     const hazards = coastHazards();
