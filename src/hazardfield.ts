@@ -384,6 +384,23 @@ export function hazardBow(h: Hazard): number {
 }
 
 /**
+ * `uHazBreak[i]` — how far each end of this crest has been broken by the
+ * coast, 0..1: the -east end and the +east end.
+ *
+ * DIMENSIONLESS, like `hazardBow` and for the same reason: a share, not a
+ * length, so no division by the radius. Forced to 0 for a maelstrom, whose
+ * profile never reads it, so a slot recycled from a broken crest cannot leave
+ * a funnel with a bite taken out of it.
+ */
+export function hazardBreakNeg(h: Hazard): number {
+  return h.kind === 'maelstrom' ? 0 : Math.fround(h.breakNeg);
+}
+
+export function hazardBreakPos(h: Hazard): number {
+  return h.kind === 'maelstrom' ? 0 : Math.fround(h.breakPos);
+}
+
+/**
  * `uHazShape.w` — the profile's scale in WORLD units: peak height for a
  * crest, funnel depth for a maelstrom, times the envelope (which already
  * carries the distance fade — see `Hazard.envelope`).
@@ -519,12 +536,37 @@ export const HAZARD_GLSL: string = [
   '// How far this crest\'s ends trail behind its centre, as a fraction of its',
   '// half-length. 0 for a straight crest and for every maelstrom.',
   'uniform float uHazBow[MAX_HAZARDS];',
+  '// How far each end has been broken by the coast, 0..1: x is the -east end',
+  '// and y the +east end. 0 on open water and for every maelstrom.',
+  'uniform vec2 uHazBreak[MAX_HAZARDS];',
   HAZ_CREST_RATIO_GLSL,
   `const float HAZ_RIM_C = ${RIM_CENTRE.glsl};`,
   `const float HAZ_RIM_INV = ${RIM_INV.glsl};`,
   `const float HAZ_RIM_RATIO = ${RIM_RATIO.glsl};`,
   `const float HAZ_MIN_SIZE = ${MIN_SIZE.glsl};`,
   HAZARD_PROFILE_GLSL,
+  // The broken end's sag, as a multiplier on the ridge.
+  //
+  // `1 - t * x * x` is exactly 1 at the crest's centre whatever `t` is, and
+  // `1 - t` at the very end, so a fully broken end comes down to nothing
+  // while the middle of the front is untouched. Quadratic rather than
+  // anything sharper because what is being drawn is a front losing its
+  // footing over a stretch of itself, not a cut.
+  //
+  // Declared HERE rather than in HAZARD_PROFILE_GLSL, which the arena splices
+  // into its own wall of water: the arena has no coast to break on, and a
+  // shared chunk that grows a function only one side can use is a shared
+  // chunk that has stopped being shared.
+  //
+  // The branch on `x < 0.0` is safe for parity on exactly the argument
+  // `hazCrest`'s front/back branch is: at x = 0 the term `t * x * x` is
+  // exactly zero on both sides whichever `t` was chosen, so the two branches
+  // return bit-identical values there and a GPU and a CPU that round `x` to
+  // opposite sides of zero cannot disagree.
+  'float hazBreakFade(float x, vec2 brk) {',
+  '  float t = x < 0.0 ? brk.x : brk.y;',
+  '  return 1.0 - t * x * x;',
+  '}',
   'float hazardHeight(vec3 p) {',
   '  float h = 0.0;',
   '  for (int i = 0; i < MAX_HAZARDS; i++) {',
@@ -537,7 +579,8 @@ export const HAZARD_GLSL: string = [
   '      float b = max(sh.z, HAZ_MIN_SIZE);',
   '      float vq = hazBowV(u, v, a, uHazBow[i]);',
   '      float bw = b * (vq > 0.0 ? HAZ_CREST_FRONT : HAZ_CREST_BACK);',
-  '      h += sh.w * (hazRidge(u / a) * hazCrest(vq / bw));',
+  '      float xr = u / a;',
+  '      h += sh.w * (hazRidge(xr) * hazCrest(vq / bw) * hazBreakFade(xr, uHazBreak[i]));',
   '    } else {',
   // The bowl is `hazBump(r)` -- (1 - r*r)^2 -- and not the (1 - r)^3 this
   // shipped with. A cube of (1 - r) has a CONE APEX at the centre: it is not
@@ -609,6 +652,16 @@ function ridgeCPU(x: number): number {
 }
 
 /**
+ * The GLSL's `hazBreakFade`, operation for operation: the two multiplications
+ * are `(t * x)` and that product times `x`, because `t * x * x` parses left
+ * to right in GLSL and a float32 product is not associative.
+ */
+function breakFadeCPU(x: number, brkNeg: number, brkPos: number): number {
+  const t = x < 0 ? brkNeg : brkPos;
+  return F(1 - F(F(t * x) * x));
+}
+
+/**
  * The GLSL's `hazBowV`, operation for operation. `v + bow * a * (xr * xr)`
  * parses left to right in GLSL, so the two multiplications are `(bow * a)`
  * and `(xr * xr)` and the product of those -- written here the same way,
@@ -665,7 +718,10 @@ export function hazardHeight(dir: { x: number; y: number; z: number }, hazards: 
       // order the GLSL does them, which is what keeps the two bit-identical.
       const vq = bowVCPU(u, v, a, F(hazardBow(hz)));
       const bw = F(b * (vq > 0 ? CREST_FRONT.value : CREST_BACK.value));
-      h = F(h + F(w * F(ridgeCPU(F(u / a)) * crestCPU(F(vq / bw)))));
+      const xr = F(u / a);
+      const ridge = F(ridgeCPU(xr) * crestCPU(F(vq / bw)));
+      const faded = F(ridge * breakFadeCPU(xr, hazardBreakNeg(hz), hazardBreakPos(hz)));
+      h = F(h + F(w * faded));
     } else {
       // Same three terms in the same order as the GLSL: the radius, the bowl
       // that radius sits in, the lip that replaces the bowl near the rim.

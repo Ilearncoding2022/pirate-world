@@ -511,6 +511,63 @@ const COAST_REFINE = 5;
 const CREST_MIN_EXTENT = 0.75;
 
 /**
+ * How fast a broken end may travel back down the crest line, world units a
+ * second PER END, and the furthest it is ever allowed to lag behind the
+ * waterline it is retreating to.
+ *
+ * The clip used to be instantaneous: the moment a probe came back dry, that
+ * whole stretch of wave stopped existing between one frame and the next. What
+ * that looks like from the deck is a wall of water with a piece cut out of
+ * it, and the piece leaves without breaking, without foam, and without taking
+ * any time to do it. The paragraph above used to argue that this was right --
+ * "gone the frame the water under it turns to land, which is what breaks on
+ * the shore looks like" -- and it is not: a front meeting a headland is the
+ * slowest-looking thing in the whole sea, not the fastest.
+ *
+ * So the end now RETREATS at a bounded rate rather than jumping. 15 units a
+ * second is a little over one hull length a second and clears the longest
+ * overhang this can produce in about a second and a half, which is the pace
+ * the ask named.
+ *
+ * RETRACT_MAX_LAG is what keeps that honest. A rate alone cannot promise
+ * anything, because the waterline it is chasing can move along the crest
+ * arbitrarily fast -- a front running parallel to a beach can go from all wet
+ * to all dry in a frame, and nothing about the wave's own speed bounds how
+ * quickly the coast eats it. Without a cap that wave would draw standing
+ * water several hull lengths inland while the retraction caught up. Six units
+ * is under two hull lengths of overhang, which with the height taper on the
+ * broken end (see `breakOf`) reads as a wave collapsing into the shallows
+ * rather than as water on a beach.
+ */
+const CREST_RETRACT_RATE = 15;
+const CREST_RETRACT_MAX_LAG = 6;
+
+/**
+ * The broken end's sag: how fast a share of the front has to be disappearing
+ * for that end to count as fully breaking, and the seconds the sag takes to
+ * come on and to recover.
+ *
+ * `hazardfield.ts` owns what the sag DOES -- a taper on the ridge, so a
+ * broken end comes down toward nothing while the middle of the front is
+ * untouched. These three own how much of it a given end gets.
+ *
+ * It is driven by the RATE the coast is eating, not by the total eaten, and
+ * that is the whole design. A wave that lost a third of itself to an islet
+ * ten seconds ago is a shorter wave, not a broken one -- it re-formed the
+ * moment it was clear -- and the thing worth drawing is the end that is
+ * being taken RIGHT NOW. BREAK_FULL_RATE is a third of the front a second,
+ * which is about what a front running square onto a beach loses.
+ *
+ * The two times are deliberately different. Coming on fast is what makes the
+ * sag read as caused by the rock rather than as the wave dying; recovering
+ * slowly is what stops a front flickering between broken and whole as its
+ * end crosses a bilinear waterline probe by probe.
+ */
+const BREAK_FULL_RATE = 0.33;
+const BREAK_RISE = 0.25;
+const BREAK_RECOVER = 1.2;
+
+/**
  * Seconds a crest takes to dissipate once it has hit the hull, and the peak
  * of the shove it delivers over those seconds at CREST_SPEED_REF, world
  * units/s.
@@ -688,6 +745,8 @@ interface MutableHazard {
   north: Vector3;
   extent: number;
   halfWidth: number;
+  breakNeg: number;
+  breakPos: number;
   bow: number;
   speed: number;
   amplitude: number;
@@ -948,6 +1007,9 @@ export function createHazards(deps: HazardsDeps): Hazards {
       north: n,
       extent: crest ? halfLength : MAELSTROM_RADIUS,
       halfWidth: crest ? rollHalfWidth() : 0,
+      // Every wave rises whole. The coast is the only thing that breaks one.
+      breakNeg: 0,
+      breakPos: 0,
       bow: crest ? rollBow(halfLength) : 0,
       speed,
       amplitude: crest ? rollAmplitude() : FUNNEL_DEPTH,
@@ -1279,6 +1341,29 @@ export function createHazards(deps: HazardsDeps): Hazards {
     reframe(h);
   }
 
+  /**
+   * Move one end's break value toward what the coast is doing to it.
+   *
+   * `lostShare` is how much of the half-length that end gave up THIS FRAME,
+   * so `lostShare / dt` is the rate it is being eaten at and that -- not the
+   * total taken -- is what the sag is driven by. See BREAK_FULL_RATE.
+   *
+   * Rises toward the drive and falls back toward it on two different clocks,
+   * which is what makes an end that is actively breaking stay broken and an
+   * end that has sailed clear of its rock re-form.
+   */
+  function easeBreak(current: number, lostShare: number, dt: number): number {
+    const drive = Math.min(1, lostShare / Math.max(dt, 1e-6) / BREAK_FULL_RATE);
+    if (drive > current) return Math.min(drive, current + dt / BREAK_RISE);
+    return Math.max(drive, current - dt / BREAK_RECOVER);
+  }
+
+  /** Both ends at once, so `clipToWater` has one call rather than two. */
+  function noteBreak(h: MutableHazard, lostNeg: number, lostPos: number, dt: number): void {
+    h.breakNeg = easeBreak(h.breakNeg, lostNeg, dt);
+    h.breakPos = easeBreak(h.breakPos, lostPos, dt);
+  }
+
   /** True where the crest line at `offset` world units along `east` is dry. */
   function landAlongCrest(h: MutableHazard, offset: number): boolean {
     if (!stepAlong(_probe, h.centre, h.east, offset * ARC)) _probe.copy(h.centre);
@@ -1325,7 +1410,7 @@ export function createHazards(deps: HazardsDeps): Hazards {
    *     moment of breaking by under a second at CREST_SPEED_REF, and the widest
    *     wave this can roll is the only one for which it is even that.
    */
-  function clipToWater(h: MutableHazard): boolean {
+  function clipToWater(h: MutableHazard, dt: number): boolean {
     const half = h.extent;
     if (half <= 0) return false;
     const n = COAST_INTERVALS;
@@ -1346,21 +1431,47 @@ export function createHazards(deps: HazardsDeps): Hazards {
         bestTo = i;
       }
     }
-    // Every probe dry: the whole front is on the beach, and it goes now.
-    if (bestFrom < 0) return false;
     // Every probe wet, ends included: open water, and nothing to re-measure.
+    // Checked before the all-dry case only because it is the common one.
     if (bestFrom === 0 && bestTo === n) return true;
 
-    const from =
-      bestFrom === 0
-        ? -half
-        : waterline(h, -half + stride * (bestFrom - 1), -half + stride * bestFrom);
-    const to =
-      bestTo === n ? half : waterline(h, -half + stride * (bestTo + 1), -half + stride * bestTo);
+    // Where the two ends are TRYING to get to. Every probe dry means the
+    // whole front is aground and both ends are heading for the centre; the
+    // wave is not removed here any more, it is retracted out of existence by
+    // the same rule as any other break, and drops below when there is nothing
+    // left worth drawing.
+    let from: number;
+    let to: number;
+    if (bestFrom < 0) {
+      from = 0;
+      to = 0;
+    } else {
+      from =
+        bestFrom === 0
+          ? -half
+          : waterline(h, -half + stride * (bestFrom - 1), -half + stride * bestFrom);
+      to =
+        bestTo === n ? half : waterline(h, -half + stride * (bestTo + 1), -half + stride * bestTo);
+    }
 
-    const extent = (to - from) / 2;
+    // Retreat toward those, at a rate and never further behind than the lag
+    // cap. Both ends only ever move INBOARD -- `from` can only rise and `to`
+    // can only fall -- which is what keeps the "it only ever shrinks" promise
+    // this function is written around, and what stops a bilinear waterline
+    // oscillating an end back and forth across a probe.
+    const step = CREST_RETRACT_RATE * dt;
+    const easedFrom = Math.min(from, Math.max(-half + step, from - CREST_RETRACT_MAX_LAG));
+    const easedTo = Math.max(to, Math.min(half - step, to + CREST_RETRACT_MAX_LAG));
+
+    // How much of each end the coast has taken, as a share of the half-length
+    // -- what the height taper reads. Measured against the TARGET rather than
+    // against where the end has retreated to, so a wave sags at the end that
+    // is breaking while it is still breaking, not a beat afterwards.
+    noteBreak(h, (from - -half) / Math.max(half, 1e-6), (half - to) / Math.max(half, 1e-6), dt);
+
+    const extent = (easedTo - easedFrom) / 2;
     if (extent < CREST_MIN_EXTENT) return false;
-    shiftAlongEast(h, (from + to) / 2);
+    shiftAlongEast(h, (easedFrom + easedTo) / 2);
     // Carried as a SHARE of the length the wave would have had, not as the
     // length itself: `grow` re-applies it every frame, so the end that broke
     // on the shore stays broken while the rest of the front goes on building.
@@ -1471,7 +1582,7 @@ export function createHazards(deps: HazardsDeps): Hazards {
       // the next one.
       grow(h);
       transport(h, dt);
-      if (!clipToWater(h)) state.live.splice(i, 1);
+      if (!clipToWater(h, dt)) state.live.splice(i, 1);
     }
 
     // ---- Contact ----------------------------------------------------

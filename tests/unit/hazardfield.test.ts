@@ -50,6 +50,11 @@ function makeHazard(kind: HazardKind, overrides: Partial<Hazard> = {}): Hazard {
     // Straight by default, so every shape assertion below still measures the
     // profile rather than the profile plus an arc. The bow has its own cases.
     bow: 0,
+    // Whole by default, so every shape assertion below measures the profile
+    // rather than the profile with a piece broken off it. The taper has its
+    // own cases.
+    breakNeg: 0,
+    breakPos: 0,
     speed: 0,
     amplitude: crest ? CREST_HEIGHT : FUNNEL_DEPTH,
     envelope: 1,

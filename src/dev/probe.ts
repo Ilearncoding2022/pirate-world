@@ -301,6 +301,8 @@ interface Placement {
   readonly extent: number;
   readonly halfWidth: number;
   readonly bow: number;
+  readonly breakNeg: number;
+  readonly breakPos: number;
   readonly amplitude: number;
   readonly envelope: number;
   readonly size: number;
@@ -315,6 +317,13 @@ const HAZARD_PLACEMENTS: readonly Placement[] = [
     extent: CREST_HALF_LENGTH,
     halfWidth: CREST_HALF_WIDTH,
     bow: CREST_BOW_MAX,
+    // Broken at one end and whole at the other, deliberately asymmetric: the
+    // taper reads a DIFFERENT number per end off one vec2, so a probe that
+    // broke both ends equally would pass just as happily with the two lanes
+    // swapped. Fully broken, because 1 is where `1 - t * x * x` reaches zero
+    // at the tip and is the one value that can expose a sign error.
+    breakNeg: 0,
+    breakPos: 1,
     amplitude: CREST_HEIGHT_MAX,
     envelope: 0.85,
     size: 1,
@@ -327,6 +336,10 @@ const HAZARD_PLACEMENTS: readonly Placement[] = [
     extent: CREST_HALF_LENGTH,
     halfWidth: CREST_HALF_WIDTH,
     bow: 0,
+    // The other lane, and a partial value: between them the two crests cover
+    // both ends, both extremes and a middle.
+    breakNeg: 0.45,
+    breakPos: 0,
     amplitude: CREST_HEIGHT,
     envelope: 1,
     size: 1,
@@ -339,6 +352,11 @@ const HAZARD_PLACEMENTS: readonly Placement[] = [
     extent: MAELSTROM_RADIUS,
     halfWidth: 0,
     bow: 0,
+    // Nonzero on a funnel ON PURPOSE. The accessors force a maelstrom's break
+    // to 0, so this is what proves they do: if either port ever read the raw
+    // field instead, this funnel would come out lopsided on that side alone.
+    breakNeg: 0.8,
+    breakPos: 0.8,
     amplitude: FUNNEL_DEPTH,
     envelope: 0.75,
     size: 0.9,
@@ -372,6 +390,8 @@ function buildProbeHazards(): Hazard[] {
       extent: p.extent,
       halfWidth: p.halfWidth,
       bow: p.bow,
+      breakNeg: p.breakNeg,
+      breakPos: p.breakPos,
       // Not read by the field at all -- it is what makes a crest travel, and
       // nothing travels in a probe -- but `Hazard` is the shape the game
       // hands the plugin and this harness feeds both sides the real thing.
@@ -396,8 +416,10 @@ function runHazardProbe(): void {
   const norths: THREE.Vector3[] = [];
   const shapes: THREE.Vector4[] = [];
   const bows: number[] = [];
+  const breaks: THREE.Vector2[] = [];
   for (let i = 0; i < MAX_HAZARDS; i++) {
     bows.push(0);
+    breaks.push(new THREE.Vector2());
     centres.push(new THREE.Vector3(0, 1, 0));
     easts.push(new THREE.Vector3(1, 0, 0));
     norths.push(new THREE.Vector3(0, 0, 1));
@@ -406,7 +428,7 @@ function runHazardProbe(): void {
   // `waterhazard.ts`'s own packing, not a copy of it: the uniforms under test
   // are then the uniforms the game ships, down to which float32 each number
   // rounds to.
-  const count = packHazards(hazards, centres, easts, norths, shapes, bows);
+  const count = packHazards(hazards, centres, easts, norths, shapes, bows, breaks);
 
   const fragmentShader = [
     'precision highp float;',
@@ -430,6 +452,7 @@ function runHazardProbe(): void {
     uHazNorth: { value: norths },
     uHazShape: { value: shapes },
     uHazBow: { value: bows },
+    uHazBreak: { value: breaks },
   };
 
   const dir = new THREE.Vector3();

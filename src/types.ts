@@ -535,6 +535,24 @@ export interface Hazard {
    */
   readonly bow: number;
   /**
+   * How far each END of this crest has been broken by the coast, 0..1, for
+   * the -east end and the +east end in that order. 0 on open water and on
+   * every maelstrom.
+   *
+   * A crest that runs onto a headland loses the stretch that met it, and the
+   * loss used to be the whole story: the surviving span was re-measured and
+   * the profile re-fitted to it, at full height right up to its new end. So a
+   * wave broken by a rock still stood a clean two metres tall against the
+   * rock. These two numbers are what let the broken end SAG -- read by both
+   * ports of `hazardHeight` as a taper on the ridge, and by nothing else.
+   *
+   * They rise while an end is actively being eaten and decay back to zero
+   * when it is not, so a front that clipped an islet and sailed on reforms,
+   * and a front grinding along a beach stays broken for as long as it does.
+   */
+  readonly breakNeg: number;
+  readonly breakPos: number;
+  /**
    * How fast a crest travels, world units/s -- which is knots, since the
    * hull's 10 world units/s is what the HUD reads out as 10 kn. 0 for a
    * maelstrom, which does not travel.

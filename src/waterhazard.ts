@@ -49,6 +49,8 @@ import {
   CREST_HEIGHT_MAX,
   hazardExtentDir,
   hazardBow,
+  hazardBreakNeg,
+  hazardBreakPos,
   hazardHalfWidthDir,
   hazardShapeKind,
   hazardStrength,
@@ -97,6 +99,7 @@ export function packHazards(
   norths: THREE.Vector3[],
   shapes: THREE.Vector4[],
   bows: number[],
+  breaks: THREE.Vector2[],
 ): number {
   const count = Math.min(live.length, MAX_HAZARDS);
   for (let i = 0; i < count; i++) {
@@ -108,6 +111,10 @@ export function packHazards(
     // The bow is its own uniform rather than a fifth component of `shapes`
     // because `shapes` is a vec4 and all four of its lanes are spoken for.
     bows[i] = hazardBow(h);
+    // Its own uniform for the same reason the bow has one: `shapes` is a vec4
+    // and all four lanes are spoken for. A vec2 rather than two floats
+    // because the two ends are read together, once, by `hazBreakFade`.
+    breaks[i].set(hazardBreakNeg(h), hazardBreakPos(h));
   }
   // Slots at or past the count are never read -- `hazardHeight` breaks out of
   // its loop there -- so they are left holding whatever they last held rather
@@ -121,12 +128,14 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
   const norths: THREE.Vector3[] = [];
   const shapes: THREE.Vector4[] = [];
   const bows: number[] = [];
+  const breaks: THREE.Vector2[] = [];
   for (let i = 0; i < MAX_HAZARDS; i++) {
     centres.push(new THREE.Vector3(0, 1, 0));
     easts.push(new THREE.Vector3(1, 0, 0));
     norths.push(new THREE.Vector3(0, 0, 1));
     shapes.push(new THREE.Vector4());
     bows.push(0);
+    breaks.push(new THREE.Vector2());
   }
 
   const uniforms: Record<string, THREE.IUniform> = {
@@ -136,6 +145,7 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
     uHazNorth: { value: norths },
     uHazShape: { value: shapes },
     uHazBow: { value: bows },
+    uHazBreak: { value: breaks },
   };
 
   let source: HazardState | null = null;
@@ -259,7 +269,7 @@ export function createWaterHazardPlugin(): WaterHazardPlugin {
       // 0 and every consumer skips the loop entirely -- which is what makes
       // this plugin free on the frames where nothing is happening.
       uniforms.uHazCount.value = source
-        ? packHazards(source.live, centres, easts, norths, shapes, bows)
+        ? packHazards(source.live, centres, easts, norths, shapes, bows, breaks)
         : 0;
     },
   };

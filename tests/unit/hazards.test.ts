@@ -658,12 +658,37 @@ describe('hazards — a crest breaks on the shore', () => {
 
     // Still on the water: the wave lost an end, not itself.
     expect(hazards.state.live).toContain(crest);
+
+    /*
+     * The broken end RETREATS to the waterline rather than jumping to it, so
+     * this is asserted as a convergence rather than as one frame's arithmetic.
+     *
+     * The wave is not there yet after one frame and must not be -- that is
+     * the whole change -- but it is already shorter, and it is heading the
+     * right way at a bounded speed. CREST_RETRACT_RATE is 15 world units a
+     * second per end, so one 0.05 s frame can take at most 0.75 units off
+     * either end and the extent can fall by at most that.
+     */
+    expect(crest.extent).toBeLessThan(full);
+    expect(full - crest.extent).toBeLessThanOrEqual(0.75 + 1e-6);
+
     // The shore is COAST_LON_DEG east of the centre, so about that much of
-    // the eastern arm is gone and the whole western arm is untouched.
+    // the eastern arm is gone and the whole western arm is untouched. Given
+    // long enough for the retreat to finish, that is where it settles.
     const survived = (full + COAST_LON_DEG * DEG) / 2;
+    for (let i = 0; i < 40 && crest.extent > survived + 0.5; i++) {
+      hazards.update(dt, ship, energy, wind);
+    }
     expect(crest.extent).toBeCloseTo(survived, 0);
     expect(crest.extent).toBeLessThan(full - 1);
     expect(crest.extent).toBeGreaterThan(1);
+
+    // And the end that was eaten is sagging while it is being eaten, which is
+    // the other half of what the coast now does to a wave. The east end is
+    // the one that met land: `east` is due east and the shore is east of the
+    // centre, so it is `breakPos` that has to have come up.
+    expect(crest.breakPos).toBeGreaterThan(0);
+    expect(crest.breakNeg).toBe(0);
 
     // Both ends of what is left are over open water, and the frame is still a
     // frame: `centre` slid west onto the middle of the surviving stretch
@@ -701,20 +726,42 @@ describe('hazards — a crest breaks on the shore', () => {
     }
   });
 
-  it('drops a crest with no open water left under it, on the frame it has none', () => {
+  it('retracts a crest with no open water left under it out of existence', () => {
     const hazards = coastHazards();
     const ship = coastShip();
     const energy = energyState('burn');
+    const dt = 0.05;
 
     // Well inland: every probe along the front is dry.
     const inland = latLonToDir(0, 45);
     hazards.force('wave', inland, headingToForward(inland, 0));
     const crest = hazards.state.live.find((h) => h.kind === 'wave');
     expect(crest).toBeDefined();
+    if (crest === undefined) return;
+    const full = crest.extent;
 
-    hazards.update(0.05, ship, energy, wind);
-    // Gone outright rather than left to dissipate: land takes the part of a
-    // wave it meets immediately, and here that is all of it.
+    /*
+     * It used to go on the first frame. It now retracts out of existence
+     * instead, by the same rule that eats any other broken end, because a
+     * front that vanishes between two frames is the thing this branch was
+     * asked to stop doing -- and a wave entirely aground is the most visible
+     * case of it, not an exception to it.
+     *
+     * What still has to be true is that it goes, and goes promptly. Both ends
+     * run at CREST_RETRACT_RATE toward the centre, so a full-length front is
+     * gone inside `full / 15` seconds plus a frame; a second is generous at
+     * every length this can roll and is well under the shortest life.
+     */
+    hazards.update(dt, ship, energy, wind);
+    expect(hazards.state.live).toContain(crest);
+    expect(crest.extent).toBeLessThan(full);
+
+    let elapsed = dt;
+    for (let i = 0; i < 200 && hazards.state.live.includes(crest); i++) {
+      hazards.update(dt, ship, energy, wind);
+      elapsed += dt;
+    }
     expect(hazards.state.live).not.toContain(crest);
+    expect(elapsed).toBeLessThan(1);
   });
 });
