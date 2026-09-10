@@ -365,21 +365,28 @@ describe('hazards — a crest rolls its own width and its own life', () => {
      * Tripled ODDS, but only about 1.24x the spawns, and the gap is worth
      * recording rather than tuning away.
      *
-     * `hazards.ts` rolls once a SECOND at P_WAVE = 0.2 and holds at most
-     * CAPACITY of each kind. A free slot therefore refills within a few
-     * seconds even in fair weather, so what limits the population is how long
-     * a hazard LIVES, not how often one is rolled for. Tripling a probability
-     * that was already saturating buys the difference between "almost
-     * immediately" and "immediately".
+     * `hazards.ts` rolls once a SECOND, five times for a wave at P_WAVE each
+     * time, and holds at most CAPACITY of each kind. A free slot therefore
+     * refills within a few seconds even in fair weather, so what limits the
+     * population is how long a hazard LIVES, not how often one is rolled for.
+     * Tripling a probability that is already saturating buys the difference
+     * between "almost immediately" and "immediately".
      *
-     * Measured over 100 minutes of sim: 744 spawns at 1x against 923 at 3x, a
-     * ratio of 1.24. **It was 1.46 when this case was written**, against a
-     * sea that held one crest; v0.14.0 raised the odds and let two run at
-     * once, and a fuller sea saturates harder, so the same multiplier buys
+     * Measured over 50 minutes of sim: 1732 spawns at 1x against 2239 at 3x,
+     * a ratio of 1.293, with the sea holding 3.45 crests of a possible five
+     * in fair weather against 4.49 under the storm. **It was 1.46 when this
+     * case was written**, against a sea that held one crest, and 1.24 when it
+     * held two: a fuller sea saturates harder, so the same multiplier buys
      * less of it. That is the capacity rule and the storm multiplier doing
      * two different jobs -- the odds decide how fast a free slot refills and
      * the capacity decides how many there are -- and both were kept
      * deliberately when the weather branch was merged.
+     *
+     * This band is what caught the five-crest sea being pinned. At the odds
+     * the capacity was first raised under, fair weather sat at 4.49 crests
+     * and 61% full and the ratio fell to 1.04 -- the storm had nothing left
+     * to fill. The odds came down until this assertion passed again, which
+     * is the assertion doing exactly the job it was written for.
      *
      * The raiders, whose roll is once per TEN seconds and nowhere near
      * saturation, get 2.72x from the same multiplier -- and only on the

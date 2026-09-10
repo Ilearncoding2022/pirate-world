@@ -490,10 +490,13 @@ describe('hazardfield: several at once', () => {
     // the field is their sum rather than either one winning.
     expect(hazardHeight(at(0, 0), [crest, funnel])).toBeCloseTo(CREST_HEIGHT - FUNNEL_DEPTH, 5);
 
-    // The shader has three slots and no fourth to read, so neither side may
-    // count a fourth hazard -- that is a desync the parity test cannot see,
-    // because it would only ever hand the GPU three.
-    const many = [crest, crest, crest, makeHazard('wave')];
+    // The shader has MAX_HAZARDS slots and no slot past them to read, so
+    // neither side may count one more -- that is a desync the parity test
+    // cannot see, because it would only ever hand the GPU the slots it has.
+    //
+    // Built from MAX_HAZARDS rather than written out, so raising the bound
+    // keeps testing the bound instead of quietly testing a number under it.
+    const many = Array.from({ length: MAX_HAZARDS + 1 }, () => crest);
     expect(many.length).toBeGreaterThan(MAX_HAZARDS);
     expect(hazardHeight(at(0, 0), many)).toBeCloseTo(CREST_HEIGHT * MAX_HAZARDS, 5);
   });

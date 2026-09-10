@@ -151,23 +151,34 @@ export interface Hazards {
  * running, and a maelstrom is a thing a player meets rather than a thing they
  * have to be told exists.
  *
- * P_WAVE is the SUM of the two crest odds this file used to carry -- 0.3 for
- * the strong wave and 0.15 for the great one -- because there is one crest
- * kind now and the sea should be no quieter for it. Read it together with
- * MAX_WAVES below: collapsing two kinds into one would otherwise have halved
- * the weather on the water, since the live budget was one of EACH kind and is
- * now two crests in one pool. Neither the odds nor the budget makes the sea
- * rougher than it was; between them they make it the same sea, drawn from one
- * continuous range instead of two fixed strengths. The maelstrom is
- * deliberately not touched -- it is the rare thing, and the one hazard that
- * can end a run.
+ * P_WAVE is PER ATTEMPT, and there are ROLL_ATTEMPTS.wave of them a roll, so
+ * the number to reason about is 5 x 0.15 = 0.75 expected spawns a second into
+ * an empty sea. It was 0.45 on a single attempt against a two-crest budget.
+ *
+ * It came down from that 0.45 because five attempts at it do not make a
+ * busier sea, they make a PINNED one. Measured over 50 minutes of sim: the
+ * water sat at 4.49 crests of a possible five and was full 61% of the time in
+ * FAIR WEATHER, and a full storm then bought 1.04x the spawns -- the storm
+ * multiplier had stopped meaning anything, because there was never a free
+ * slot for it to fill faster. The whole point of a capacity and an odds knob
+ * being two different numbers is that the first says how many and the second
+ * says how quickly, and a saturated sea collapses them into one.
+ *
+ * At 0.15 the same measurement gives 3.45 crests in fair weather, full 23% of
+ * the time, against 4.49 and 61% under a storm, for a ratio of 1.293 -- back
+ * inside the band this file has always claimed and `hazards.test.ts` asserts.
+ * So fair weather is genuinely busier than the two-crest sea it replaces, and
+ * a storm is once again the thing that fills the water up.
+ *
+ * The maelstrom is deliberately not touched -- it is the rare thing, and the
+ * one hazard that can end a run.
  *
  * Note the odds are per roll and per KIND: a kind already at its live budget
  * is drawn for and skipped, so the actual rate is well under these numbers
  * once the sea is busy.
  */
 export const ROLL_PERIOD = 1;
-const P_WAVE = 0.45;
+const P_WAVE = 0.15;
 const P_MAELSTROM = 0.02;
 
 /**
@@ -187,21 +198,45 @@ const ROLL_ODDS: Record<HazardKind, number> = {
 };
 
 /**
+ * How many separate chances each kind gets per roll.
+ *
+ * A roll used to be one draw per kind, so a second of weather could raise at
+ * most one wave however empty the sea was: filling five slots from cold took
+ * five seconds of consecutive successes. Five attempts is the owner's ask
+ * that a tick be ABLE to raise five, and it is what makes the new capacity
+ * reachable in the moment a squall arrives rather than a ceiling the sea
+ * creeps up on.
+ *
+ * Every attempt draws whether it can act or not, exactly as the single draw
+ * always did -- see ROLL_ORDER. Six numbers come off `rng` per roll now, in
+ * the same order, spent or not, so the stream still replays.
+ *
+ * The maelstrom stays at one. Its odds are the rare-event knob and giving it
+ * five chances a second would multiply an 0.02 into something a player meets
+ * constantly, which is the opposite of what it is for.
+ */
+const ROLL_ATTEMPTS: Record<HazardKind, number> = {
+  wave: 5,
+  maelstrom: 1,
+};
+
+/**
  * How many of each kind may be on the water at once, and the two together are
  * MAX_HAZARDS -- the shader's uniform-array bound, which nothing here may
  * exceed.
  *
- * Two crests and one maelstrom, where it used to be one of each of three
- * kinds. The count is unchanged on purpose: MAX_HAZARDS is what sizes the
- * uniform block and the fragment loop in `hazardfield.ts`, so re-spending the
- * freed slot on a second wave costs the shader nothing at all and is what
- * keeps the sea as busy as it was before the two crest kinds became one.
+ * Five crests and one maelstrom, where it was two and one. The maelstrom is
+ * deliberately still one: it is the rare thing and the only hazard that can
+ * end a run, and a sea with two of them is a different game rather than a
+ * busier one.
  *
- * Two crests can now overlap, which the old one-of-each rule made impossible
+ * Crests overlap freely, which the old one-of-each rule made impossible
  * between the strong and great wave only by accident. `hazardHeight` has
- * summed its slots since the day it was written, so where two fronts cross
- * the water genuinely stands higher, and neither the hull's ride nor the
- * parity probe needs a word changing for it.
+ * summed its slots since the day it was written, so where fronts cross the
+ * water genuinely stands higher, and neither the hull's ride nor the parity
+ * probe needs a word changing for it. At five that summing is doing real
+ * work: a crossing of three fronts is now something the sea can actually
+ * produce rather than a case that existed only in the arithmetic.
  */
 const MAX_WAVES = MAX_HAZARDS - 1;
 const CAPACITY: Record<HazardKind, number> = {
@@ -1110,15 +1145,26 @@ export function createHazards(deps: HazardsDeps): Hazards {
    */
   function roll(ship: ShipState, wind: WindState, stormOdds: number): void {
     for (const kind of ROLL_ORDER) {
-      const draw = rng();
-      // The capacity rule and the storm multiplier are two different limits
-      // and both stand. `stormOdds` makes a hazard likelier to be rolled;
-      // CAPACITY caps how many can be on the water at once, so a storm fills
-      // the free slots faster without ever raising the ceiling. That is why
-      // tripling the odds buys well under three times the weather -- see
-      // `main.ts`'s own note on STORM_ODDS_GAIN.
-      if (countOf(kind) >= CAPACITY[kind]) continue;
-      if (draw < ROLL_ODDS[kind] * stormOdds) trySpawn(kind, ship, wind);
+      // Every attempt draws, and draws BEFORE anything is allowed to skip it
+      // -- see ROLL_ATTEMPTS and ROLL_ORDER. The count of numbers taken off
+      // `rng` per roll is therefore fixed at ROLL_ATTEMPTS summed over the
+      // kinds, whatever the sea happens to be holding, which is the whole of
+      // why a seeded run replays.
+      for (let attempt = 0; attempt < ROLL_ATTEMPTS[kind]; attempt++) {
+        const draw = rng();
+        // The capacity rule and the storm multiplier are two different limits
+        // and both stand. `stormOdds` makes a hazard likelier to be rolled;
+        // CAPACITY caps how many can be on the water at once, so a storm fills
+        // the free slots faster without ever raising the ceiling. That is why
+        // tripling the odds buys well under three times the weather -- see
+        // `main.ts`'s own note on STORM_ODDS_GAIN.
+        //
+        // Re-read every attempt rather than once per kind: five attempts can
+        // fill the last free slot on the second of them, and the three behind
+        // it must then find the sea full rather than overrun it.
+        if (countOf(kind) >= CAPACITY[kind]) continue;
+        if (draw < ROLL_ODDS[kind] * stormOdds) trySpawn(kind, ship, wind);
+      }
     }
   }
 

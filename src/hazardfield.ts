@@ -50,8 +50,23 @@ import type { Hazard } from './types';
  * exactly as `wavefield.ts` converts NORMAL_STEP.
  */
 
-/** How many hazards can be alive at once: one of each kind. */
-export const MAX_HAZARDS = 3;
+/**
+ * How many hazards can be alive at once, and the bound that sizes the
+ * shader's uniform arrays and its fragment loop.
+ *
+ * Six: five crests and one maelstrom (`hazards.ts` owns that split, in
+ * CAPACITY). It was three, and it was three because the sea began as one of
+ * each of three kinds; two of those kinds became one, and the freed slot was
+ * spent on a second crest rather than reclaimed.
+ *
+ * Doubling it is the owner's ask for a sea that can raise up to five waves at
+ * once. The cost is real and is paid per PIXEL, not per hazard: the fragment
+ * shader evaluates `hazardHeight` three times to build its normal, so the
+ * worst case here is eighteen slot iterations a pixel where it was nine. The
+ * loop still breaks on `uHazCount`, so a quiet sea costs exactly what it did
+ * -- this is a ceiling on a busy one, not a new floor.
+ */
+export const MAX_HAZARDS = 6;
 
 /**
  * A crest's half-length and half-width, world units, so the wave is 20 long
