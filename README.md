@@ -28,6 +28,7 @@ the first frame you are handed does not stutter.
 | `Space` (inside a berth's ring) | Make fast, or cast off again. While made fast the helm is locked |
 | on-screen `[FISH]` | Open the fishing screen — start a session, or read the record. On the helm pad, beside THRUST |
 | on-screen `[SHOP]` | Open the chandlery — only once you are moored. Under the telemetry panel, because it is a berth's key rather than the ship's |
+| on-screen `[WORK]` | Open the harbour's contract board — only once you are moored. Beside `[SHOP]`, on the same terms: it is the berth's key, not the ship's |
 | on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds. On the helm pad, under REVERSE |
 | on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time. On the helm pad, over THRUST |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
@@ -380,6 +381,27 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   **one** below 25%, and the card tells you which before the guns start.
   Any berth mends it free at two percent a second; the chandlery will sell you
   ten percent for 100 gold when there is no berth to be had.
+- **Contracts, and a reputation.** Every harbour posts work, and `[WORK]`
+  alongside a berth opens its board under the harbour's own name. A posting is
+  a **cargo run to a named harbour against a deadline** or a **survey** of a
+  share of the world, and it pays gold and reputation. The board is **three
+  postings, redrawn once a world day** — twenty real minutes — so a harbour you
+  pass twice in an afternoon is offering the same work both times, and coming
+  back tomorrow is what changes it. Some runs add a condition the sphere makes
+  real rather than a number: *arrive in daylight* is a race against the
+  terminator, and the board tells you how long the destination's dawn has left.
+  Take one and it goes to the **job strip** at the top of the HUD, which names
+  the destination, its bearing and range, and counts the deadline down as you
+  sail; a survey counts the share of the world you have actually charted.
+  **Reputation** is one number, floored at -100 with no ceiling: settling a
+  contract pays it, missing or abandoning one costs five. You can hold **three
+  at once**, so a board is a choice rather than a shopping list. Contracts in
+  hand survive a reload, and `Esc` → CONTRACTS reads the board's held list from
+  anywhere, which is the one part of this that does not need a berth.
+- **Notices.** A one-line strip across the top of the screen, under the job
+  strip, says what just happened — a contract taken, settled or run out — for
+  four seconds of *world* time, so a notice raised as you open a panel is still there when you close
+  it. One at a time, and the fifth in a row is dropped rather than queued.
 - **The chandlery.** Alongside a berth, `[SHOP]` opens a panel headed with the
   harbour's name, a REPAIR block, and two tabs — NAVIGATION
   and FISHING. **Not every harbour sells everything**: the consumables and the
