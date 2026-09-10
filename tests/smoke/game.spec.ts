@@ -347,15 +347,33 @@ test.describe('game smoke', () => {
   });
 
   test('battle=1 boots into the arena clean', async ({ page }) => {
+    /*
+     * The one case in this tier that needs longer than the suite's 60 s, and
+     * it is this file's own budget rather than the config's so that every
+     * other case still fails fast.
+     *
+     * A fight used to draw a second, empty scene -- one flat plane, two hulls
+     * and a handful of spheres. It draws the live world it is now fought in:
+     * globe water, the displacement patch, the reflection cube, the cloud deck
+     * and the weather, all on a software rasteriser. That took it from about
+     * 50 s to about 66 s, close enough to 60 that it began flaking when run
+     * after the rest of the suite on a warm machine.
+     *
+     * This is NOT a frame-rate measurement and must never be read as one --
+     * docs/TESTING.md's rule for this tier is that SwiftShader is for looking
+     * at what is drawn, never at how fast. It is a budget for a renderer
+     * roughly a hundred times slower than the one a player has.
+     */
+    test.setTimeout(150_000);
+
     const problems = collectConsoleProblems(page);
 
     /*
-     * The arena is a SECOND scene with its own sea shader, its own lights and
-     * its own camera, and none of it is compiled by an ordinary session: a
-     * fight is a 16%-per-ten-seconds draw away, and the whole point of this
-     * tier is that it executes shaders Node never sees. `?battle=1` puts an
-     * orange boat on the hull three seconds in, so the contact, the fade and
-     * the arena all happen inside one boot.
+     * A fight compiles nothing an ordinary session does -- the boundary ring,
+     * the balls, the splashes -- and puts the world's own water shader under a
+     * camera that never otherwise looks at it. `?battle=1` puts an orange boat
+     * on the hull three seconds in, so the contact, the fade and the fight all
+     * happen inside one boot.
      */
     await boot(page, `/?battle=1&${SEED}`);
 
