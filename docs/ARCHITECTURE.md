@@ -300,7 +300,7 @@ shader.
 | `battleai.ts` | `createBattleAi(rng)`, `BattleAi`, `AiView`, `AI_LAG`, `AI_HELM_PERIOD`, `AI_HELM_COIN`, `AI_FUSE`, `AI_SOLUTION_TOLERANCE` | the enemy gunner and the enemy helm, and nothing else: it knows nothing of the sea, the ring's shrink or the locker's bookkeeping. A two-second delay line (`observe` records every tick, `throttle`/`gun` read it `AI_LAG` later, so every decision is aimed at the player of two seconds ago), a coin flip in one helm decision in four, and a fuse that commits a shot `AI_FUSE` before it fires — which is what makes it dodgeable. Decisions 1, 2 and 4 of `docs/BATTLE_REWORK_PLAN.md` |
 | `battlesea.ts` | `createBattleSea(rng, options)`, `BattleSea`, `BattleSeaState`, `SwayTarget`, `CALM`, `ROUGH`, the crest/sway/flotsam constants, `FOUL_SECONDS` | the two seeded systems that put something in the arena, each switched independently by `BattleOptions`: up to `CREST_MAX` crests at once, each a finite length of a line perpendicular to one of the four cardinal directions, rolling across the ring at its own speed and shoving the hulls it actually passes over as a closed-form pulse (nothing to integrate, so nothing that can go unstable at a capped `dt`); and a fleet of three to six flotsam rafts, each its own size and speed, that swallow a ball crossing them and foul a hull they touch for `FOUL_SECONDS`. `CALM` turns both off and is what every unit case measuring the gunner is pinned against; `ROUGH` is the arena's old default; `LIVE` — rafts but no crests — is what a fight in the world is built with, because the sea under the ring is the globe's own and the shoves come from its crests through `shove`. Decisions 5 and 7 |
 | `bounty.ts` | `WIN_TIERS`, `rollWinGold(rng)`, `lossGold(purse)`, `rollDrawGold(rng, purse)`, `LOSS_SHARE`/`LOSS_MIN`/`LOSS_MAX`, `DRAW_SWING` | data and pure functions for the three gold outcomes; every roll takes the caller's `rng` |
-| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the fight's props: a `Group` in FLAT ARENA COORDINATES holding the boundary ring, the cannonballs, the splashes, the flashes and the rafts, plus the camera parented into it. No longer a second `Scene`, and no longer owns a sea, lights or a sky: `main.ts` adds the group to the WORLD scene and gives it the one transform that lays the arena's plane on the globe's tangent plane at the ring. See **The fight happens in the world** |
+| `battlescene.ts` | `createBattleScene(quality)`, `BattleScene` | the fight's props: a `Group` in FLAT ARENA COORDINATES holding the cannonballs, the splashes, the flashes and the rafts. No longer a second `Scene`, and no longer owns a sea, lights or a sky: `main.ts` adds the group to the WORLD scene and gives it the one transform that lays the arena's plane on the globe's tangent plane at the ring. The camera is NOT in the group — `placeCamera` puts it on the ring in world space, and the reason is written there. The ring itself is not drawn. See **The fight happens in the world** |
 | `battlering.ts` | `findRingCentre(heightMap, seaLevel, contact)`, `ringFits`, `RING_CLEARANCE` | where a fight may be staged. A raider can catch the player a cable off a headland, and `battle.ts` puts both hulls on a circle it assumes is water; on the globe that has to be earned. Samples the DISC — not the rim — on a three-unit polar grid, and slides the ring to the nearest clear water when the contact point will not do. Reports whether it actually found one |
 | `battlewave.ts` | `SEA_VERTEX`, `seaFragment(fine)`, `CREST_VERTEX`, `crestFragment(fine)`, `ARENA_CREST_HEIGHT`, `CREST_GRID` | the arena's water as GLSL, split out of `battlescene.ts` the way `hazardcrest.ts` was split out of `waterhazard.ts`. Compiles `waterglsl.ts`'s ridged field on a plane, `hazardfield.ts`'s crest profile as shared characters and `hazardcrest.ts`'s art constants, so the fight is fought on the same wave the world raises — see **The arena sea is not the globe water, but it is the same wave** |
 | `battlecover.ts` | `createBattleCover(deps)`, `BattleCover`, `COUNTDOWN` | the card a fight is DECLARED on: the plate, the rules in one sentence off `FIRE_COOLDOWN`/`HITS_TO_LOSE`, and the three-second count into the arena. A card over a FROZEN world, unlike `battleui.ts` — see **The beat before a fight**. Counts on the wall clock, not on `dt` |
@@ -746,11 +746,31 @@ kept out.
 arena coordinates and nothing else; `main.ts` adds it to the world scene and
 gives it the basis `(east, up, north)` at the ring's centre, so a combatant at
 arena `(x, z)` lands at `centre * R + east * x + north * z` and a prop at
-`y = 0` lands at sea level. The camera is a child of that group, so the fixed
-shot the arena was designed around is carried onto the globe with everything it
-frames. `battle.ts` still does every calculation in flat metres and has not
-changed a line for any of it. See docs/ROADMAP.md, "The fight, in the live
-world", whose step 1 this is.
+`y = 0` lands at sea level. `battle.ts` still does every calculation in flat
+metres and has not changed a line for any of it. See docs/ROADMAP.md, "The
+fight, in the live world", whose step 1 this is.
+
+**The camera is not in that group, and that is load-bearing.** Parenting it
+there is the obvious move — the props already carry the transform — and it was
+written that way first. The world renders WRONG through a camera parented like
+that: no sky at all, a black starfield over a lit afternoon sea, and water so
+transparent the sea floor shows through it. It was isolated by elimination
+against the chase camera on a live frame (pose, FOV, aspect, near/far, layer
+masks, frustum test, and the sky dome's own visibility and day factor all
+identical; the same pose through an unparented camera drew correctly). So
+`placeCamera` positions it in world space from the ring's basis instead.
+
+Its depth range is the world camera's 0.1–6000, not the arena's old 0.1–2000:
+the sky dome sits about 3800 units out and a 2000 far plane cuts it off, which
+looks like the sky ending in a hard band above the horizon. And its pose is 19
+up and 52 back rather than 26 and 34 — 20 degrees below horizontal instead of
+37, so the horizon is inside the frame and the sea is seen at a grazing angle
+that reflects the sky instead of showing the bottom through it.
+
+**The ring is not drawn.** It briefly was; a hard annulus laid flat on the sea
+read as interface dropped onto the world. `battle.ts` still holds both boats to
+it and still closes it, so the constraint is unchanged — only the annulus is
+gone.
 
 What that buys is the thing the roadmap wanted and not a graphical upgrade: the
 clock runs. `weatherCells.update`, `wind.update`, `weather.update`,
