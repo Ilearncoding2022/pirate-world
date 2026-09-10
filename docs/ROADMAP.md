@@ -457,6 +457,31 @@ Two documents hold real, costed designs that were never built:
 - **`docs/RENDER_PLAN.md` Phase 3.** Gerstner mid layer, FFT ocean, spray
   sprites, shadow map, ship-local land patch, depth-buffer shoreline.
 
+### 10. The storm no longer brings a fleet — **open question**
+
+A storm is supposed to treble the wandering raiders: `roll` multiplies
+`P_ORANGE` by `stormOdds`, which reaches 3 at full weather. It does not do
+that any more, and has not since `c3c0093` tripled `P_ORANGE` from 0.24 to
+0.72 at the owner's request.
+
+The threshold is not clamped, so full weather tests `rng() < 2.16` and every
+roll with no orange alive spawns one. Certainty is the ceiling, so the most a
+storm can do is close the gap between 0.72 and 1: measured over 100 minutes of
+sim it raises the raider count by **39%, where it used to raise it by 190%**.
+Every multiplier above 1.39 is inert, and the weather system cannot tell.
+
+`tests/unit/aiboats.test.ts` pins the 1.39 so this cannot drift further
+unnoticed, but pinning it is not deciding it. Three ways out, none costed:
+
+- **Accept it.** 39% is a real difference and the sea is already busy at 0.72.
+  The multiplier then wants deleting rather than leaving as decoration.
+- **Cut `P_ORANGE` back** and let the multiplier work again, which undoes the
+  change that made the empty sea feel populated.
+- **Move the storm's effect off the odds.** Raise the population cap or
+  shorten `ROLL_PERIOD` under weather instead of multiplying a probability
+  that is already near 1 — the only one of the three that gets both a busy
+  calm sea and a storm that visibly changes it.
+
 ## Technical work not yet done
 
 ### 1. No device detection, no frame governor

@@ -3,6 +3,7 @@ import { Vector3 } from 'three';
 import {
   CONTACT_RADIUS,
   PHASE_MAX,
+  P_ORANGE,
   RED_SPEED,
   ROLL_PERIOD,
   createAiBoats,
@@ -317,7 +318,7 @@ describe('aiboats: pursuit', () => {
 });
 
 describe('aiboats: the storm multiplier', () => {
-  it('raises nearly three times as many raiders under a full storm', () => {
+  it('cannot treble the raiders any more, because P_ORANGE saturates', () => {
     const ship = stationaryShip();
     const energy = energyState();
     const dt = 0.1;
@@ -340,22 +341,30 @@ describe('aiboats: the storm multiplier', () => {
     const storm = spawnsAt(3);
     expect(calm).toBeGreaterThan(0);
     /*
-     * Close to the tripling the multiplier asks for, and the reason it lands
-     * so much nearer 3 than `hazards.ts` does is the roll period. The raiders
-     * roll once every TEN seconds, nowhere near saturating their
-     * one-of-each-kind cap, so tripling the probability very nearly triples
-     * the encounters. The hazards roll every second and were already
-     * saturated; they get 1.24. See the matching case in `hazards.test.ts`.
+     * This case used to read "raises nearly three times as many raiders", and
+     * it was true when P_ORANGE was 0.24: the roll was nowhere near its
+     * one-of-each-kind cap, so tripling the probability very nearly tripled
+     * the encounters and the ratio came out around 2.9.
      *
-     * Almost all of this is ORANGE, and that is not an accident of the
-     * seed: red is exempt from the multiplier (see the case below) and its
-     * own odds are 0.032 against orange's 0.24, so the fleet a storm brings
-     * is overwhelmingly the wandering sort. The ratio is barely moved by the
-     * exemption for exactly that reason.
+     * `c3c0093` TRIPLED P_ORANGE to 0.72 (owner's request: the sea between
+     * harbours read as empty). That silently spent the storm multiplier. The
+     * draw is `draw < ROLL_ODDS.orange * stormOdds` with no clamp, so at
+     * stormOdds 3 the threshold is 2.16 and `rng()` is ALWAYS below it: every
+     * roll with no orange alive spawns one. A storm cannot do better than
+     * certainty, so the ceiling on this ratio is now 1 / P_ORANGE -- about
+     * 1.39 -- and no multiplier above 1/0.72 = 1.39 can move it at all.
+     *
+     * That is a real behaviour change and not a slack test, so the band is
+     * pinned tight around the saturation figure rather than widened to admit
+     * the old one. If P_ORANGE ever comes back down, this fails and says so.
+     *
+     * Red is untouched by any of it: it is exempt from the multiplier (see
+     * the case below) and its odds are 0.032, so it barely moves the ratio.
      */
     const ratio = storm / calm;
-    expect(ratio).toBeGreaterThan(2.2);
-    expect(ratio).toBeLessThan(3.2);
+    expect(P_ORANGE * 3).toBeGreaterThan(1); // the saturation this pins
+    expect(ratio).toBeGreaterThan(1.25);
+    expect(ratio).toBeLessThan(1.55);
   });
 
   it('multiplies the wandering raider and never the aggressive one', () => {
@@ -379,9 +388,12 @@ describe('aiboats: the storm multiplier', () => {
     const calm = spawnsAt(1);
     const storm = spawnsAt(3);
 
-    // Orange takes the weather: the roll is nowhere near saturation, so a
-    // tripled probability shows up almost in full.
-    expect(storm.orange).toBeGreaterThan(calm.orange * 2);
+    // Orange takes the weather, but only as far as certainty goes: at
+    // P_ORANGE 0.72 a tripled threshold saturates, so what shows through is
+    // the gap between 0.72 and 1 rather than the factor of three. See the
+    // case above for the arithmetic.
+    expect(storm.orange).toBeGreaterThan(calm.orange * 1.25);
+    expect(storm.orange).toBeLessThan(calm.orange * 1.55);
 
     /*
      * Red does not. The two counts are not asserted EQUAL, and the reason is
