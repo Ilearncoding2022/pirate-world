@@ -16,10 +16,10 @@ of a market rather than of a codebase and say so where they start.
 
 | | |
 |---|---|
-| Version | 0.19.0 |
-| Source | 102 TypeScript modules, ~41 200 lines, plus 3 800 lines of CSS |
-| Tests | 47 unit files / 405 cases (~4 s), 8 browser cases (~2.2 min) |
-| Bundle | 929 KB JS (263 KB gzipped), 40 KB CSS, one chunk |
+| Version | 0.20.0 |
+| Source | 106 TypeScript modules, ~44 000 lines, plus 5 500 lines of CSS |
+| Tests | 50 unit files / 528 cases (~5 s), 8 browser cases (~2.2 min) |
+| Bundle | 948 KB JS (279 KB gzipped), 50 KB CSS, one chunk |
 | Assets | One 5.1 MB glTF hull, four WebP illustrations. Everything else procedural |
 | Dependencies | 2 runtime (`three`, `simplex-noise`), 7 dev |
 
@@ -28,7 +28,17 @@ unusually exposed in the ways that are not. There is **not one TODO, FIXME,
 HACK or XXX comment** in `src/` — search case-sensitively, or the `C.xxx`
 swizzles in the GLSL modules will give you six false hits. The sim half is
 densely tested and the architecture document is genuinely authoritative. What is missing is almost entirely
-*category* rather than *quality*: no audio, no goal, no CI, no linter.
+*category* rather than *quality*: no audio, no CI, no linter. **"No goal" came
+off that list on 2026-09-10**, when harbour-issued contracts landed
+(`docs/QUESTS_PLAN.md` Phase 1). The game still has no win condition and no
+failure state, and both of those are choices rather than gaps.
+
+Eight unit cases fail on this commit and failed before it: two in
+`aiboats.test.ts`, three in `energy-*.test.ts` and three in `hull-hud.test.ts`.
+They are pre-existing and unrelated to contracts — `git stash && npm test`
+reproduces the same eight — and they are the first thing item 2 of **Suggested
+order** should pick up, because a red suite is how a second red failure goes
+unnoticed.
 
 ## What v0.19.0 delivered
 
@@ -57,6 +67,35 @@ items that were on the improvement list before it:
 
 It did **not** add audio, a goal, a settings menu, CI, or any performance work.
 Those were never in its scope.
+
+## What the contracts work delivered
+
+Unreleased as of 2026-09-10, on `claude/game-quests-planning-dtbgoz`.
+`docs/QUESTS_PLAN.md` Phase 1, and the authoritative description of it is
+**Contracts** in `docs/ARCHITECTURE.md`.
+
+- **A reason to sail somewhere.** Every harbour posts three contracts, redrawn
+  once per world day. A delivery names a harbour and a deadline in world days;
+  its tier is its great-circle arc from the issuer, in bands at 60 and 120
+  degrees. A chart goal asks for a cosine-weighted fraction of the globe.
+- **Day and night as a navigation problem.** About half the deliveries carry a
+  window that has to be met AT THE DESTINATION — arrive while it is still
+  daylight there, or after dark. The terminator crawls at a tenth of the hull's
+  speed, so a window cannot be waited out; it has to be sailed to. This is the
+  one mechanic here a flat-ocean game could not copy.
+- **Reputation.** One signed integer, floored at -100 with no ceiling. A settled
+  contract pays it and its purse; a missed or abandoned one costs five. It buys
+  nothing yet, deliberately — so that when it does, the history is already
+  there.
+- **The notification layer.** A one-line transient strip, held for four WORLD
+  seconds so a notice cannot run out behind an overlay. Contracts are its only
+  consumer so far.
+- **`chart.coverage()`.** The fraction of the globe's area discovered, weighted
+  by the cosine of each row's latitude and kept as a running total.
+
+It did **not** add audio, CI, a settings menu, a win condition or a failure
+state, and it did **not** tune anything: every figure in `questconstants.ts` is
+a first guess that has had no playtest.
 
 ## Where this sits in its genre
 
@@ -247,13 +286,17 @@ true at once.
   Set a quality floor for step 1 (fog capped, minimum ambient light) so a fight
   is never unreadable. That is a design rule, not a compromise.
 
-### 5. Contracts that are spherical by construction
+### 5. Contracts that are spherical by construction — **partly closed**
 
-**Player-facing work** item 2 already wants port contracts. The point here is
-that they should not be generic fetch quests. Make each one a question about
-the planet: deliver to a harbour more than 90 degrees of arc away on one tank;
-arrive somewhere while it is still daylight *there*; reach a pole and return;
-chart a given fraction of the globe (`chart.ts` already knows it).
+**Built, and shaped this way rather than as fetch quests.** A delivery's tier is
+its great-circle arc from the issuer, in three bands at 60 and 120 degrees; a
+window is satisfied by `solarPhase` at the TARGET, so it cannot be waited out
+and has to be sailed to; a chart goal reads a cosine-weighted fraction of the
+globe's area, which is what stops it being finishable by circling a pole.
+
+Still unbuilt: "reach a pole and return", which is the `EXPEDITION` kind. It
+waits on the latitude power gradient below being legible, or a player will not
+know why the tank died.
 
 - **Why it is worth it.** Closes the largest design gap using only systems that
   exist, and does it in a way a flat-ocean game could not copy. Great-circle
@@ -315,19 +358,21 @@ frame loop beside `hud.update`, reading the same `WeatherState`, `WindState`
 and `ShipState` everything else does. The pause contract already exists — the
 frozen branch is where the bed should duck.
 
-### 2. A reason to sail somewhere
+### 2. A reason to sail somewhere — **partly closed**
 
-There is still no objective, quest, contract, destination or win condition.
-Verified: grepping `src/` for `quest|objective|mission|win condition` returns
-only unrelated uses of the word "contract" in module documentation.
+**Closed by `docs/QUESTS_PLAN.md` Phase 1.** Harbours now post contracts. A
+delivery names a harbour, a deadline in world days and, on about half the
+postings, a window that has to be met at the DESTINATION — arrive while it is
+still daylight there. A chart goal asks for a fraction of the current sea.
+Three can be in hand at once, a settled one pays gold and reputation, and a
+missed one costs five reputation and nothing else. See **Contracts** in
+`docs/ARCHITECTURE.md`.
 
-v0.19.0 made the world worth re-entering and gave the player 36 named places,
-which is exactly the substrate a goal needs and stops short of being one. The
-cheapest thing that would work: **port-issued contracts** — carry something
-from Rustwharf to Ionport inside a time or hull budget for a purse — using the
-harbour list, the known-harbour memory and the bearing formatter that already
-exist. A chart-completion milestone is the other obvious one and is nearly
-free, since `chart.ts` already knows what fraction has been revealed.
+What is still open: there is no WIN condition and no failure state, which was
+deliberate and remains the right call for this game. Two contract kinds are
+specified and unbuilt — `EXPEDITION` (reach a pole and return) and `SURVEY`
+(moor somewhere you never have) — and reputation is earned and shown but buys
+nothing yet. All three are Phase 2 of the same plan.
 
 ### 3. Onboarding
 
@@ -341,13 +386,21 @@ Contextual first-run prompts, shown once and dismissible, are the whole of the
 work. There is no tutorial framework to build — `main.ts` already knows every
 state a prompt would key on.
 
-### 4. Feedback and notifications
+### 4. Feedback and notifications — **partly closed**
 
-There is no toast or notification layer. Gold changes are a silent number swap
-in the telemetry panel; a caught fish, an arriving storm, a raider sighting and
-a harbour first-visit all pass without comment. The hull block added in
-v0.19.0 is the model to follow — it names its cause in words and colours by
-severity — but it is a *panel*, and events need something transient.
+**The layer exists.** `toast.ts` is a one-line transient strip under the
+contract line, held for four WORLD seconds — so a notice raised as the fishing
+card opens is still there when it closes — and coloured by severity the way the
+hull block is. It was built inside the contracts branch because a notification
+layer with no consumer is a design with no feedback.
+
+What is still open is every OTHER consumer. Gold changes outside a contract are
+still a silent number swap in the telemetry panel; a caught fish, an arriving
+storm, a raider sighting and a harbour first-visit still pass without comment.
+Each is now one `toast.push` at an event `main.ts` already sees.
+
+Battle feedback is untouched: still pooled point lights and pips, no hull damage
+states, no smoke, no listing.
 
 Battle feedback is still pooled point lights and pips. There are no hull damage
 states, no smoke, no listing.
@@ -549,7 +602,7 @@ These are not preferences. Each will individually sink a paid release.
 |---|---|---|
 | **No licence, no third-party notices** | No `LICENSE`, `COPYING` or `NOTICE` at the root; `ls` proves it | `three` and `simplex-noise` are MIT, and MIT *requires* shipping the copyright notice. The build currently does not. Trivial to fix, real exposure until it is. |
 | **No audio** | **Player-facing work** item 1 | A paid game with no sound reads as an unfinished tech demo. Every review will lead with it. |
-| **No goal** | **Player-facing work** item 2 | A sandbox with no objective, no win state and no failure state cannot be charged for. This is the largest gap in the project, commercial or otherwise. |
+| ~~**No goal**~~ **Untuned goal** | **Player-facing work** item 2 | Was the largest gap in the project. Contracts closed it on 2026-09-10: a harbour posts work, a delivery is priced by arc and half of them carry a window that has to be met at the destination. What is not closed is the TUNING — not one of the figures in `questconstants.ts` has been played, and an economy that pays wrong is as commercially fatal as one that pays nothing. `?quest=board` is the cheapest way to look at it. Still no win state and no failure state, which remain choices. |
 | **No settings, no pause, no accessibility** | **Player-facing work** item 5 | Storefronts surface accessibility fields now. No remappable keys, no colourblind aid and no volume control is a refund driver, and the red-versus-orange raider read is already documented as invisible to a deuteranope. |
 | **Save is one `localStorage` slot, no export, no import** | **Technical work** item 7 | Tolerable when the game is free. For a paid copy, one cache clear destroys a customer's progress and earns a refund and a review. |
 | **No CI, no crash reporting, no analytics** | **Technical work** items 4 and 5; `grep -riE 'analytics\|gtag\|plausible\|posthog\|sentry' src/ index.html` returns nothing | Patches to paying customers cannot rest on a manual test run on one machine, and a crash on hardware nobody owns is currently invisible. |
@@ -673,9 +726,11 @@ because it looks good on a store page rather than because it improves the game.
    rests on one machine. Half a day.
 3. **Audio.** The largest felt change available, no asset pipeline, no
    architectural risk.
-4. **The notification layer.** Small, and a prerequisite for items 6 and 7:
-   without it a contract, a first-visit and a caught fish are all silent
-   number changes.
+4. ~~**The notification layer.**~~ **Done**, inside the contracts work: the
+   strip exists and contracts use it. What is left is the other consumers — a
+   caught fish, an arriving storm, a raider sighting, a harbour first-visit —
+   each one `toast.push` at an event `main.ts` already sees. An hour, and worth
+   taking before item 3, because audio and a notice are the same beat.
 5. **Settings menu with quality auto-detection.** These are one job: detection
    is only safe once the player can override it. Fixes the worst
    user-hostility left and the worst performance exposure at once. Save export
@@ -683,9 +738,13 @@ because it looks good on a store page rather than because it improves the game.
 6. **Compress the ship and add a deploy target.** Cuts first load by roughly
    four fifths and finally puts the game somewhere other than localhost. A
    prerequisite for any portal release, where bounce is measured in seconds.
-7. **Contracts between named harbours**, shaped as **Strengthening what is
-   unique** item 5 rather than as generic fetch quests. The first actual goal,
-   built entirely on substrate v0.19.0 already shipped.
+7. ~~**Contracts between named harbours**~~ **Phase 1 done.** Deliveries with
+   arc tiers and destination daylight windows, chart goals, reputation, the
+   board at a berth, a HUD line and a menu page. What is left is Phase 2 of
+   `docs/QUESTS_PLAN.md`: the `EXPEDITION` and `SURVEY` kinds, and deciding what
+   reputation buys. Neither is a prerequisite for a release — the tuning
+   numbers, which have had no playtest, are the real outstanding work, and
+   `?quest=board` is how to look at them.
 8. **Shareable seeds and a circumnavigation record.** Nearly free, and the
    thing that turns a browser build into a link worth sending.
 9. **Fish by latitude, depth and time**, then **latitude as a power

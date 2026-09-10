@@ -16,7 +16,7 @@ Measured on the owner's machine, at the sizes and settings checked in:
 
 | Command | What it is | Cost |
 |---|---|---|
-| `npm test` | Unit tier. Node, no WebGL. | ~4 s, 405 tests |
+| `npm test` | Unit tier. Node, no WebGL. | ~5 s, 528 tests |
 | `npm run test:all` | Build, unit tier, browser tier. | ~2.3 min |
 | `npm run shots` | Screenshots only, no assertions. | ~29 s |
 | `npm run build` | Alone. | ~2 s |
@@ -183,7 +183,7 @@ pins and the one `generateWorld` falls back to after twelve failed draws. A
 pinned seed makes exactly one attempt and THROWS if it fails, which is what
 makes it a pin; if that ever fires, the unit tier said so first.
 
-Four dev queries are worth knowing when you need to look at something:
+Six dev queries are worth knowing when you need to look at something:
 
 | Query | What it is for |
 |---|---|
@@ -191,7 +191,14 @@ Four dev queries are worth knowing when you need to look at something:
 | `?reject=<n>` | Force the first n world attempts to fail. The only way to exercise the retry and the fallback, because no failing seed is known. |
 | `?hull=<1..100>` | Start worn. Goes through `Hull.override`, which does not write the save. |
 | `?spawn=<lat>,<lon>` | Start somewhere else. The only way to reach either polar harbour, or to get close enough to a harbour to see its name label, or to open the chandlery in a browser at all. |
+| `?quest=board` | Print every harbour's contract board for today to the console. A board turns over once per world day, which is twenty real minutes, so this is the only way to look at the shape of the draw without waiting for it. |
+| `?quest=accept:<n>` / `?quest=accept:<name>:<n>` | Take posting `n` at the nearest harbour, or at a named one (underscores for spaces, matched case-insensitively). The only way to get a contract in hand without sailing to a berth first, which is what makes a completion testable at all. |
 
 `?spawn=` is what retires this file's old note that the chandlery is
 unreachable from the browser tier. It is reachable now:
 `?seed=1337&spawn=26.31,-12.52` moors at Scrapmoor.
+
+The two contract queries compose with it, and that pairing is the whole point:
+`?seed=1337&spawn=26.31,-12.52&quest=accept:0` moors at Scrapmoor carrying its
+first posting, which is one `[WORK]` press away from a board to look at and one
+passage away from a settlement.

@@ -11,7 +11,7 @@ import { createHud } from './hud';
 import { createRadar } from './radar';
 import { createTimeDial } from './timedial';
 import { createEnv } from './env';
-import { elapsedAtLocalTime } from './daynight';
+import { DAY_LENGTH, elapsedAtLocalTime } from './daynight';
 import { createEnergy } from './energy';
 import { createWind } from './wind';
 import { createWeatherCells } from './weathercells';
@@ -42,9 +42,24 @@ import { createBattleSim } from './battle';
 import { CALM, ROUGH } from './battlesea';
 import { createBattleUi } from './battleui';
 import { createBattleCover } from './battlecover';
-import { createMenu } from './menu';
+import { createMenu, formatBearing, formatDistance } from './menu';
+import { createQuests, daylightLeft, formatSpan } from './quests';
+import { createQuestCover } from './questcover';
+import { createToast } from './toast';
+import { QUEST_URGENT_BELOW } from './hud';
+import { solarPhase } from './solartime';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
-import type { AiBoat, AiBoatKind, BattleOutcome, HazardKind, PropulsionState, ShipState } from './types';
+import type {
+  AiBoat,
+  AiBoatKind,
+  ActiveQuest,
+  BattleOutcome,
+  HazardKind,
+  PropulsionState,
+  QuestOffer,
+  ShipState,
+} from './types';
+import type { QuestLineInput } from './hud';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
 import { HARBOUR_NAMES } from './harbournames';
 import { OVERDRIVE_MAX_FORWARD } from './overdrive';
@@ -412,6 +427,181 @@ async function startGame(): Promise<void> {
   chart.onChange(() => writeChart(chart.encode()));
   window.addEventListener('pagehide', () => writeChart(chart.encode()));
 
+  /* ------------------------------------------------------------------ */
+  /* Contracts                                                          */
+  /* ------------------------------------------------------------------ */
+
+  /*
+   * The contract sim, built HERE and not in `createRecords`.
+   *
+   * It is the one record that needs the world: a delivery is resolved against
+   * `globe.towns` by name, and a chart goal reads the bitmap created two lines
+   * up. Neither exists when the save file is read, which is why `save.ts` hands
+   * out the seed and the loaded contracts and takes the sim back through
+   * `attachQuests` rather than owning it.
+   *
+   * Both dependencies are callbacks even though both values already exist at
+   * this point. That is deliberate: `quests.ts` is the module every later phase
+   * of this feature grows inside, and a callback is what keeps it honest about
+   * the one fact that does not change here -- the world is redrawn on every
+   * load and a harbour is a name, never a position.
+   */
+  const quests = createQuests({
+    towns: () => globe.towns,
+    chart: () => chart,
+    known: records.known,
+    wallet: records.wallet,
+    reputation: records.reputation,
+    seed: records.questSeed,
+    saved: records.questsSaved,
+  });
+  // The save file's half of the deal. From here on every settlement writes.
+  records.attachQuests(quests);
+
+  /*
+   * The notification strip, and the one line of wiring that makes contracts
+   * audible at all.
+   *
+   * Without it a settled contract is a silent number change in a panel nobody
+   * was looking at -- `docs/ROADMAP.md` makes the notification layer a
+   * prerequisite for this feature for exactly that reason, and this is it.
+   *
+   * The severities are the three the strip has: `good` for money in,
+   * `bad` for standing lost, `info` for everything that merely moved. A
+   * completion names the purse because that is the number the player wants and
+   * the GOLD row will not announce itself.
+   */
+  const toast = createToast();
+  quests.on((event) => {
+    switch (event.kind) {
+      case 'accepted':
+        toast.push(`CONTRACT TAKEN - ${event.quest.brief}`, 'info');
+        break;
+      case 'completed':
+        toast.push(
+          `CONTRACT PAID - ${event.gold} g, +${event.reputation} REP`,
+          'good',
+        );
+        break;
+      case 'failed':
+        // The word, not the verdict: both cost the same, and telling a player
+        // who just pressed ABANDON that they failed would read as the game
+        // mislabelling their own choice. See `QuestEvent.reason`.
+        toast.push(
+          `CONTRACT ${event.reason === 'abandoned' ? 'ABANDONED' : 'LOST'} - -${event.reputation} REP`,
+          'bad',
+        );
+        break;
+      case 'progress':
+        toast.push(`CHARTED ${Math.floor(event.fraction * 100)}%`, 'info');
+        break;
+    }
+  });
+
+  /**
+   * Where a harbour is from here, or null if this world has no such place.
+   *
+   * The HARBOURS page's own two lines, factored out because the contract line,
+   * the CONTRACTS page and the board all need the same answer and three copies
+   * of a great-circle solve is three chances for one of them to disagree about
+   * where Ionport is.
+   *
+   * Null rather than a zero fix for an absent harbour: contracts survive a
+   * world being redrawn by NAME, so a target that does not exist in this world
+   * is an ordinary reading and the views print UNCHARTED for it.
+   */
+  function harbourFix(name: string): { bearing: number; distance: number } | null {
+    const town = globe.towns.byName(name);
+    if (town === null) return null;
+    return {
+      bearing: bearingTo(ship.state, town.dir),
+      distance: Math.acos(Math.min(1, ship.state.position.dot(town.dir))) * GLOBE_RADIUS,
+    };
+  }
+
+  /**
+   * What the sun is doing over an offer's target, as one line for its card.
+   *
+   * The single thing `questcover.ts` cannot work out for itself, and the reason
+   * the day/night half of this design is legible at the moment of DECIDING
+   * rather than only on arrival. Empty for an offer with no window, because a
+   * line about the sky on a contract that does not care about the sky would
+   * teach the player to stop reading it.
+   *
+   * Both branches are answered from `solartime.ts`, which is the same geometry
+   * the day dial draws and the water shader crossfades on, so the card, the
+   * dial and the sea cannot develop three opinions about whether it is night at
+   * Ionport.
+   */
+  function skyNote(offer: QuestOffer): string {
+    if (offer.window === 'ANY' || offer.target === null) return '';
+    const town = globe.towns.byName(offer.target);
+    if (town === null) return 'THAT HARBOUR IS NOT IN THIS SEA';
+    const phase = solarPhase(town.dir, env.sunDirection);
+    const wantDay = offer.window === 'DAYLIGHT';
+
+    if (phase.polar) {
+      // Above about 63 degrees the sun either never sets or never rises, so
+      // there is no countdown to give -- only a fact.
+      return phase.isDay === wantDay
+        ? `${wantDay ? 'ENDLESS DAY' : 'ENDLESS NIGHT'} THERE`
+        : `${wantDay ? 'POLAR NIGHT' : 'MIDNIGHT SUN'} THERE - THE WINDOW NEVER OPENS`;
+    }
+
+    const dayLeft = daylightLeft(town.dir, env.sunDirection);
+    if (phase.isDay === wantDay) {
+      // The window is open. What matters is how long it stays open, because
+      // that is what the passage has to beat.
+      const left = wantDay ? dayLeft : (1 - phase.progress) * (1 - phase.dayFraction) * DAY_LENGTH;
+      return `${wantDay ? 'DAYLIGHT' : 'DARK'} THERE FOR ${formatSpan(left)}`;
+    }
+    // Shut. What matters is the wait, because the ship can be under way for it.
+    const until = wantDay
+      ? (1 - phase.progress) * (1 - phase.dayFraction) * DAY_LENGTH
+      : dayLeft;
+    return `${wantDay ? 'DAWN' : 'DUSK'} THERE IN ${formatSpan(until)}`;
+  }
+
+  /**
+   * The one contract the HUD line carries, assembled for `hud.updateQuest`.
+   *
+   * Three can be in hand and only one fits on a line read while steering, so
+   * this picks: the shortest clock first, and a goal with no clock only when
+   * nothing is ticking. That ordering is the whole rule, and it is the right
+   * one because a chart goal cannot be lost and a deadline can.
+   */
+  function urgentQuest(): QuestLineInput | null {
+    let pick: ActiveQuest | null = null;
+    for (const quest of quests.active) {
+      if (pick === null) {
+        pick = quest;
+        continue;
+      }
+      if (quest.remaining === null) continue;
+      if (pick.remaining === null || quest.remaining < pick.remaining) pick = quest;
+    }
+    if (pick === null) return null;
+
+    const berth = globe.towns.dockAt(ship.state.position)?.town ?? null;
+    const town = pick.target === null ? null : globe.towns.byName(pick.target);
+    const fix = pick.target === null ? null : harbourFix(pick.target);
+    return {
+      quest: pick,
+      bearing: fix?.bearing ?? null,
+      distance: fix?.distance ?? 0,
+      // Asked at the TARGET's own direction, which is `solartime.ts`'s whole
+      // point: a window is about the sky over the destination and never about
+      // the sky over the ship.
+      phaseOk:
+        town === null ||
+        pick.window === 'ANY' ||
+        (pick.window === 'DAYLIGHT') === solarPhase(town.dir, env.sunDirection).isDay,
+      atTarget:
+        energy.state.mode === 'docked' && berth !== null && berth.name === pick.target,
+      coverage: chart.coverage(),
+    };
+  }
+
   /*
    * Rough water: the strong waves that shove the hull and the maelstroms that
    * eat it. Built here because it needs the world -- the height field it
@@ -600,6 +790,7 @@ async function startGame(): Promise<void> {
       !fishBook.isOpen &&
       !shop.isOpen &&
       !fishCover.isOpen &&
+      !questCover.isOpen &&
       !battleUi.isOpen &&
       !battleCover.isOpen &&
       hazards.state.phase === 'free',
@@ -631,6 +822,38 @@ async function startGame(): Promise<void> {
           distance: Math.acos(Math.min(1, ship.state.position.dot(town.dir))) * GLOBE_RADIUS,
         };
       }),
+    /*
+     * The CONTRACTS page, filled on every open.
+     *
+     * Built here for the HARBOURS page's reason: this is the one place that can
+     * see the contracts, the towns and the ship at once. `menu.ts` is handed
+     * finished strings and never learns what a world second or an
+     * `ActiveQuest` is.
+     *
+     * It lists what is IN HAND and never what is on offer. Offers live at the
+     * berth that posts them, which is the whole point of a board -- a page that
+     * let a player take work from the middle of an ocean would throw away the
+     * one moment in the game where planning a passage is the obvious thing to
+     * be doing.
+     */
+    contracts: () =>
+      quests.active.map((quest) => {
+        const fix = quest.target === null ? null : harbourFix(quest.target);
+        return {
+          brief: quest.brief,
+          // Three states in one string, on the power tag's rule: a row missing
+          // its fix must not be a row with an empty box where the fix goes.
+          fix:
+            quest.target === null
+              ? ''
+              : fix === null
+                ? 'UNCHARTED'
+                : `${formatBearing(fix.bearing)}  ${formatDistance(fix.distance)}`,
+          remaining: quest.remaining === null ? '' : formatSpan(quest.remaining),
+          urgent: quest.remaining !== null && quest.remaining < QUEST_URGENT_BELOW,
+        };
+      }),
+    reputation: () => records.reputation.points,
   });
 
   /*
@@ -1029,12 +1252,125 @@ async function startGame(): Promise<void> {
     harbour: () => globe.towns.dockAt(ship.state.position)?.town ?? null,
   });
 
+  /*
+   * The contract board. A cover screen of its own, opened by its own key.
+   *
+   * It is handed the sim, the standing, and three callbacks that answer
+   * questions only this file can: where the ship is tied up, which world day it
+   * is, and what the sun is doing over a target. Everything else on a card is
+   * already inside the offer, which is what keeps a screen full of bearings and
+   * deadlines from needing to know what a `Towns` is.
+   */
+  const questCover = createQuestCover({
+    quests,
+    reputation: records.reputation,
+    // `energy.mode` is the project's single definition of docked, so the board's
+    // heading and the power panel can never disagree about which harbour this
+    // is. Read through `dockAt` for the NAME, as the shop's head is.
+    berth: () =>
+      energy.state.mode === 'docked'
+        ? (globe.towns.dockAt(ship.state.position)?.town.name ?? null)
+        : null,
+    day: () => quests.day,
+    sky: skyNote,
+    // The halt every overlay makes, for the fishing card's reason: it is what
+    // makes "the world resumes from rest" true of this screen too. The hull is
+    // already stopped -- a berth is a two-second dwell -- so this is belt and
+    // braces rather than a correction.
+    onOpen: () => ship.halt(),
+  });
+
+  /*
+   * `?quest=`, the contracts dev query. Null on every ordinary session.
+   *
+   * Read through URLSearchParams and never through `import.meta.env.MODE`, on
+   * exactly the same terms as `?quality=`, `?hazard=` and the three battle
+   * queries: `vite preview` serves a genuine production build and these are
+   * meant to be used against one.
+   *
+   * Two forms, and both exist because the alternative is a vigil rather than a
+   * test. A board turns over once per world day, which is twenty real minutes,
+   * and a contract has to be accepted at a berth and settled at another one --
+   * so looking at a day's postings, or driving a completion, would otherwise
+   * mean sailing there first.
+   *
+   *   ?quest=board                 print every harbour's board for today
+   *   ?quest=accept:<n>            take posting n at the nearest harbour
+   *   ?quest=accept:<name>:<n>     take posting n at a named harbour
+   *
+   * A name may use underscores for spaces (`Marine_Stronghold`) and is matched
+   * case-insensitively, because a query string carrying a literal space is a
+   * thing only a browser's address bar forgives.
+   *
+   * It fires on the first frame rather than here: `quests.offers` cannot judge
+   * a window until it has seen the sun, and the sun arrives with the first
+   * `quests.update`.
+   */
+  const questQuery = new URLSearchParams(window.location.search).get('quest');
+  let questDevPending = questQuery !== null;
+
+  /** Resolves a `?quest=` harbour argument to a real name, or null. */
+  function devHarbour(raw: string): string | null {
+    const wanted = raw.replace(/_/g, ' ').trim().toLowerCase();
+    return HARBOUR_NAMES.find((name) => name.toLowerCase() === wanted) ?? null;
+  }
+
+  /** The harbour nearest the ship, by great-circle arc. Null in a world with none. */
+  function nearestHarbour(): string | null {
+    let best: string | null = null;
+    let bestDot = -2;
+    for (const town of globe.towns.all) {
+      const dot = town.dir.dot(ship.state.position);
+      if (dot > bestDot) {
+        bestDot = dot;
+        best = town.name;
+      }
+    }
+    return best;
+  }
+
+  function runQuestQuery(query: string): void {
+    if (query === 'board') {
+      for (const name of HARBOUR_NAMES) {
+        const posted = quests.offers(name, quests.day);
+        if (posted.length === 0) continue;
+        console.info(
+          `quest board day ${quests.day} — ${name}:\n` +
+            posted
+              .map((o) => `  [${o.tier}] ${o.brief} — ${o.gold} g, +${o.reputation} REP (${o.id})`)
+              .join('\n'),
+        );
+      }
+      return;
+    }
+
+    const parts = query.split(':');
+    if (parts[0] !== 'accept' || parts.length < 2) {
+      console.warn(`?quest=${query} is not a form this build knows; see main.ts`);
+      return;
+    }
+    const harbour = parts.length >= 3 ? devHarbour(parts[1]) : nearestHarbour();
+    const slot = Number(parts[parts.length - 1]);
+    if (harbour === null || !Number.isInteger(slot) || slot < 0) {
+      console.warn(`?quest=${query}: no such harbour, or no such slot`);
+      return;
+    }
+    const posted = quests.offers(harbour, quests.day);
+    const offer = posted[slot];
+    if (offer === undefined) {
+      console.warn(`?quest=${query}: ${harbour} posted ${posted.length} today`);
+      return;
+    }
+    console.info(`?quest= accepted at ${harbour}: ${offer.brief}`);
+    quests.accept(offer);
+  }
+
   // hud.ts owns whether [FISH] looks pressable; this owns what pressing it does.
   // The overlay test is here and not in the HUD because the HUD does not know
   // the overlays exist, and `fishing.open()` re-tests the tank on its own
   // account -- a disabled attribute is an affordance, never a lock.
   document.getElementById('btn-fish')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) return;
     if (menu.isOpen) return;
     // Nor during a cannon fight. docs/BATTLE_PLAN.md argues this guard is not
     // needed, on the grounds that a fight opens synchronously from `onContact`
@@ -1064,7 +1400,7 @@ async function startGame(): Promise<void> {
   // project's one definition of docked, so this and the key agree by
   // construction.
   document.getElementById('btn-shop')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) return;
     if (menu.isOpen) return;
     if (battleUi.isOpen || battleCover.isOpen) return;
     if (hazards.state.phase !== 'free') return;
@@ -1076,6 +1412,28 @@ async function startGame(): Promise<void> {
     shop.open();
   });
 
+  /*
+   * [WORK]. The berth is re-tested here rather than trusted off the button, on
+   * exactly [SHOP]'s terms: `hud.ts` writes the disabled attribute as an
+   * affordance and a disabled attribute is not a lock.
+   *
+   * The guard list is [SHOP]'s, entire. A board over a frozen world has the
+   * same two ways of going wrong: a cover card raised over a ram that has
+   * already landed would never be ticked and never closed, and a card opened
+   * over a hull in a maelstrom would halt a ship that is being carried.
+   */
+  document.getElementById('btn-quests')?.addEventListener('click', () => {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) {
+      return;
+    }
+    if (menu.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
+    if (energy.state.mode !== 'docked') return;
+    ship.halt();
+    questCover.open();
+  });
+
   // ANCHOR and COIL: unlike [FISH] and [SHOP], neither opens an overlay --
   // both act on the world directly, so there is no `ship.halt()` and no
   // `onOpen`/`onClose` pair here. The guard is the same set of "the world is
@@ -1083,7 +1441,7 @@ async function startGame(): Promise<void> {
   // test neither of these needs. `hud.ts` writes the disabled attribute as
   // an affordance; the stores' own `canDeploy`/`canEngage` are the lock.
   document.getElementById('btn-anchor')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) return;
     if (menu.isOpen) return;
     if (battleUi.isOpen || battleCover.isOpen) return;
     if (hazards.state.phase !== 'free') return;
@@ -1091,7 +1449,7 @@ async function startGame(): Promise<void> {
   });
 
   document.getElementById('btn-overdrive')?.addEventListener('click', () => {
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) return;
     if (menu.isOpen) return;
     if (battleUi.isOpen || battleCover.isOpen) return;
     if (hazards.state.phase !== 'free') return;
@@ -1176,7 +1534,7 @@ async function startGame(): Promise<void> {
      * otherwise be a second opinion about what it means to have arrived.
      */
     if (event.code !== 'Space' && event.key !== ' ') return;
-    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) return;
     if (menu.isOpen) return;
     if (battleUi.isOpen || battleCover.isOpen) return;
     if (hazards.state.phase !== 'free') return;
@@ -1462,6 +1820,7 @@ async function startGame(): Promise<void> {
       fishBook.isOpen ||
       shop.isOpen ||
       fishCover.isOpen ||
+      questCover.isOpen ||
       battleCover.isOpen ||
       menu.isOpen
     ) {
@@ -1548,9 +1907,35 @@ async function startGame(): Promise<void> {
      * disagree with the power panel about whether a berth was reached.
      * `add` is idempotent and this runs every frame the ship sits still.
      */
-    if (energy.state.mode === 'docked') {
-      const berth = globe.towns.dockAt(ship.state.position);
-      if (berth) records.known.add(berth.town.name);
+    const berth =
+      energy.state.mode === 'docked' ? globe.towns.dockAt(ship.state.position) : null;
+    if (berth) records.known.add(berth.town.name);
+
+    /*
+     * Contracts, on the same beat and off the same verdict.
+     *
+     * Deliberately in the SAILING branch only, which is the whole of the pause
+     * contract for this feature: the frozen branch (the menu, the shop, the
+     * board, the fishing cover, a session, the battle card) and the arena
+     * branch both return before they reach this line, so a deadline cannot run
+     * out while an overlay owns the screen. That is a property of where the
+     * call sits rather than a flag `quests.ts` could be left stuck in -- the
+     * same argument that puts `records.hull.update` here and nowhere else.
+     *
+     * `env` is one frame old here, exactly as it is for `energy.update` above:
+     * `globe.update` is what rewrites it and that runs at the foot of the
+     * frame. Sixteen milliseconds of a twenty-minute day.
+     */
+    quests.update(dt, env.elapsed, env.sunDirection, berth?.town.name ?? null);
+    // The strip runs on the same clock for the same reason: a notice raised as
+    // a card opens must still be there when it closes.
+    toast.update(dt);
+    // `?quest=`, once, on the first sailing frame -- the first moment
+    // `quests.offers` has a sun to judge a window against. False on every
+    // ordinary session.
+    if (questDevPending && questQuery !== null) {
+      questDevPending = false;
+      runQuestQuery(questQuery);
     }
 
     // Wind sits between the two: it needs this frame's docked verdict to know
@@ -1728,6 +2113,19 @@ async function startGame(): Promise<void> {
     docks.update(dt, env, ship.state, energy.state, view.camera);
     wake.update(dt, ship.state, env, renderer);
     hud.update(ship.state, energy.state, wind.state, weather.state);
+    /*
+     * The contract line, after the HUD's own sweep and for the same reason the
+     * dial comes after `globe.update`: it reads `env.sunDirection` to decide
+     * whether a window is open at the target, and reading it earlier in the
+     * frame would put the line one frame behind the sky it describes.
+     *
+     * In the sailing branch only. The frozen branch has nothing to redraw here
+     * -- the clocks are world time and the world is stopped, so the text on the
+     * element is already right -- which is the one place this differs from the
+     * time dial, whose canvas can be resized behind an overlay and come back
+     * blank.
+     */
+    hud.updateQuest(urgentQuest());
     radar.update(
       dt,
       ship.state,

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { loadSave, writeSave, createRecords, SAVE_KEY, EMPTY_SAVE } from '../../src/save';
 import type { SaveData } from '../../src/types';
 import { HARBOUR_NAMES, HARBOUR_COUNT } from '../../src/harbournames';
+import { MAX_ACTIVE, REPUTATION_FLOOR } from '../../src/questconstants';
 
 /**
  * A minimal in-memory `Storage`, since vitest's `node` environment has no
@@ -64,6 +65,24 @@ describe('save', () => {
       hull: 74,
       knownHarbours: ['Rustwharf', 'Neon Reach'],
       harbourStock: { Rustwharf: ['trim', 'governor'] },
+      reputation: 35,
+      questSeed: 3141592653,
+      quests: [
+        {
+          id: 'd0|Rustwharf|1|Neon Reach',
+          kind: 'DELIVERY',
+          tier: 1,
+          issuer: 'Rustwharf',
+          target: 'Neon Reach',
+          window: 'NIGHT',
+          duration: 225,
+          coverage: null,
+          gold: 750,
+          reputation: 15,
+          brief: 'Carry salvage to NEON REACH',
+          remaining: 180,
+        },
+      ],
     };
     writeSave(data);
     const loaded = loadSave();
@@ -357,5 +376,230 @@ describe('save', () => {
 
     const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
     expect(persisted.seaAnchors).toBe(1);
+  });
+  /* ---------------------------------------------------------------- */
+  /* Contracts, reputation and the board seed                          */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * One saved contract, as `save.ts` will read it back. Kept as a builder so a
+   * case can spoil exactly one field and leave the rest well-formed, which is
+   * the only way to tell "this field is rejected" from "the whole entry is".
+   */
+  function savedQuest(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      id: 'd0|Rustwharf|1|Ionport',
+      kind: 'DELIVERY',
+      tier: 2,
+      issuer: 'Rustwharf',
+      target: 'Ionport',
+      window: 'DAYLIGHT',
+      duration: 450,
+      coverage: null,
+      gold: 1200,
+      reputation: 25,
+      brief: 'Carry mail to IONPORT',
+      remaining: 210,
+      ...over,
+    };
+  }
+
+  it('round-trips reputation, the board seed and a contract', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, reputation: 45, questSeed: 987654321, quests: [savedQuest()] }),
+    );
+    const loaded = loadSave();
+    expect(loaded.reputation).toBe(45);
+    expect(loaded.questSeed).toBe(987654321);
+    expect(loaded.quests).toHaveLength(1);
+    expect(loaded.quests[0].target).toBe('Ionport');
+    expect(loaded.quests[0].window).toBe('DAYLIGHT');
+    expect(loaded.quests[0].remaining).toBe(210);
+  });
+
+  it('defaults all three on a save written before contracts existed', () => {
+    // Absent is not damage, on the rule every field added to version 1 follows:
+    // a player who predates the feature has no contracts and no standing, which
+    // is exactly what these defaults say about them.
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, gold: 10, fishBook: {} }));
+    const loaded = loadSave();
+    expect(loaded.reputation).toBe(0);
+    expect(loaded.questSeed).toBe(0);
+    expect(loaded.quests).toEqual([]);
+  });
+
+  it('keeps a NEGATIVE reputation, which no other field in this file may be', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ ...EMPTY_SAVE, reputation: -35 }));
+    expect(loadSave().reputation).toBe(-35);
+  });
+
+  it('brings an edited reputation up to the floor rather than trusting it', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ ...EMPTY_SAVE, reputation: -100000 }));
+    expect(loadSave().reputation).toBe(REPUTATION_FLOOR);
+  });
+
+  it('discards an unreadable reputation and keeps the rest of the file', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ ...EMPTY_SAVE, gold: 700, reputation: 'lots' }));
+    const loaded = loadSave();
+    expect(loaded.reputation).toBe(0);
+    expect(loaded.gold).toBe(700);
+  });
+
+  it('drops a chart goal, because the sea it measured is gone', () => {
+    /*
+     * `docs/QUESTS_PLAN.md`, interpretation 4. The chart is wiped with the
+     * world -- it lives under its own key and is checked against the world seed
+     * -- so a goal that asked for 20% of an ocean that no longer exists would
+     * silently restart from zero, which reads as a bug rather than as a rule.
+     */
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        ...EMPTY_SAVE,
+        quests: [
+          savedQuest(),
+          { ...savedQuest({ id: 'chart|0.2', kind: 'CHART', target: null }) },
+        ],
+      }),
+    );
+    const loaded = loadSave();
+    expect(loaded.quests).toHaveLength(1);
+    expect(loaded.quests[0].kind).toBe('DELIVERY');
+  });
+
+  it('drops one bad contract out of three and keeps the other two', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        ...EMPTY_SAVE,
+        quests: [
+          savedQuest({ id: 'a' }),
+          savedQuest({ id: 'b', tier: 9 }),
+          savedQuest({ id: 'c' }),
+        ],
+      }),
+    );
+    expect(loadSave().quests.map((q) => q.id)).toEqual(['a', 'c']);
+  });
+
+  it('drops a contract with no destination, rather than keeping a slot with nothing in it', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ target: null })] }),
+    );
+    expect(loadSave().quests).toEqual([]);
+  });
+
+  it('drops a contract with no clock, which could never expire', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ remaining: null })] }),
+    );
+    expect(loadSave().quests).toEqual([]);
+  });
+
+  it('keeps a target this build cannot place, on knownHarbours’ terms', () => {
+    // A harbour from a longer name table is still a harbour the player is
+    // carrying work to; `quests.ts` re-resolves by name on every frame.
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ target: 'Somewhere Newer' })] }),
+    );
+    expect(loadSave().quests[0].target).toBe('Somewhere Newer');
+  });
+
+  it('keeps a kind this build never generates, so a later save survives the trip', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ kind: 'EXPEDITION' })] }),
+    );
+    expect(loadSave().quests[0].kind).toBe('EXPEDITION');
+  });
+
+  it('clamps a clock edited past the deadline it was issued with', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ duration: 300, remaining: 99999 })] }),
+    );
+    expect(loadSave().quests[0].remaining).toBe(300);
+  });
+
+  it('never loads more than MAX_ACTIVE, however many the file claims', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        ...EMPTY_SAVE,
+        quests: Array.from({ length: MAX_ACTIVE + 4 }, (_, i) => savedQuest({ id: `q${i}` })),
+      }),
+    );
+    expect(loadSave().quests).toHaveLength(MAX_ACTIVE);
+  });
+
+  it('drops a duplicate id, which would be two clocks on one contract', () => {
+    fake.setItem(
+      SAVE_KEY,
+      JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ id: 'same' }), savedQuest({ id: 'same' })] }),
+    );
+    expect(loadSave().quests).toHaveLength(1);
+  });
+
+  it('discards a quests field that is not an array and keeps the rest', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ ...EMPTY_SAVE, gold: 88, quests: 'three' }));
+    const loaded = loadSave();
+    expect(loaded.quests).toEqual([]);
+    expect(loaded.gold).toBe(88);
+  });
+
+  it('createRecords draws a board seed where the file has none, and keeps one it has', () => {
+    // Zero is the sentinel for "never drawn" rather than a seed of zero, which
+    // is why a fresh draw can never come back as zero either.
+    const fresh = createRecords();
+    expect(fresh.questSeed).not.toBe(0);
+
+    fake.setItem(SAVE_KEY, JSON.stringify({ ...EMPTY_SAVE, questSeed: 4242 }));
+    expect(createRecords().questSeed).toBe(4242);
+  });
+
+  it('createRecords writes standing through to the file', () => {
+    const records = createRecords();
+    records.reputation.award(30);
+    expect((JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData).reputation).toBe(30);
+    records.reputation.penalise(5);
+    expect((JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData).reputation).toBe(25);
+  });
+
+  it('createRecords writes the loaded contracts back before the sim is attached', () => {
+    /*
+     * The failure this exists to catch: a catch in the first second of a session
+     * fires `persist`, and if `persist` read an empty sim instead of the loaded
+     * file it would be the write that erased three contracts in hand.
+     */
+    fake.setItem(SAVE_KEY, JSON.stringify({ ...EMPTY_SAVE, quests: [savedQuest({ id: 'held' })] }));
+    const records = createRecords();
+    records.wallet.add(10);
+    const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
+    expect(persisted.quests.map((q) => q.id)).toEqual(['held']);
+  });
+
+  it('createRecords persists whatever the attached sim reports, on every event', () => {
+    const records = createRecords();
+    let fire: (() => void) | null = null;
+    let snapshot: ReturnType<typeof savedQuest>[] = [];
+    records.attachQuests({
+      snapshot: () => snapshot as never,
+      on: (fn: () => void) => {
+        fire = fn;
+        return (): void => undefined;
+      },
+    });
+    // `attachQuests` writes once itself, so the file already agrees with the sim.
+    expect((JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData).quests).toEqual([]);
+
+    snapshot = [savedQuest({ id: 'taken' })];
+    fire!();
+    expect((JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData).quests.map((q) => q.id)).toEqual([
+      'taken',
+    ]);
   });
 });

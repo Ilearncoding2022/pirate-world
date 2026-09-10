@@ -35,6 +35,19 @@ import { GLOBE_RADIUS, capColumns } from './geo';
 export interface Chart {
   /** True if this direction has ever been within visibility of the ship. */
   discovered(dir: Vector3): boolean;
+  /**
+   * Fraction of the globe's AREA that has been discovered, in [0, 1].
+   *
+   * Area and not texels, which is the whole of the arithmetic below. The grid
+   * is equirectangular, so a row beside a pole covers a thin strip of sphere
+   * and a row at the equator covers a wide one: counted naively, charting the
+   * Arctic would be worth ten times charting the same number of texels at the
+   * equator. Every row is therefore weighted by the cosine of its latitude.
+   *
+   * Kept as a running total rather than scanned, because a `CHART` contract
+   * reads this every frame — see `quests.ts`.
+   */
+  coverage(): number;
   /** Stamp a disc of `radius` world units around `centre` as discovered. */
   reveal(centre: Vector3, radius: number): void;
   /** The whole chart, encoded for storage. */
@@ -188,7 +201,39 @@ export function createChart(
   height = CHART_HEIGHT,
 ): Chart {
   const data = new Uint8Array(width * height);
+
+  /*
+   * Row weights, and the total they sum to.
+   *
+   * `cos(lat)` at each row's centre, which is the relative area of one texel on
+   * that row. Built once: it is a function of `height` alone, so nothing about
+   * the world or the save can move it.
+   */
+  const rowWeight = new Float64Array(height);
+  let totalWeight = 0;
+  for (let y = 0; y < height; y++) {
+    const lat = ((y + 0.5) / height - 0.5) * Math.PI;
+    rowWeight[y] = Math.cos(lat);
+    totalWeight += rowWeight[y] * width;
+  }
+
   decodeInto(data, saved, seed, width, height);
+
+  /*
+   * Weighted area discovered so far, kept as a running total.
+   *
+   * Initialised by one full pass over the decoded grid — half a million byte
+   * reads, once, at boot, against a per-frame read from `quests.ts` that would
+   * otherwise cost the same. Every later change goes through `reveal`, which is
+   * the only writer, so the total cannot drift from the grid.
+   */
+  let seenWeight = 0;
+  for (let y = 0; y < height; y++) {
+    const row = y * width;
+    for (let x = 0; x < width; x++) {
+      if (data[row + x] !== 0) seenWeight += rowWeight[y];
+    }
+  }
 
   let dirty = false;
   let sinceSave = 0;
@@ -251,6 +296,7 @@ export function createChart(
         for (let x = 0; x < width; x++) {
           if (data[row + x] === 0) {
             data[row + x] = SEEN;
+            seenWeight += rowWeight[y];
             dirty = true;
           }
         }
@@ -264,10 +310,18 @@ export function createChart(
         x = ((x % width) + width) % width;
         if (data[row + x] === 0) {
           data[row + x] = SEEN;
+          seenWeight += rowWeight[y];
           dirty = true;
         }
       }
     }
+  }
+
+  function coverage(): number {
+    // Clamped, because the running total is a sum of floats and a fully
+    // charted globe has to read exactly 1 rather than 1.0000000002.
+    const fraction = seenWeight / totalWeight;
+    return fraction < 0 ? 0 : fraction > 1 ? 1 : fraction;
   }
 
   /**
@@ -315,7 +369,7 @@ export function createChart(
     listener = fn;
   }
 
-  return { discovered, reveal, encode, onChange, tick, width, height };
+  return { discovered, coverage, reveal, encode, onChange, tick, width, height };
 }
 
 export { CHART_WIDTH, CHART_HEIGHT, CHART_SAVE_INTERVAL, CHART_VERSION, CHART_HEADER_BYTES };

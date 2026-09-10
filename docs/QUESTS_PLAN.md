@@ -1,9 +1,16 @@
 # Contracts, reputation, and the notification strip: implementation plan
 
-Status: **proposed, not built.** Nothing in this document exists in `src/`.
-Verified on 2026-09-10 the way `docs/ROADMAP.md` verifies it: grepping `src/`
-for `quest|contract|reputation|toast` returns only the word "contract" used in
-module documentation to mean an API promise.
+Status: **Phase 1 built.** `src/` now holds `questconstants.ts`,
+`reputation.ts`, `quests.ts`, `toast.ts` and `questcover.ts`, with
+`chart.coverage()`, three new `SaveData` fields, a HUD line, a CONTRACTS menu
+page and the `[WORK]` key. 123 unit cases across `tests/unit/quests.test.ts`,
+`quests-views.test.ts`, `reputation.test.ts` and additions to `save.test.ts` and
+`chart.test.ts`. `docs/ARCHITECTURE.md` has a **Contracts** section, which is
+the authoritative description of what was actually built; this file is kept as
+the brief it was, plus the list of departures at the end.
+
+Phase 2 — `EXPEDITION`, `SURVEY`, and what reputation buys — is still
+unbuilt, and the sections below that describe it are still a plan.
 
 This document is the complete brief for **Phase 1**. An implementing agent
 should not need the conversation it came from. Read `docs/ARCHITECTURE.md`
@@ -548,3 +555,37 @@ of ten (roadmap, USP item 3).
 | Failure cost | 5 reputation, flat | Gold stake: gates early quests behind having gold. Purse penalty: a silent gold drop mid-sail. Nothing: the deadline becomes decoration. |
 | Chart goal on reload | Dropped, no penalty | Kept at 0 percent: a goal that quietly restarts reads as a bug. Kept with a new target: invents a rule nobody asked for. |
 | Active slots | Three, any kind | One: a passive chart goal blocks a delivery. Typed slots: two HUD lines and a taxonomy to get right on day one. |
+
+## Departures from this plan, as built
+
+Five, each with the reason. Nothing else in the document was contradicted.
+
+1. **Completion is settled before expiry**, not after. The plan's order decides
+   a contract that arrives on the same frame its clock runs out against the
+   player, by up to 16 ms of a several-minute deadline, and the player did get
+   there. The clock is decremented and clamped at zero first, so the HUD never
+   prints a negative, and the expiry sweep runs last. Pinned by a test.
+2. **The dock key reads `[WORK]`, not `[CONTRACTS]`.** The dock keys are sized
+   by their label and sit under the telemetry panel; nine characters would have
+   pushed the row past the panel above it. The board's own heading and the menu
+   page both say CONTRACTS.
+3. **A failure event carries a `reason`** — `expired` or `abandoned`. Both cost
+   the same, so this is not a rule but a WORD: telling a player who just pressed
+   ABANDON that they failed reads as the game mislabelling their own choice.
+4. **The board's random stream is consumed in a fixed order**, and the chart
+   goal is overlaid over slot 0 after the draw rather than taking a slot before
+   it. The plan said a chart slot "is always" one of the three, which taken
+   literally would shorten the delivery draw the moment a coverage target was
+   passed and reshuffle the two postings beside it.
+5. **`offers` takes no sun argument**; `quests.ts` holds `env.sunDirection` by
+   reference from the last `update`. `daynight.ts` is the sole writer of
+   `WorldEnv` and rewrites that vector in place, so the reference is always
+   current and the module needs no value import of `Vector3`. The cost is that
+   `offers` answers empty before the first `update`, which in a real session is
+   a window that does not exist — the frame loop runs before any click can reach
+   the board.
+
+Two interpretations in the list above were confirmed in the build rather than
+changed: a `CHART` goal is dropped on load by `save.ts` (interpretation 4), and
+ABANDON costs exactly what a missed deadline costs, so a slot holding a contract
+this world cannot complete can always be cleared.

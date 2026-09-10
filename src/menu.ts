@@ -92,6 +92,49 @@ export interface MenuDeps {
    * be the wrong failure entirely.
    */
   readonly harbours?: () => readonly HarbourEntry[];
+  /**
+   * Contracts in hand, as of the instant the page is opened.
+   *
+   * A callback for `harbours`' reason and one more of its own: a deadline moves
+   * every frame, so a list read once at construction would be wrong by the time
+   * anyone saw it. Called when the CONTRACTS pane is SHOWN, not on every
+   * Escape.
+   *
+   * Rows arrive fully formatted. This file does not know what a `Towns`, an
+   * `ActiveQuest` or a world second is, and a contracts page is no reason for
+   * it to learn — the same line the HARBOURS page holds.
+   */
+  readonly contracts?: () => readonly ContractEntry[];
+  /**
+   * Standing, for the one figure at the head of the CONTRACTS page.
+   *
+   * Optional and defaulted to nothing rather than to zero: a menu built before
+   * the records exist should print no reputation row at all, not a confident 0
+   * that happens to be wrong.
+   */
+  readonly reputation?: () => number;
+}
+
+/**
+ * One row of the CONTRACTS page, already formatted by the caller.
+ *
+ * Every field is a string for `HarbourEntry`'s reason inverted: that one hands
+ * over numbers because a bearing has to be formatted the same way in two
+ * places and this file owns the formatter. A contract's brief is written by
+ * `quests.ts`, its clock by the same formatter the HUD line uses, and its fix
+ * by the two functions below — so there is nothing left here to format, and a
+ * page that re-derived any of it could disagree with the HUD about the same
+ * contract.
+ */
+export interface ContractEntry {
+  /** The one-line brief, as the harbour posted it. */
+  readonly brief: string;
+  /** Bearing and distance to the target, `UNCHARTED`, or empty for a goal. */
+  readonly fix: string;
+  /** Time left as `M:SS`, or empty for a goal with no deadline. */
+  readonly remaining: string;
+  /** True when `remaining` should read as a warning rather than as a figure. */
+  readonly urgent: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -177,9 +220,10 @@ export interface Menu {
  */
 const CONTROLS_CLASS = 'menu--controls';
 const HARBOURS_CLASS = 'menu--harbours';
+const CONTRACTS_CLASS = 'menu--contracts';
 
 /** Which pane is up. The root is the one with no modifier on the overlay. */
-type Pane = 'root' | 'controls' | 'harbours';
+type Pane = 'root' | 'controls' | 'harbours' | 'contracts';
 
 export function createMenu(deps: MenuDeps): Menu {
   const root = document.getElementById('menu');
@@ -190,6 +234,11 @@ export function createMenu(deps: MenuDeps): Menu {
   const harboursButton = document.getElementById('menu-harbours');
   const harboursBack = document.getElementById('menu-harbours-back');
   const harboursList = document.getElementById('menu-harbours-list');
+  const contractsButton = document.getElementById('menu-contracts');
+  const contractsBack = document.getElementById('menu-contracts-back');
+  const contractsList = document.getElementById('menu-contracts-list');
+  const contractsRep = document.getElementById('menu-contracts-rep');
+  const contractsEmpty = document.getElementById('menu-contracts-empty');
 
   if (root === null || !(controlsButton instanceof HTMLButtonElement)) {
     /*
@@ -261,7 +310,69 @@ export function createMenu(deps: MenuDeps): Menu {
   }
 
   /**
-   * Shows one of the three panes.
+   * Fills the contracts list from the callback.
+   *
+   * Rebuilt outright on every showing, like the harbour list and for the same
+   * reason: three rows is nothing, and every clock on every row is stale the
+   * moment the world moves again.
+   *
+   * The brief goes in through `textContent`. It is built by `quests.ts` out of
+   * a cargo noun and a harbour name, and a place name rendered into a page is
+   * exactly the kind of thing that later comes from somewhere else.
+   */
+  function fillContracts(): void {
+    if (contractsRep !== null) {
+      const points = deps.reputation?.();
+      // Hidden rather than zeroed when there is no source: a page that printed
+      // REPUTATION 0 for a caller that has not wired one would be confidently
+      // wrong about the one number on it.
+      contractsRep.hidden = points === undefined;
+      if (points !== undefined) contractsRep.textContent = `REPUTATION  ${points}`;
+    }
+
+    if (contractsList === null) return;
+    contractsList.textContent = '';
+    const entries = deps.contracts?.() ?? [];
+
+    // The empty state is a sentence rather than a blank box. An empty page is
+    // where most players will meet this list first, and "you have none" and
+    // "the list failed to load" must not look the same.
+    if (contractsEmpty !== null) contractsEmpty.hidden = entries.length > 0;
+
+    for (const entry of entries) {
+      const row = document.createElement('li');
+      row.className = 'contracts__row';
+
+      const brief = document.createElement('span');
+      brief.className = 'contracts__brief';
+      brief.textContent = entry.brief;
+      row.appendChild(brief);
+
+      const status = document.createElement('span');
+      status.className = 'contracts__status';
+
+      if (entry.fix.length > 0) {
+        const fix = document.createElement('span');
+        fix.className = 'contracts__fix';
+        fix.textContent = entry.fix;
+        status.appendChild(fix);
+      }
+      if (entry.remaining.length > 0) {
+        const clock = document.createElement('span');
+        clock.className = entry.urgent
+          ? 'contracts__clock contracts__clock--urgent'
+          : 'contracts__clock';
+        clock.textContent = entry.remaining;
+        status.appendChild(clock);
+      }
+      row.appendChild(status);
+
+      contractsList.appendChild(row);
+    }
+  }
+
+  /**
+   * Shows one of the four panes.
    *
    * The pane is reset to root on the way IN rather than on the way out, so a
    * player who left the menu reading the controls does not come back to a
@@ -277,13 +388,24 @@ export function createMenu(deps: MenuDeps): Menu {
   function setPane(pane: Pane): void {
     overlay.classList.toggle(CONTROLS_CLASS, pane === 'controls');
     overlay.classList.toggle(HARBOURS_CLASS, pane === 'harbours');
+    overlay.classList.toggle(CONTRACTS_CLASS, pane === 'contracts');
 
     if (pane === 'harbours') fillHarbours();
+    if (pane === 'contracts') fillContracts();
 
     if (pane === 'controls') {
       if (backButton instanceof HTMLButtonElement) backButton.focus();
     } else if (pane === 'harbours') {
       if (harboursBack instanceof HTMLButtonElement) harboursBack.focus();
+    } else if (pane === 'contracts') {
+      if (contractsBack instanceof HTMLButtonElement) contractsBack.focus();
+    } else if (lastPane !== 'contracts' && contractsButton instanceof HTMLButtonElement) {
+      // Out to the root, focus goes to the destination the player has NOT just
+      // been to. With three destinations that is no longer a clean choice, so
+      // it settles on the one that changes: the controls list and the harbour
+      // list read the same on every visit, and the contracts page is the only
+      // page here whose contents move while the player is away from it.
+      contractsButton.focus();
     } else if (lastPane === 'controls' && harboursButton instanceof HTMLButtonElement) {
       harboursButton.focus();
     } else {
@@ -317,6 +439,10 @@ export function createMenu(deps: MenuDeps): Menu {
 
   function onHarbours(): void {
     setPane('harbours');
+  }
+
+  function onContracts(): void {
+    setPane('contracts');
   }
 
   function onBack(): void {
@@ -357,6 +483,8 @@ export function createMenu(deps: MenuDeps): Menu {
   backButton?.addEventListener('click', onBack);
   harboursButton?.addEventListener('click', onHarbours);
   harboursBack?.addEventListener('click', onBack);
+  contractsButton?.addEventListener('click', onContracts);
+  contractsBack?.addEventListener('click', onBack);
 
   return {
     get isOpen(): boolean {
@@ -377,6 +505,8 @@ export function createMenu(deps: MenuDeps): Menu {
       backButton?.removeEventListener('click', onBack);
       harboursButton?.removeEventListener('click', onHarbours);
       harboursBack?.removeEventListener('click', onBack);
+      contractsButton?.removeEventListener('click', onContracts);
+      contractsBack?.removeEventListener('click', onBack);
     },
   };
 }

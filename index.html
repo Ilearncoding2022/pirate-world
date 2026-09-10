@@ -275,6 +275,25 @@
           >
             <span class="dock__key">SHOP</span>
           </button>
+          <!-- The harbour's board. It sits beside [SHOP] and not in the helm
+               pad for exactly [SHOP]'s reason: it is a thing a BERTH does,
+               dead everywhere else, and it belongs next to the panel that tells
+               you whether you are at one rather than under the thumb that
+               steers. The owner chose a key of its own over a tab in the
+               chandlery knowing the pad was crowded -- see questcover.ts.
+
+               Ships disabled, because the world opens at sea, and hud.ts reads
+               that shipped state back rather than assuming it. -->
+          <button
+            id="btn-quests"
+            class="dbtn dock__btn"
+            type="button"
+            aria-label="Open the contract board"
+            disabled
+            title="Only alongside a berth"
+          >
+            <span class="dock__key">WORK</span>
+          </button>
         </div>
       </nav>
       <!-- END HUD DOCK -->
@@ -495,6 +514,48 @@
         <span class="moor__text" id="hud-moor-text"></span>
       </div>
 
+      <!-- ===================== CONTRACT =====================
+           The one contract line. Top-centre, which is the last edge of this
+           HUD nothing else claims: the panel and the dock take top-left, the
+           scope top-right, the helm bottom-left and the mooring notice
+           bottom-centre.
+
+           A LINE and not a log. Three contracts can be in hand at once and the
+           Esc menu's CONTRACTS page lists all three; what belongs here is the
+           one the player is steering to, because this is the thing read while
+           steering. hud.ts picks the shape and main.ts picks which contract.
+
+           Ships hidden: a new captain is carrying nothing. Nothing in
+           style.css may declare a `display` on `.quest` itself, for the same
+           reason `.moor` forbids it -- the UA's `[hidden]` rule is
+           `display: none` at author-origin strength and an author `display`
+           would beat it, leaving an empty box on the HUD of every player who
+           has never taken a contract. -->
+      <div class="quest quest--run" id="hud-quest" role="status" hidden>
+        <span class="quest__key" aria-hidden="true">JOB</span>
+        <span class="quest__text" id="hud-quest-text"></span>
+      </div>
+
+      <!-- ===================== NOTIFICATION STRIP =====================
+           The transient notice the game had none of until contracts needed one
+           (docs/ROADMAP.md, Player-facing work item 4). One message at a time,
+           held for TOAST_HOLD of WORLD seconds by toast.ts -- so a notice
+           raised as the fishing card opens is still there when it closes.
+
+           It sits just under the contract line and above everything else at
+           that edge, because the two are one conversation: the line says what
+           the job is and this says what just happened to it.
+
+           `aria-live="polite"` because, like the mooring notice, it announces
+           something the player did not just cause.
+
+           Contracts are its only consumer today. A caught fish, an arriving
+           storm, a raider sighting and a harbour first-visit are each one
+           `toast.push` at an event main.ts already sees. -->
+      <div class="toast toast--info" id="hud-toast" role="status" aria-live="polite" hidden>
+        <span class="toast__text" id="hud-toast-text"></span>
+      </div>
+
     </div>
 
     <!-- ===================== FISHING CARD =====================
@@ -652,6 +713,68 @@
     </div>
     <!-- END FISHING COVER -->
 
+    <!-- ===================== CONTRACT BOARD =====================
+         What [WORK] opens, and only ever alongside a berth. Outside .hud for
+         the same reason every other overlay is: .hud is pointer-events:none and
+         this needs the pointer.
+
+         It is the fishing cover's shell, to the letter -- same backdrop, same
+         art-behind-a-body, same close disc, same Escape. A player who has
+         opened that screen has already learned how to leave this one.
+
+         Both lists ship EMPTY. The postings are a pure function of the board
+         seed, the harbour's name and the world day (quests.ts), so a row
+         written here would be three chances to disagree with the sim about what
+         a harbour is offering; and the contracts in hand are whatever the save
+         file had. The two empty lines are sentences for the same reason the
+         menu page's is.
+
+         The reputation figure ships EMPTY and is written on every open:
+         questcover.ts is the one screen where it can change, so a number typed
+         here would be stale the first time a contract settled. -->
+    <!-- CONTRACT BOARD -->
+    <div class="questcover" id="questcover" hidden aria-hidden="true">
+      <div class="questcover__backdrop" id="questcover-backdrop"></div>
+
+      <section
+        class="questcover__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="questcover-title"
+      >
+        <!-- The art is a background rather than an <img>, so the panel's own
+             aspect ratio decides the crop and the picture can never push the
+             lists off the bottom of a short window. It reuses the harbour plate
+             the fishing cover wears at a berth: this screen only ever opens at
+             one, so it is the same place seen from the same deck. -->
+        <div class="questcover__art" aria-hidden="true"></div>
+
+        <button class="questcover__close" id="questcover-close" type="button" aria-label="Close">
+          &#10005;
+        </button>
+
+        <div class="questcover__body">
+          <header class="questcover__head">
+            <h2 class="questcover__title" id="questcover-title">CONTRACTS</h2>
+            <p class="questcover__rep" id="questcover-rep"></p>
+          </header>
+
+          <h3 class="questcover__section">POSTED HERE</h3>
+          <ul class="questcover__list" id="questcover-offers"></ul>
+          <p class="questcover__empty" id="questcover-offers-empty" hidden>
+            Nothing posted today. The board turns over with the sun.
+          </p>
+
+          <h3 class="questcover__section">IN HAND</h3>
+          <ul class="questcover__list questcover__list--held" id="questcover-active"></ul>
+          <p class="questcover__empty" id="questcover-active-empty" hidden>
+            You are carrying nothing.
+          </p>
+        </div>
+      </section>
+    </div>
+    <!-- END CONTRACT BOARD -->
+
     <!-- ===================== BATTLE COVER =====================
          The beat between the ram and the arena.
 
@@ -733,6 +856,12 @@
                  remembered harbour beyond the scope's 50 units cannot be
                  found at all in a world that was redrawn on this load. -->
             <button class="fbtn menu__btn" id="menu-harbours" type="button">Harbours</button>
+            <!-- Contracts in hand. A menu page for the harbour list's reason
+                 and one of its own: the HUD carries ONE contract line because
+                 it is read while steering, and the other two have to be
+                 readable somewhere. Offers are not here -- those live at the
+                 berth, which is the whole point of a board. -->
+            <button class="fbtn menu__btn" id="menu-contracts" type="button">Contracts</button>
           </div>
           <p class="menu__hint">Esc closes</p>
         </div>
@@ -746,6 +875,7 @@
             <li><kbd>&#8593;</kbd><kbd>&#8595;</kbd><kbd>&#8592;</kbd><kbd>&#8594;</kbd><span>Same as WASD</span></li>
             <li><kbd>Scroll</kbd><span>Zoom camera</span></li>
             <li><kbd>Space</kbd><span>Harpoon / Fire a broadside</span></li>
+            <li><kbd>Space</kbd><span>Moor or cast off, alongside a berth</span></li>
             <li><kbd>Esc</kbd><span>This menu, and closes any panel</span></li>
           </ul>
           <div class="menu__actions">
@@ -766,6 +896,32 @@
           <ul class="harbours__list" id="menu-harbours-list"></ul>
           <div class="menu__actions">
             <button class="fbtn menu__btn" id="menu-harbours-back" type="button">Back</button>
+          </div>
+        </div>
+
+        <!-- The contracts pane.
+
+             Ships EMPTY, on the harbour list's terms: every row carries a
+             clock that is only true for the instant the pane was opened, and
+             menu.ts builds them from its `contracts` callback each time the
+             pane is shown. The empty line below it is a sentence rather than a
+             blank box, because an empty board is where most players will meet
+             this page first and "you have none" must not look like "the list
+             failed to load".
+
+             The reputation row ships EMPTY too and menu.ts hides it outright
+             where no source is wired -- a page printing a confident
+             REPUTATION 0 for a caller that has not been given one would be
+             wrong about the only number on it. -->
+        <div class="menu__pane menu__pane--contracts">
+          <h2 class="menu__title">CONTRACTS</h2>
+          <p class="contracts__rep" id="menu-contracts-rep" hidden></p>
+          <ul class="contracts__list" id="menu-contracts-list"></ul>
+          <p class="contracts__empty" id="menu-contracts-empty">
+            No contracts in hand. Moor at any harbour and press WORK.
+          </p>
+          <div class="menu__actions">
+            <button class="fbtn menu__btn" id="menu-contracts-back" type="button">Back</button>
           </div>
         </div>
       </section>

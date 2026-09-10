@@ -884,6 +884,118 @@ export interface FishingInput {
 }
 
 /* ------------------------------------------------------------------ */
+/* Contracts                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a harbour can ask for. See `docs/QUESTS_PLAN.md`.
+ *
+ * Four kinds, and only the first two are generated in Phase 1. `EXPEDITION`
+ * and `SURVEY` are in the union from the start so the save loader accepts a
+ * file written by a later build and the HUD formatter has a branch for them
+ * rather than a default that prints something wrong. `quests.ts` simply never
+ * draws either until Phase 2 turns it on.
+ *
+ * - `DELIVERY` — moor at a named harbour, inside a deadline, optionally while
+ *   it is daylight or night THERE.
+ * - `CHART`    — reveal a fraction of this world. No deadline, no target.
+ * - `EXPEDITION` (Phase 2) — reach a pole harbour and return to the issuer.
+ * - `SURVEY` (Phase 2) — moor at a harbour never moored at before.
+ */
+export type QuestKind = 'DELIVERY' | 'CHART' | 'EXPEDITION' | 'SURVEY';
+
+/**
+ * When a `DELIVERY` may complete, measured AT THE TARGET and never at the
+ * ship.
+ *
+ * This is the whole of "driven by day/night": the ship is about ten times
+ * faster than the terminator (`daynight.ts`), so a window at a harbour half a
+ * world away is a navigation problem rather than a wait. `ANY` is the default
+ * and the commonest draw.
+ */
+export type QuestWindow = 'ANY' | 'DAYLIGHT' | 'NIGHT';
+
+/**
+ * Difficulty, 1 to 3. For a `DELIVERY` it is the great-circle arc band from
+ * the issuer; for a `CHART` goal it is which coverage target. It indexes the
+ * purse, the deadline and the reputation tables in `questconstants.ts`, so it
+ * is the one number that has to be right.
+ */
+export type QuestTier = 1 | 2 | 3;
+
+/** One posting on a harbour's board. Immutable; `accept` copies it. */
+export interface QuestOffer {
+  /**
+   * Stable for as long as the posting is. Built from the kind, the issuer, the
+   * world day and the slot, so reopening the board inside one world day shows
+   * the same three and `accept` can refuse a duplicate by identity — see
+   * `quests.ts` on why the board is derived rather than saved.
+   */
+  readonly id: string;
+  readonly kind: QuestKind;
+  readonly tier: QuestTier;
+  /** Harbour name that issued it. */
+  readonly issuer: string;
+  /** Harbour name to reach, or null for a goal with no destination. */
+  readonly target: string | null;
+  readonly window: QuestWindow;
+  /**
+   * World seconds allowed from acceptance, or null for a goal with no
+   * deadline. World seconds, never wall-clock: the clock stops when the world
+   * stops, which is what keeps a contract from expiring under the fishing
+   * card.
+   */
+  readonly duration: number | null;
+  /** `CHART`: the coverage fraction to reach, in [0, 1]. Null otherwise. */
+  readonly coverage: number | null;
+  readonly gold: number;
+  /** Reputation earned on completion. Failure costs `REPUTATION_FAIL`, flat. */
+  readonly reputation: number;
+  /** One line for the card and the menu page, formatted by `quests.ts`. */
+  readonly brief: string;
+}
+
+/** An accepted contract. The only mutable field is the clock. */
+export interface ActiveQuest extends QuestOffer {
+  /** World seconds left, or null for a goal with no deadline. Persisted. */
+  remaining: number | null;
+}
+
+/**
+ * What `quests.ts` announces. The notification strip and the save file are
+ * its two subscribers, and neither may change anything in response.
+ *
+ * `quest` is the contract as it was at the moment of the event, which for
+ * `completed` and `failed` is a contract that is no longer active.
+ */
+export type QuestEvent =
+  | { readonly kind: 'accepted'; readonly quest: ActiveQuest }
+  | {
+      readonly kind: 'completed';
+      readonly quest: ActiveQuest;
+      readonly gold: number;
+      readonly reputation: number;
+    }
+  | {
+      readonly kind: 'failed';
+      readonly quest: ActiveQuest;
+      readonly reputation: number;
+      /**
+       * Why it ended. `expired` is a deadline that ran out; `abandoned` is the
+       * player dropping it from the board.
+       *
+       * The two cost exactly the same — `REPUTATION_FAIL`, flat — so this is
+       * not a rule, it is a WORD: the strip has to be able to say ABANDONED
+       * rather than FAILED, because a player who just pressed the button knows
+       * perfectly well what happened and being told they failed would read as
+       * the game mislabelling their own choice.
+       */
+      readonly reason: 'expired' | 'abandoned';
+    }
+  /** A `CHART` goal crossing a whole `CHART_PROGRESS_STEP` of its target. */
+  | { readonly kind: 'progress'; readonly quest: ActiveQuest; readonly fraction: number };
+
+/* ------------------------------------------------------------------ */
 /* Fishing — persistence                                               */
 /* ------------------------------------------------------------------ */
 
@@ -949,6 +1061,36 @@ export interface SaveData {
    * see `harbourstock.ts`.
    */
   readonly harbourStock: Readonly<Record<string, readonly UpgradeLine[]>>;
+  /**
+   * Standing with the harbours. An integer, floored at `REPUTATION_FLOOR` and
+   * with no ceiling. Absent means 0, which is where a new captain starts.
+   *
+   * It buys nothing yet. `docs/QUESTS_PLAN.md` Phase 2 owns what it will buy;
+   * Phase 1 only earns it, spends it and keeps it.
+   */
+  readonly reputation: number;
+  /**
+   * The seed the contract boards are drawn from. A uint32, drawn once on the
+   * first run and never changed.
+   *
+   * It is saved rather than re-drawn because a board is derived from
+   * `(questSeed, harbour name, world day)` instead of being written to disk:
+   * re-drawing the seed on every load would reshuffle every harbour's board
+   * on every reload, and "this harbour had a pole run yesterday" would mean
+   * nothing. Absent means a fresh draw, which is right for a save written
+   * before contracts existed.
+   */
+  readonly questSeed: number;
+  /**
+   * Contracts in hand, with their clocks.
+   *
+   * Entries survive a world being redrawn, by harbour NAME, exactly as
+   * `knownHarbours` does: the target is re-resolved through `Towns.byName` in
+   * whatever world comes up, so the bearing and the distance change and the
+   * deadline does not. A `CHART` goal is the one kind dropped on load, because
+   * the sea it measured is gone — see `docs/QUESTS_PLAN.md`, interpretation 4.
+   */
+  readonly quests: readonly ActiveQuest[];
 }
 
 /* ------------------------------------------------------------------ */

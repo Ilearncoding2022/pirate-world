@@ -26,6 +26,26 @@ import { GLOBE_RADIUS, latLonToDir } from '../../src/geo';
 const SEED = 1337;
 
 /**
+ * The fraction of TEXELS a chart has stamped, counted by probing every one.
+ *
+ * The naive measure `coverage()` deliberately is not, kept here so the
+ * cosine-weighting case can show the difference rather than merely assert the
+ * weighted number. Probes through `discovered`, using the same projection
+ * `chart.ts` indexes by, so it reads the grid the way the scope does.
+ */
+function texelFraction(chart: { discovered(dir: Vector3): boolean }, width: number, height: number): number {
+  let seen = 0;
+  for (let y = 0; y < height; y++) {
+    const latDeg = (((y + 0.5) / height - 0.5) * Math.PI * 180) / Math.PI;
+    for (let x = 0; x < width; x++) {
+      const lonDeg = (((x + 0.5) / width - 0.5) * 2 * Math.PI * 180) / Math.PI;
+      if (chart.discovered(latLonToDir(latDeg, lonDeg))) seen++;
+    }
+  }
+  return seen / (width * height);
+}
+
+/**
  * A v2 header: one version byte, then the seed little-endian over four.
  *
  * Built out of `String.fromCharCode` rather than typed into the string
@@ -213,5 +233,100 @@ describe('chart', () => {
     chart.reveal(latLonToDir(0, 0), 0);
     chart.reveal(latLonToDir(0, 0), -10);
     expect(chart.discovered(latLonToDir(0, 0))).toBe(false);
+  });
+  /* ---------------------------------------------------------------- */
+  /* coverage() — area, not texels                                    */
+  /* ---------------------------------------------------------------- */
+
+  it('reads 0 on a blank chart and 1 on a full one', () => {
+    const chart = createChart(SEED, null, 64, 32);
+    expect(chart.coverage()).toBe(0);
+    // A cap of more than half a circumference covers the globe entire. The
+    // exact 1 is the assertion: the running total is a sum of floats, and a
+    // fully charted world reading 0.9999999 would leave a 35% contract
+    // unfinishable forever.
+    chart.reveal(latLonToDir(0, 0), Math.PI * GLOBE_RADIUS);
+    expect(chart.coverage()).toBe(1);
+  });
+
+  it('weights a row by the cosine of its latitude', () => {
+    /*
+     * The whole of the arithmetic, and the failure it exists to catch.
+     *
+     * Two caps of identical ANGULAR radius, one at the equator and one at 80
+     * degrees north. They cover the same area of sphere, and wildly different
+     * numbers of texels: the grid is equirectangular, so a cap near the pole is
+     * smeared across most of the row it sits on.
+     *
+     * So the weighted figures must come out close, and the raw texel counts must
+     * not. Counted naively, a player could finish a 35% contract by sailing two
+     * small circles around the top of the world -- and nothing on screen would
+     * look wrong while they did it.
+     */
+    const angular = 0.2;
+    const equator = createChart(SEED, null, 512, 256);
+    equator.reveal(latLonToDir(0, 0), angular * GLOBE_RADIUS);
+    const polar = createChart(SEED, null, 512, 256);
+    polar.reveal(latLonToDir(80, 0), angular * GLOBE_RADIUS);
+
+    // Within a quarter of each other, which is the grid's resolution at this
+    // size rather than slack: the stamp is nearest-texel with a one-column
+    // margin, and that margin is a bigger share of a small cap than of a big one.
+    expect(polar.coverage()).toBeGreaterThan(equator.coverage() * 0.75);
+    expect(polar.coverage()).toBeLessThan(equator.coverage() * 1.25);
+
+    // And the naive count, which is what the weighting is there to refuse: the
+    // polar cap occupies several times the texels for the same sphere.
+    expect(texelFraction(polar, 512, 256)).toBeGreaterThan(
+      texelFraction(equator, 512, 256) * 3,
+    );
+  });
+
+  it('matches the spherical-cap formula for a cap at the equator', () => {
+    /*
+     * The closed form, as the one check that this is measuring AREA rather than
+     * something merely monotonic in it. A cap of angular radius r covers
+     * `(1 - cos r) / 2` of a sphere.
+     *
+     * The tolerance is the grid's: at 512 x 256 a texel is about 0.7 degrees,
+     * and the stamp is nearest-texel with a one-column margin, so a few percent
+     * relative error is the resolution rather than a mistake.
+     */
+    const angular = 0.3;
+    const chart = createChart(SEED, null, 512, 256);
+    chart.reveal(latLonToDir(0, 0), angular * GLOBE_RADIUS);
+    const expected = (1 - Math.cos(angular)) / 2;
+    expect(chart.coverage()).toBeGreaterThan(expected * 0.85);
+    expect(chart.coverage()).toBeLessThan(expected * 1.3);
+  });
+
+  it('never goes down, and does not double-count a texel revealed twice', () => {
+    const chart = createChart(SEED, null, 256, 128);
+    chart.reveal(latLonToDir(0, 0), 20);
+    const once = chart.coverage();
+    chart.reveal(latLonToDir(0, 0), 20);
+    expect(chart.coverage()).toBe(once);
+    chart.reveal(latLonToDir(0, 40), 20);
+    expect(chart.coverage()).toBeGreaterThan(once);
+  });
+
+  it('survives a round trip through storage', () => {
+    // The running total is initialised by a full pass over the DECODED grid, so
+    // a chart read back off disk has to report what it reported before. Without
+    // that pass a reload would silently reset a contract's progress to zero.
+    const source = createChart(SEED, null, 256, 128);
+    source.reveal(latLonToDir(12, 34), 40);
+    const restored = createChart(SEED, source.encode(), 256, 128);
+    expect(restored.coverage()).toBeCloseTo(source.coverage(), 10);
+  });
+
+  it('reads 0 for a chart whose saved bitmap belonged to another world', () => {
+    // A chart of another sea starts blank, which is the ordinary case now that
+    // the world is redrawn on every load -- and the total has to start blank
+    // with it.
+    const source = createChart(SEED, null, 256, 128);
+    source.reveal(latLonToDir(0, 0), 60);
+    const other = createChart(SEED + 1, source.encode(), 256, 128);
+    expect(other.coverage()).toBe(0);
   });
 });

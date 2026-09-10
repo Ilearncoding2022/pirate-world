@@ -1,4 +1,4 @@
-import type { SaveData, UpgradeLine } from './types';
+import type { ActiveQuest, QuestKind, QuestTier, QuestWindow, SaveData, UpgradeLine } from './types';
 import type { Wallet } from './wallet';
 import type { FishBookStore } from './fishbook';
 import type { Battery } from './battery';
@@ -29,6 +29,9 @@ import type { KnownHarbours } from './knownharbours';
 import type { HarbourStock } from './harbourstock';
 import { createKnownHarbours } from './knownharbours';
 import { createHarbourStock } from './harbourstock';
+import type { Reputation } from './reputation';
+import { createReputation } from './reputation';
+import { MAX_ACTIVE, REPUTATION_FLOOR } from './questconstants';
 
 /**
  * save.ts — localStorage, versioned, and tolerant of anything it finds there.
@@ -104,6 +107,12 @@ export const EMPTY_SAVE: SaveData = Object.freeze({
   hull: 100,
   knownHarbours: Object.freeze([]),
   harbourStock: Object.freeze({}),
+  reputation: 0,
+  // Zero is the sentinel for "never drawn", not a seed. `createRecords` draws a
+  // real one the first time it sees this, which is the only place a quest seed
+  // is ever chosen -- see the note there on why it cannot be drawn here.
+  questSeed: 0,
+  quests: Object.freeze([]),
 });
 
 /* ------------------------------------------------------------------ */
@@ -163,6 +172,109 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** True for one of the four durable ladders a harbour may carry. */
 function isUpgradeLine(value: unknown): value is UpgradeLine {
   return value === 'trim' || value === 'moonglass' || value === 'arclamp' || value === 'governor';
+}
+
+/* ------------------------------------------------------------------ */
+/* Contracts, read back off disk                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The four kinds, including the two this build never generates.
+ *
+ * `EXPEDITION` and `SURVEY` are accepted here deliberately. A save written by a
+ * later build that generates them must survive a round trip through this one —
+ * the same promise `fishBook` keeps for unknown species ids and `knownHarbours`
+ * keeps for unknown names. `quests.ts` will simply never settle one, which
+ * costs the player a contract slot and not their history; dropping them would
+ * cost the contract.
+ */
+function isQuestKind(value: unknown): value is QuestKind {
+  return value === 'DELIVERY' || value === 'CHART' || value === 'EXPEDITION' || value === 'SURVEY';
+}
+
+function isQuestWindow(value: unknown): value is QuestWindow {
+  return value === 'ANY' || value === 'DAYLIGHT' || value === 'NIGHT';
+}
+
+/** A finite number at or above zero, or null. Used for the purses and the clocks. */
+function toNonNegative(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return value;
+}
+
+/** A non-empty string, or null. */
+function toName(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * One contract off disk, or null if any field of it is unreadable.
+ *
+ * Whole-entry rather than per-field, which is the opposite of how the counts
+ * above are repaired, and the reason is that a contract is not a set of
+ * independent numbers: a delivery with a good purse and a rotten target is not
+ * a contract with a scratch on it, it is a contract with no destination. There
+ * is nothing to salvage and an unfulfillable slot is worse than an empty one.
+ *
+ * `CHART` goals are dropped whole and on purpose — see
+ * `docs/QUESTS_PLAN.md`, interpretation 4. The chart is wiped with the world
+ * (`CHART_KEY` is keyed on the seed), so the sea a chart goal measured does not
+ * exist after a reload and the goal would silently restart from zero. A harbour
+ * contract has a NAME to re-resolve and therefore survives; a fraction of a
+ * vanished ocean does not.
+ */
+function toQuest(value: unknown, notes: string[]): ActiveQuest | null {
+  if (!isRecord(value)) return null;
+
+  const kind = value.kind;
+  if (!isQuestKind(kind)) return null;
+  if (kind === 'CHART') {
+    notes.push('dropped a chart goal (its world is gone)');
+    return null;
+  }
+
+  const id = toName(value.id);
+  const issuer = toName(value.issuer);
+  const brief = toName(value.brief);
+  const window = value.window;
+  const tier = value.tier;
+  if (id === null || issuer === null || brief === null) return null;
+  if (!isQuestWindow(window)) return null;
+  if (tier !== 1 && tier !== 2 && tier !== 3) return null;
+
+  // Every kind this build can settle has a destination, so a missing target is
+  // damage rather than an absent optional. An unknown NAME is kept, on
+  // `knownHarbours`' terms: a harbour this build cannot place is still a
+  // harbour, and `quests.ts` re-resolves by name on every frame.
+  const target = toName(value.target);
+  if (target === null) return null;
+
+  const gold = toNonNegative(value.gold);
+  const reputation = toNonNegative(value.reputation);
+  if (gold === null || reputation === null) return null;
+
+  // Both clocks are nullable in the type and neither may be null here: a
+  // deadline-less delivery would never expire and never be failable.
+  const duration = toNonNegative(value.duration);
+  const remaining = toNonNegative(value.remaining);
+  if (duration === null || remaining === null) return null;
+
+  return {
+    id,
+    kind,
+    tier: tier as QuestTier,
+    issuer,
+    target,
+    window,
+    // Clamped to the deadline it was issued with, so an edited file cannot buy
+    // itself an hour on a five-minute run.
+    duration,
+    coverage: null,
+    gold: Math.floor(gold),
+    reputation: Math.floor(reputation),
+    brief,
+    remaining: remaining > duration ? duration : remaining,
+  };
 }
 
 /**
@@ -315,6 +427,64 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
     }
   }
 
+  /**
+   * Standing. Signed, floored, no ceiling — the one field in this file that may
+   * legitimately be negative, which is why it cannot go through `toCount`.
+   */
+  let reputation: number | null = 0;
+  const rawReputation = record.reputation;
+  if (rawReputation !== undefined) {
+    if (typeof rawReputation !== 'number' || !Number.isFinite(rawReputation)) {
+      reputation = null;
+      notes.push(`reputation ${JSON.stringify(rawReputation)}`);
+    } else {
+      reputation = Math.max(REPUTATION_FLOOR, Math.round(rawReputation));
+    }
+  }
+
+  /**
+   * The board seed. A uint32, and zero means "never drawn" rather than a seed
+   * of zero — `createRecords` draws one on that reading.
+   */
+  const rawSeed = record.questSeed;
+  const questSeed =
+    typeof rawSeed === 'number' && Number.isFinite(rawSeed) && rawSeed >= 0
+      ? Math.floor(rawSeed) >>> 0
+      : 0;
+
+  /**
+   * Contracts in hand. An unreadable entry costs one contract; an unreadable
+   * LIST costs all of them, because there is nothing to iterate.
+   */
+  const quests: ActiveQuest[] = [];
+  const rawQuests = record.quests;
+  if (rawQuests !== undefined) {
+    if (!Array.isArray(rawQuests)) {
+      notes.push('quests is not an array');
+    } else {
+      let rejectedQuests = 0;
+      const seenIds = new Set<string>();
+      for (const entry of rawQuests) {
+        const quest = toQuest(entry, notes);
+        if (quest === null) {
+          rejectedQuests++;
+          continue;
+        }
+        // A duplicate id would give the player two clocks on one contract and
+        // two purses for one delivery. Dropping the second costs nothing.
+        if (seenIds.has(quest.id)) continue;
+        seenIds.add(quest.id);
+        // The ceiling is enforced on the way in for `toCapped`'s reason: an
+        // edited file holding nine contracts is a cheap cheat, and the store
+        // clamps on construction anyway.
+        if (quests.length < MAX_ACTIVE) quests.push(quest);
+      }
+      if (rejectedQuests > 0) {
+        notes.push(`${rejectedQuests} unreadable quests ${rejectedQuests === 1 ? 'entry' : 'entries'}`);
+      }
+    }
+  }
+
   const fishBook: Record<string, number> = {};
   const raw = parsed.fishBook;
   if (!isRecord(raw)) {
@@ -357,6 +527,9 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
     hull: hull ?? 100,
     knownHarbours,
     harbourStock,
+    reputation: reputation ?? 0,
+    questSeed,
+    quests,
   };
 }
 
@@ -487,6 +660,20 @@ function reportWriteFailure(reason: string): void {
  * in its clean form, rather than leaving the damage to be re-parsed and
  * re-warned about on every load until the first catch.
  */
+/**
+ * What `createRecords` needs to know about the contract sim, and no more.
+ *
+ * A structural type rather than `Quests` itself, and that is the point: this
+ * file must be able to persist contracts without importing the sim that makes
+ * them. `quests.ts` imports `wallet.ts` and `reputation.ts`, both of which this
+ * file already builds, so importing `quests.ts` here would close a cycle for
+ * the sake of two method names.
+ */
+export interface QuestSource {
+  snapshot(): readonly ActiveQuest[];
+  on(fn: () => void): () => void;
+}
+
 export function createRecords(): {
   wallet: Wallet;
   book: FishBookStore;
@@ -503,6 +690,28 @@ export function createRecords(): {
   hull: Hull;
   known: KnownHarbours;
   stock: HarbourStock;
+  reputation: Reputation;
+  /**
+   * The board seed for this session: the saved one, or a fresh draw on a file
+   * that has never had one.
+   *
+   * Handed out rather than kept, because `quests.ts` is built by `main.ts` and
+   * not here — see `attachQuests`.
+   */
+  questSeed: number;
+  /** Contracts loaded off disk, for `createQuests`' own `saved` parameter. */
+  questsSaved: readonly ActiveQuest[];
+  /**
+   * Subscribes the contract sim to the save file. Called once, by `main.ts`.
+   *
+   * The one asymmetry in this module, and it is forced: every other record here
+   * is built from a number in the file and nothing else, so this function can
+   * own it outright. Contracts need `globe.towns` and the chart, neither of
+   * which exists when the records are created, so the sim is built later and
+   * hands itself back. Until it does, `persist` writes the contracts exactly as
+   * they were loaded, which is the truth about them.
+   */
+  attachQuests(quests: QuestSource): void;
 } {
   const save = loadSave();
   const wallet = createWallet(save.gold);
@@ -539,6 +748,27 @@ export function createRecords(): {
    */
   const known = createKnownHarbours(save.knownHarbours);
   const stock = createHarbourStock(save.harbourStock);
+  const reputation = createReputation(save.reputation);
+
+  /*
+   * The board seed, drawn here on a file that has none.
+   *
+   * `Math.random` and not a seeded stream, on the same terms as the world seed
+   * in `worldgen.ts`: this is a choice made once about a save file, not a
+   * number any test reproduces. Zero is re-rolled to 1 rather than accepted,
+   * because zero is the sentinel the loader reads as "never drawn".
+   *
+   * It is not written to disk here. A fresh draw reaches the file with the
+   * first thing the player earns, buys or moors at, and until then it is
+   * re-drawn on every load — which costs nothing, because a player who has done
+   * nothing is also sailing a world that was redrawn on the same load. The
+   * alternative, writing a save for a player who has not played, would create
+   * the key on a page visit.
+   */
+  const questSeed = save.questSeed !== 0 ? save.questSeed : Math.floor(Math.random() * 0xffffffff) + 1;
+
+  /** The contract sim, once `main.ts` has one to give. Null until then. */
+  let questSource: QuestSource | null = null;
 
   function persist(): void {
     writeSave({
@@ -562,6 +792,12 @@ export function createRecords(): {
       // frame loop writes to.
       knownHarbours: Array.from(known.names),
       harbourStock: stock.snapshot(),
+      reputation: reputation.points,
+      questSeed,
+      // Before `attachQuests`, the contracts that were loaded -- not an empty
+      // list. A `persist` triggered by a catch in the first second of a session
+      // must not be the write that erases three contracts in hand.
+      quests: questSource?.snapshot() ?? save.quests,
     });
   }
 
@@ -596,6 +832,9 @@ export function createRecords(): {
   // through rather than being throttled the way the cell and the hull are.
   known.onChange(persist);
   stock.onChange(persist);
+  // Standing moves on a settled contract and nowhere else, so it writes
+  // straight through like the two above rather than being throttled.
+  reputation.onChange(persist);
 
   return {
     wallet,
@@ -613,5 +852,27 @@ export function createRecords(): {
     hull,
     known,
     stock,
+    reputation,
+    questSeed,
+    questsSaved: save.quests,
+    attachQuests(quests: QuestSource): void {
+      questSource = quests;
+      /*
+       * Every contract event, and one more thing: the clock.
+       *
+       * `quests.ts` fires on accept, completion, failure and each whole step of
+       * a chart goal, which is four or five writes in the life of a contract.
+       * The clock itself moves every frame and is deliberately NOT subscribed:
+       * a deadline ticking down would write 87 KB of save file sixty times a
+       * second for a figure read back exactly once, at boot. The cost is that a
+       * tab closed mid-passage hands the contract back with the time it had at
+       * the last event rather than at the last frame, which is generous to the
+       * player and cheap to be generous about.
+       */
+      quests.on(persist);
+      // Once, now: the loaded contracts have just become the live ones, and the
+      // sim may already have refused one it could not place.
+      persist();
+    },
   };
 }

@@ -1,4 +1,5 @@
 import type {
+  ActiveQuest,
   EnergyMode,
   EnergyState,
   HullMode,
@@ -22,6 +23,8 @@ import {
   createStubHull,
 } from './hull';
 import { BATTERY_CAPACITY } from './battery';
+import { formatSpan } from './quests';
+import { formatBearing, formatDistance } from './menu';
 
 /**
  * hud.ts — formats ShipState into the DOM overlay declared in index.html.
@@ -597,6 +600,117 @@ export function powerTagText(tag: PwrTag, berth: string | null): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Contracts                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Everything the contract line needs, assembled by `main.ts`.
+ *
+ * A struct rather than five parameters, and the reason is the third field: the
+ * bearing and the distance are only meaningful in a world that HAS the target
+ * harbour, and a world redrawn on this load may not. Grouping them makes
+ * `bearing: null` a state of the whole reading rather than a sentinel on one
+ * number.
+ *
+ * Nothing here is a world object. `hud.ts` has never seen a `Towns` or a
+ * `Vector3` for the harbour name in the power tag either, and a contract is no
+ * reason to start.
+ */
+export interface QuestLineInput {
+  readonly quest: ActiveQuest;
+  /**
+   * True bearing to the target in radians, or null when this world has no
+   * harbour by that name.
+   *
+   * Null is an ordinary reading, not damage: contracts survive a world being
+   * redrawn by NAME, so a target can be a place that does not exist until the
+   * next load. The line says UNCHARTED and keeps its clock, which is the truth.
+   */
+  readonly bearing: number | null;
+  /** Great-circle distance to the target, world units. Ignored when `bearing` is null. */
+  readonly distance: number;
+  /** True while the target's own sky satisfies the contract's window. */
+  readonly phaseOk: boolean;
+  /** True while the ship is moored at this contract's target. */
+  readonly atTarget: boolean;
+  /** Chart coverage now, [0, 1]. Read for a `CHART` goal and nothing else. */
+  readonly coverage: number;
+}
+
+/**
+ * The one contract line on the HUD, or the empty string for none.
+ *
+ * One line and not a log. Three contracts can be in hand at once and the menu's
+ * CONTRACTS page lists all of them; what belongs on the HUD is the one a player
+ * is steering to right now, because the HUD is read while steering. `main.ts`
+ * picks which — see `urgentQuest` there.
+ *
+ * Four shapes, and the second is the whole reason day and night are in this
+ * system at all:
+ *
+ *     IONPORT  042°  310 u  0:47     a delivery under way
+ *     IONPORT  WAIT FOR DAYLIGHT     tied up at it, and the sun is not up THERE
+ *     IONPORT  UNCHARTED  0:47       a harbour this world does not have
+ *     CHART  14% of 20%              a goal with no destination and no clock
+ *
+ * The WAIT line is deliberately not a failure and does not look like one. A
+ * player who has sailed to the right harbour and arrived in the wrong hour has
+ * done most of the job, and the sun will be up again inside a few minutes. What
+ * they need is the word, not a warning.
+ *
+ * Exported for `tests/unit/quests-views.test.ts`.
+ */
+export function questLineText(line: QuestLineInput | null): string {
+  if (line === null) return '';
+  const { quest } = line;
+
+  if (quest.kind === 'CHART') {
+    const target = quest.coverage ?? 0;
+    return `CHART  ${Math.floor(line.coverage * 100)}% of ${Math.round(target * 100)}%`;
+  }
+
+  // Every other kind has a destination. Named rather than defaulted, so a
+  // Phase 2 kind reads as a place to sail to instead of falling through to
+  // something written for a chart goal.
+  const where = (quest.target ?? 'BERTH').toUpperCase();
+  if (line.atTarget && !line.phaseOk) {
+    return `${where}  ${quest.window === 'NIGHT' ? 'WAIT FOR NIGHT' : 'WAIT FOR DAYLIGHT'}`;
+  }
+
+  const clock = quest.remaining === null ? '' : `  ${formatSpan(quest.remaining)}`;
+  if (line.bearing === null) return `${where}  UNCHARTED${clock}`;
+  return `${where}  ${formatBearing(line.bearing)}  ${formatDistance(line.distance)}${clock}`;
+}
+
+/**
+ * How alarming the contract line is, which is a different question from what it
+ * says — the same split the power and hull blocks make.
+ *
+ * - `goal`   a contract with no clock. Quiet; it cannot be lost.
+ * - `wait`   at the target, waiting for its hour. Not a warning.
+ * - `urgent` under `QUEST_URGENT_BELOW` on the clock.
+ * - `run`    everything else.
+ *
+ * Exported for `tests/unit/quests-views.test.ts`.
+ */
+export type QuestSeverity = 'run' | 'wait' | 'urgent' | 'goal';
+
+/**
+ * World seconds under which a contract line goes amber.
+ *
+ * One minute, which is about the longest passage on this globe: below it, the
+ * question stops being "which way" and becomes "can I still get there at all".
+ */
+export const QUEST_URGENT_BELOW = 60;
+
+export function questSeverity(line: QuestLineInput | null): QuestSeverity {
+  if (line === null) return 'run';
+  if (line.quest.remaining === null) return 'goal';
+  if (line.atTarget && !line.phaseOk) return 'wait';
+  return line.quest.remaining < QUEST_URGENT_BELOW ? 'urgent' : 'run';
+}
+
+/* ------------------------------------------------------------------ */
 /* Mooring                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -857,6 +971,16 @@ export function createHud(
   towns?: Towns,
 ): {
   update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void;
+  /**
+   * The contract line, or null to take it down.
+   *
+   * Its own entry point rather than a parameter on `update`, because it is the
+   * one reading on this HUD that comes from neither a sim state nor a store: it
+   * is assembled by `main.ts` out of a contract, the world's harbours and the
+   * ship's position, and threading three more arguments through `update` would
+   * make every caller that has no contracts pass three nulls.
+   */
+  updateQuest(line: QuestLineInput | null): void;
   /** Shows or hides the GPU/CPU/draw-call line. Off by default; main.ts calls this from its Backquote listener. */
   setDevTimingVisible(visible: boolean): void;
   /** Feeds this frame's rolling means to the dev line. A no-op while it is hidden costs nothing worth guarding. */
@@ -930,6 +1054,15 @@ export function createHud(
 
   // The mooring notice. One modifier carries both states, so the wording and
   // the colour can never end up describing different ones.
+  /*
+   * The contract line. Three writers on one element, exactly as the mooring
+   * notice and the power block are built: shown/hidden, a severity modifier,
+   * and the text.
+   */
+  const writeQuestShown = hiddenWriter(document.getElementById('hud-quest'));
+  const writeQuestState = modifierWriter(document.getElementById('hud-quest'), 'quest');
+  const writeQuestText = textWriter(document.getElementById('hud-quest-text'));
+
   const writeMoorShown = hiddenWriter(document.getElementById('hud-moor'));
   const writeMoorState = modifierWriter(document.getElementById('hud-moor'), 'moor');
   const writeMoorText = textWriter(document.getElementById('hud-moor-text'));
@@ -954,6 +1087,16 @@ export function createHud(
     'Only alongside a berth',
   );
 
+  // [WORK], on exactly [SHOP]'s gate and for exactly its reason: the contract
+  // board is a thing a BERTH does and is dead everywhere else. It is a second
+  // writer rather than a shared one because the two keys are two elements, and
+  // a single writer over both would have to diff them together -- which is fine
+  // today and wrong the first time one of them gains a second condition.
+  const writeQuestGate = gateWriter(
+    document.getElementById('btn-quests'),
+    'Only alongside a berth',
+  );
+
   // ANCHOR and COIL. Their stock count pushes off the store the same way the
   // purse does off the wallet -- `seaanchor.ts`/`overdrive.ts` notify on
   // every buy and every spend, and a HUD readout that only redrew on its own
@@ -975,6 +1118,19 @@ export function createHud(
   const writeOverdriveLive = modifierWriter(document.getElementById('btn-overdrive'), 'act');
 
   return {
+    updateQuest(line: QuestLineInput | null): void {
+      // Hidden first when there is nothing, so the modifier and the text are
+      // not written to an element nobody can see. Every writer is
+      // write-through, so a HUD with no contracts costs nothing per frame.
+      if (line === null) {
+        writeQuestShown(false);
+        return;
+      }
+      writeQuestState(questSeverity(line));
+      writeQuestText(questLineText(line));
+      writeQuestShown(true);
+    },
+
     update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void {
       // Read once and shared by the two charging sweeps, so the tank and the
       // hull step together at a berth rather than a frame apart. Wall clock
@@ -1128,6 +1284,7 @@ export function createHud(
       // same test -- so the key cannot disagree with the plant about whether
       // the ship has arrived.
       writeShopGate(energy.mode === 'docked');
+      writeQuestGate(energy.mode === 'docked');
       // `energy.canThrust` is deliberately not read: `dead` and `restart`
       // between them hold for exactly as long as thrust is refused, so a
       // second indicator would say the same thing twice and could only ever

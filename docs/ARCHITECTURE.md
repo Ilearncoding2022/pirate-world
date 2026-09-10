@@ -290,7 +290,7 @@ shader.
 | `weather.ts` | `createWeather(seed?, pin?)`, `WeatherPin`, `VIS_MIN`, the share constants | the weather AT THE SHIP: squalls rolled off `WindState`'s phases, combined with the cells by `max` BEFORE smoothing. Owns `WeatherState`, including the three the flash carries — `flashLocal`, `flashSeed` and `flashOrigin`, all fixed at the INSTANT of the strike and cleared when it retires, so a cell that drifts or dies mid-flash cannot displace, reshape or unplace a bolt that is already lit. `?weather=` pins the envelopes and switches the squall roll off; cells keep running under a pin |
 | `rain.ts` | `createRain(drops)` | `quality.rainDrops` drops in a box stretched to the CAMERA every frame, all motion in the vertex shader, hidden below `rain > 0.02` or once the far fade has run out. `update`'s optional fifth argument is the camera, and it is not a courtesy: width comes off the frustum (so the curtain reaches the frame at every zoom and on every window shape), depth off the camera's own distance (so it reaches the lens), and the ceiling off its altitude (so the plane the drops start at never crosses the frame). The drops dissolve toward three of the four walls (`RAIN_FADE`); the fourth is astern, behind the lens. `LAYER_DEFAULT` only: rain in the reflection cube is rain reflected in rain, directly under the hull |
 | `lightning.ts` | `createLightning()`, `buildBolt(positions, seed)` | the BOLT, for the flash `weather.ts` has always had. Owns no timing, no gate and no randomness of its own: `weather.flash` is the envelope, `flashSeed` the shape, `flashOrigin` the place. Geometry is rewritten once per STRIKE rather than per frame, and the object hides itself between them; built on every tier including the one with no rain, because a bolt is under two hundred vertices for a third of a second. `LAYER_DEFAULT` only, for `rain.ts`'s reason |
-| `chart.ts` | `createChart(w?, h?, encoded?)`, `CHART_WIDTH/HEIGHT`, `CHART_SAVE_INTERVAL`, `CHART_VERSION` | the fog-of-war bitmap: 1024×512 bytes in memory (the scope samples it 37 000 times a raster and a byte read beats a shift), bit-packed and base64'd in storage. `reveal` stamps a spherical cap through `geo.ts`'s `capColumns`, the same function `weathermap.ts` stamps a cell with |
+| `chart.ts` | `createChart(w?, h?, encoded?)`, `CHART_WIDTH/HEIGHT`, `CHART_SAVE_INTERVAL`, `CHART_VERSION` | the fog-of-war bitmap: 1024×512 bytes in memory (the scope samples it 37 000 times a raster and a byte read beats a shift), bit-packed and base64'd in storage. `reveal` stamps a spherical cap through `geo.ts`'s `capColumns`, the same function `weathermap.ts` stamps a cell with. `coverage()` is the fraction of the globe's AREA discovered, kept as a running total and cosine-weighted by row — equirectangular texels are not equal areas, and counted naively a player could finish a chart contract by circling the pole |
 | `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards**. `update`'s optional fifth argument is `stormOdds`, a multiplier on the roll's COMPARISON only (the draw stays unconditional, so the stream still replays) |
 | `aiboats.ts` | `createAiBoats(deps)`, `AiBoatsDeps`, `AiBoats`, `ROLL_PERIOD`, the spawn and pursuit constants | the raider sim: the roll, spawning, transport, pursuit, conversion, contact and the post-fight grace. Owns `AiBoatState`, mutated in place; DOM-free, scene-free and seeded, exactly as `hazards.ts` is; see **AI boats and the battle** |
 | `aihulls.ts` | `createAiHulls(scene, cloneHull)`, `AiHulls` | the raiders as things you can see: at most two hull clones from `ship.cloneHull()`, placed on the globe from `AiBoatState` each frame, neon recoloured, `rimglow.ts` installed. `hullOf(boat)` is what the arena borrows |
@@ -319,8 +319,8 @@ shader.
 | `shipfx.ts` | `createShipFx(model, maxAnisotropy)`, `shipGlow`, `isNeon` | animates the model's separate nodes: sail, flag, neon; `shipGlow` is a module-level singleton (colour + dimming level) `waterreflect.ts` reads to paint the hull's fake reflection streak, since the hull cannot appear in its own reflection camera; `isNeon` is exported so `aihulls.ts` recolours exactly the materials this file animates |
 | `camera.ts` | `createFollowCamera(aspect)`, `NEAR_DISTANCE`, `NEAR_HEIGHT` | the two chase-framing constants are exported for `fogbank.ts`, which derives its clearing from the fact that this camera sits inside the fog layer — see **The fog bank**. follow camera, tracks ship up; `snap(ship)` puts it at this frame's damped destination immediately, for the one event that moves the hull without sailing it there |
 | `controls.ts` | `createControls()` | keyboard + on-screen D-pad + wheel |
-| `hud.ts` | `createHud(wallet)` | speed, gold, power, the backup cell, the hull, and the mooring notice; wind, sky, heading and the fix live on the radar panel, and the ship's keys on the helm pad. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also owns the three level bars' `flow--*` state and their `is-crest` / `is-sweep` markers (see **What a bar is doing**), and publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
-| `menu.ts` | `createMenu(deps)`, `Menu` | the Escape menu and the controls guide inside it. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms |
+| `hud.ts` | `createHud(wallet)`, `questLineText`, `questSeverity`, `QuestLineInput`, `QUEST_URGENT_BELOW` | speed, gold, power, the backup cell, the hull, the mooring notice, and the one contract line; wind, sky, heading and the fix live on the radar panel, and the ship's keys on the helm pad. Owns the power panel's two derived readings — `powerTag` (the ten `EnergyMode` causes plus its own `full`) and `powerSeverity` (the five colours), which are deliberately two axes rather than one enum; see **The tag names a cause; the colour names a severity**. Also owns the three level bars' `flow--*` state and their `is-crest` / `is-sweep` markers (see **What a bar is doing**), and publishes `--telemetry-h`, the panel's rendered height, which the dock is positioned off |
+| `menu.ts` | `createMenu(deps)`, `Menu`, `HarbourEntry`, `ContractEntry`, `formatBearing`, `formatDistance` | the Escape menu and its three pages: the controls guide, the 36 harbours, and the contracts in hand. Owns the Escape key OUTRIGHT — opening as well as closing — and asks `main.ts`'s `canOpen` whether it may; a card over a frozen world, on the pause contract's terms. Both list pages are handed finished rows by `main.ts` and neither knows what a `Towns`, a `ShipState` or an `ActiveQuest` is |
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?, weather?, cells?, chart?)`. The scope's GEOMETRY never changes with the weather — `RADAR_RANGE`, the projection tables and the range rings are fixed — what changes is how much of it has anything in it: beyond `WeatherState.visibility` a pixel is `SCOPE_FOG` if uncharted and the coast dimmed toward it if charted. Cells draw as discs of `radius * strength`, culled on `visibility + radius` so a bank whose centre is off the scope still shows. It is also where the chart is STAMPED, because this is the one place that knows both the visibility and when it last looked; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `horizon.ts` | `limbSin(cameraRadius)`, `sunAppearsSin(cameraRadius)`, `SUN_APPEARS_SIN` | where the DRAWN horizon is, and the elevation the sun's disc clears it at; derived from `GLOBE_RADIUS`, the chase camera's opening framing and `SUN_DISC_RADIANS`, so nothing downstream writes the number down |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `SolarPhase` | where the ship stands in its own day or night, and how far through it; DOM-free, so the geometry is testable without a canvas |
@@ -340,7 +340,7 @@ shader.
 | `chumdrum.ts`, `barbedheads.ts` | `createChumDrumStore`/`createBarbedHeadsStore` | the two Fishing consumables, armed on `fishcover.ts` and spent by `fishing.ts` into `createFishingSim`'s `minSpawnTier`/`tensionDrainScale` |
 | `arclamp.ts`, `governor.ts` | `createArcLampStore`/`createGovernorStore` | the two Fishing durables; `arcLamp.sessionSeconds` and `governor.sessionCost` feed `fishing.ts`/`fishsim.ts` directly |
 | `tierstore.ts`, `stockstore.ts` | `createTierStore`, `createStockStore` | the shared shape behind all eight items above — a tier ladder and a one-at-a-time stock cap, respectively; see `docs/SHOP_PLAN.md` for why the eight do not each reimplement one |
-| `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY`, `loadChart()`, `writeChart(encoded)`, `CHART_KEY` | localStorage, versioned, tolerant of garbage. TWO keys: the save file, rewritten in full on every catch, purchase and whole percent of battery, and the chart, 87 KB written at most every five seconds while it changes. Opposite cadences, so they are not one file — the price being that clearing a player's progress means clearing both |
+| `save.ts` | `createRecords()`, `loadSave()`, `writeSave(data)`, `SAVE_KEY`, `loadChart()`, `writeChart(encoded)`, `CHART_KEY`, `QuestSource` | localStorage, versioned, tolerant of garbage. `attachQuests` is the one asymmetry: every other record is built from a number in the file, but contracts need `globe.towns` and the chart, so `main.ts` builds the sim and hands it back. TWO keys: the save file, rewritten in full on every catch, purchase and whole percent of battery, and the chart, 87 KB written at most every five seconds while it changes. Opposite cadences, so they are not one file — the price being that clearing a player's progress means clearing both |
 | `dev/probe.ts` | `runProbe()` | `?probe=wave`'s only entry point; renders the GPU `waveField` chunk to a canvas and publishes the matching CPU samples for `tests/smoke/wave-parity.spec.ts`; tree-shaken out of a normal load |
 | `blackout.ts` | `createBlackout()` | the fade a wreck happens behind, and both of a battle's; owns `#blackout` and the promise that `onBlack` runs when the screen is ACTUALLY opaque, on `transitionend` with a timer fallback |
 | `loading.ts` | `createLoading()` | drives the splash `index.html` ships visible; the only UI a module does not build |
@@ -348,6 +348,11 @@ shader.
 | `harbournames.ts` | `HARBOUR_NAMES`, `HARBOUR_COUNT`, `NORTH_POLE_INDEX`, `SOUTH_POLE_INDEX`, `HARBOUR_NAME_MAX_LENGTH` | the 36 names, and the only part of the world that never moves. A harbour's IDENTITY is its name, not its position — the world is redrawn every load — so `save.ts` keys on the string. Indices 0 and 1 are the poles and are read from here rather than counted from the front of the list |
 | `worldgen.ts` | `generateWorld(seedHint, quality, onAttempt?, forcedRejections?)`, `checkWorld`, `worldPasses`, `WORLD_ATTEMPTS`, `LAND_MIN`, `LAND_MAX` | draws a seed, builds a world's DATA, measures it, and throws a bad one away. `?seed=` makes exactly one attempt and THROWS; without a hint it draws from the CSPRNG up to `WORLD_ATTEMPTS` and then falls back to `DEFAULT_SEED`, which passes by construction. `?reject=<n>` forces the first n attempts to fail, and exists because no failing seed is known — see **Harbours** |
 | `hull.ts` | `Hull`, `createHull(percent?)`, `createStubHull()`, `HULL_MIN/MAX`, `HULL_WEAR`, `HULL_WEATHER_GAIN`, `HULL_REPAIR_RATE`, `HULL_WORN_BELOW`, `HULL_FAILING_BELOW`, `HULL_CAP_WORN/FAILING/CRITICAL` | durability: a float in [1, 100] published as a whole percent, with `speedCap`, `canFish`, `hitsToLose` and `mode` all DERIVED from that published number. `update(dt, docked, weathered)` is called only from the sailing branch, which is what keeps the clock off during fishing, a fight, the shop and the menu. `hud.ts` and `shop.ts` import the band edges rather than copying them |
+| `questconstants.ts` | `MAX_ACTIVE`, `OFFERS_PER_HARBOUR`, `ARC_NEAR`, `ARC_FAR`, `CRUISE_SPEED`, `DELIVERY_DAYS`, `WINDOW_SLACK`, `WINDOW_MIN`, `DELIVERY_GOLD`, `CHART_TARGETS`, `CHART_GOLD`, `CHART_PROGRESS_STEP`, `REPUTATION_BY_TIER`, `REPUTATION_FAIL`, `REPUTATION_FLOOR`, `TOAST_HOLD`, `TOAST_QUEUE`, `CARGOES` | every tuning number the contract system has, and deliberately zero imports — so a test can read the table without standing up a world. `CRUISE_SPEED` is not imported from `ship.ts` on purpose: `MAX_FORWARD` states the hull's flat-out speed and this states the speed a contract ASSUMES, which has to be below it |
+| `reputation.ts` | `Reputation`, `createReputation(initial?)` | standing with the harbours: one signed integer, floored at `REPUTATION_FLOOR` and with no ceiling. Built on `wallet.ts`'s shape and deliberately NOT a second wallet — there is no `spend` and no refusal, because a deadline that has passed has passed whether the player can afford it or not. It buys nothing yet; Phase 2 of `docs/QUESTS_PLAN.md` owns what it will buy |
+| `quests.ts` | `createQuests(deps)`, `Quests`, `QuestsDeps`, `arcBetween`, `tierForArc`, `windowReachable`, `windowSatisfied`, `daylightLeft`, `formatSpan`, `formatDeadline` | the contract sim: generation, acceptance, the per-frame check, completion, failure and the reward. DOM-free and world-free, with callbacks for `Towns` and `Chart`. No `Date`, no `performance.now()` and no `setTimeout` — see **Contracts** |
+| `toast.ts` | `createToast()`, `createToastQueue()`, `Toast`, `ToastSeverity` | the transient notice the game had none of. One message at a time, held for `TOAST_HOLD` of WORLD seconds, ticked from the sailing branch only. `createToastQueue` is the same rules without a DOM, for the tests |
+| `questcover.ts` | `createQuestCover(deps)`, `QuestCover` | the harbour's board, what [WORK] opens. `fishcover.ts`'s shell; knows nothing of `Towns`, the sun or the chart — every fact on a card is inside the offer, except the one line about the target's sky, which `main.ts` supplies as a callback |
 | `knownharbours.ts` | `KnownHarbours`, `createKnownHarbours(saved?)` | the names the ship has moored at, in first-visit order. `add` is idempotent because the caller is a frame loop |
 | `harbourstock.ts` | `HarbourStock`, `createHarbourStock(saved?, names?, random?)`, `LINE_MIN_HARBOURS` | which of the four durable ladders each harbour sells. Rolled for ALL 36 at once and saved, because the coverage guarantee — every ladder carried by at least six harbours — cannot be made one harbour at a time, and because a remembered harbour must keep the stock it had |
 
@@ -893,6 +898,112 @@ nothing failed to compile, both tiers were green, and the labels had never
 once been seen. `docs/TESTING.md`'s rule that no test asserts on appearance is
 what makes the owner's eye the only thing that can catch this class of bug;
 budget for it.
+
+## Contracts
+
+The first goal the game has had. `docs/QUESTS_PLAN.md` is the brief; this is
+what it became. Read it before touching `quests.ts`, `chart.coverage`, or
+anything that reads `SaveData.quests`.
+
+One sim, four views. `quests.ts` owns every rule — generation, acceptance, the
+per-frame check, completion, failure, the reward — and `questcover.ts`,
+`hud.ts`, `menu.ts` and `toast.ts` read it or subscribe to it and decide
+nothing. That is the `energy.ts`-to-`hud.ts` split the project already runs on,
+and the reason for it here is that a contract's rules are spherical geometry and
+clock arithmetic, which are the things that can be wrong without looking wrong.
+
+### The clock is the world's, never the wall's
+
+There is no `Date`, no `performance.now()` and no `setTimeout` in `quests.ts`,
+and there must never be one. `main.ts` calls `quests.update` from the SAILING
+branch of the frame loop and nowhere else, so a deadline cannot run out while
+the menu, the shop, the board, the fishing cover, a session or a fight owns the
+screen — and cannot run out with the tab in the background either. That is a
+property of where the call sits, exactly as `records.hull.update` is, rather
+than a flag the sim could be left stuck in.
+
+The flip side is the mechanic rather than a flaw. A deadline is in ABSOLUTE
+world seconds, while the *local* day stretches for a ship running west and
+compresses for one running east (**Day, night, and travel**). The clock does not
+bend; the daylight does. A player who understands that reaches a daylight window
+a player who does not would miss.
+
+### A window is measured at the target, never at the ship
+
+A `DELIVERY` may carry a `DAYLIGHT` or a `NIGHT` window, and it is satisfied by
+`solarPhase(target.dir, env.sunDirection).isDay` — the same function the day
+dial draws from and the same geometry the water shader crossfades on, so the
+card, the dial and the sea cannot develop three opinions about whether it is
+night at Ionport.
+
+This is the one thing in the project that could not be copied by a flat-ocean
+game, and it works because of a ratio recorded in `daynight.ts`: the terminator
+sweeps the ground at 1.05 units a second and the hull makes about ten. A window
+cannot be waited out profitably; it has to be sailed to.
+
+`windowReachable` is the delicate part. A window is a repeating interval on the
+time axis with period `DAY_LENGTH`, and the function walks those intervals
+asking whether any overlaps `[travel, deadline]` by at least `WINDOW_MIN`. The
+margin is not decoration — an overlap of one second is a window nobody can steer
+into, and offering it would be a lie told in arithmetic. A polar point is
+answered rather than guarded: above about 63 degrees the phase is a constant.
+
+### The board is derived, not stored
+
+A harbour's postings are a pure function of `(questSeed, harbour name, world
+day)`. Nothing about a posting is written to disk, so reopening the board inside
+one world day cannot reshuffle it and the day boundary is what turns it over.
+Two consequences worth knowing:
+
+- **Only the seed is saved.** A seed re-drawn per load would reshuffle every
+  board on every reload and make the day boundary meaningless.
+- **The chart slot is overlaid AFTER the draw**, over slot 0, rather than taking
+  a slot before it. Coverage climbs continuously while the ship sails, so a
+  chart goal that consumed a slot would shorten the delivery draw the moment a
+  target was passed and reshuffle the postings beside it — and a player who had
+  decided to come back for the antipode run would find it gone.
+
+### Three traps
+
+**Trap 1 — settlement runs on a frame loop.** `update` is called every frame the
+ship is moored, exactly as `knownHarbours.add` is. So a contract is spliced out
+of `active` BEFORE its listeners fire, and the listeners are what pay the purse
+and write the save. One missing splice is a purse paid sixty times a second.
+
+**Trap 2 — failure must not import a fail state.** Failing or abandoning costs
+`REPUTATION_FAIL` and nothing else. No gold is taken, no upgrade is lost, no
+other contract is touched, nothing is locked. `docs/ROADMAP.md` asked for
+"failure costs gold, never progress" and the owner tightened it to standing,
+never gold.
+
+**Trap 3 — coverage is area, not texels.** The chart is an equirectangular grid,
+so a row beside a pole covers a thin strip of sphere and a row at the equator a
+wide one. `chart.coverage()` weights every row by the cosine of its latitude and
+keeps the result as a running total. Counted naively, a 35% contract could be
+finished by circling the top of the world, and nothing on screen would look
+wrong while it happened.
+
+### What survives a reload, and what does not
+
+The world is redrawn on every load, so the same rule the harbours follow applies
+here: a contract's target is a NAME, re-resolved through `Towns.byName` in
+whatever world comes up. The bearing and the distance change; the deadline does
+not; the HUD line reads `UNCHARTED` for a target this world has not got, and
+keeps its clock.
+
+A `CHART` goal is the one kind dropped on load, and `save.ts` drops it rather
+than `quests.ts`. The chart lives under its own key and is checked against the
+world seed, so the sea a chart goal measured does not exist after a reload — and
+a goal that silently restarted from zero reads as a bug rather than as a rule.
+
+### One documented departure from the plan
+
+`docs/QUESTS_PLAN.md` lists the per-frame order as deadlines, then completion.
+The code settles COMPLETIONS FIRST. The plan's order decides a contract that
+arrives on the same frame its clock runs out against the player, by up to 16 ms
+of a several-minute deadline, and the player did get there. The clock is
+decremented and clamped at zero before anything else, so the HUD never shows a
+negative; the expiry sweep runs last.
 
 ## The cloud deck
 `clouds.ts` is not one sphere but `SHELL_COUNT` concentric ones spanning

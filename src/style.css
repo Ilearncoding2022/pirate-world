@@ -4813,3 +4813,681 @@ body.in-battle .dbtn--right {
 }
 
 /* END HARBOURS C */
+
+/* =====================================================================
+   CONTRACTS — the HUD line, the notification strip, the menu's fourth
+   pane, and the board a berth posts.
+
+   Four surfaces, one section, because they are one feature and a reader
+   chasing "where does a contract show up" should find the lot in one
+   place. Nothing here invents a voice: the HUD line is the mooring
+   notice's shape, the strip is the same box said once and taken away, the
+   menu pane is the harbour list's rows, and the board is the fishing
+   cover's shell down to the close disc.
+
+   See docs/QUESTS_PLAN.md.
+   ===================================================================== */
+/* CONTRACTS */
+
+/* ---------------------------------------------------------------------
+   The HUD line (top-centre) and the strip under it.
+
+   Top-centre is the last free edge on this HUD: the telemetry panel and
+   the dock have top-left, the scope top-right, the helm pad bottom-left
+   and the mooring notice bottom-centre. Putting the contract at the
+   opposite edge from the mooring notice is deliberate -- the two can be
+   up together (moored at a target, waiting for its hour) and they must
+   not stack.
+
+   Nothing here may set `display` on `.quest` or `.toast` themselves.
+   hud.ts and toast.ts hide both with the `hidden` attribute, whose UA
+   rule is `display: none` at author-origin strength; an author `display`
+   here would beat it and every player who has never taken a contract
+   would carry two empty boxes. The `:not([hidden])` rules below are
+   where the `display` goes, exactly as `.moor` does it.
+   ------------------------------------------------------------------- */
+
+.quest {
+  position: absolute;
+  top: calc(var(--hud-pad) + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  max-width: min(560px, calc(100vw - 2 * var(--hud-pad)));
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: var(--quest-ink);
+  border: 1px solid var(--quest-edge);
+  background: rgba(3, 12, 22, 0.78);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.quest:not([hidden]) {
+  display: flex;
+}
+
+/* The legend, drawn as the mooring notice's SPACE key is, because a
+   labelled readout on this HUD always names itself in a key-shaped box.
+   It is not pressable and says so to a reader: `aria-hidden` in the
+   markup, and no hover here. */
+.quest__key {
+  flex: none;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  border: 1px solid var(--quest-edge);
+  background: var(--quest-key-bg);
+}
+
+/* Tabular, because the line ends in a clock that counts down: a
+   proportional 1 would make the whole line shuffle left once a second. */
+.quest__text {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* run: a passage under way. The quiet default, in the HUD's own cyan. */
+.quest--run {
+  --quest-ink: #9fd8e8;
+  --quest-edge: rgba(63, 224, 255, 0.3);
+  --quest-key-bg: rgba(63, 224, 255, 0.08);
+}
+
+/* goal: no clock, so nothing to lose. Quieter still -- a chart goal is a
+   standing intention rather than a thing in progress. */
+.quest--goal {
+  --quest-ink: var(--ink-mute);
+  --quest-edge: rgba(63, 224, 255, 0.18);
+  --quest-key-bg: rgba(63, 224, 255, 0.05);
+}
+
+/* wait: at the target, waiting for its hour.
+   Mint, the colour every reading of a harbour carries -- the scope's
+   diamond, the world label and the HARBOURS page's names. Deliberately
+   NOT amber: the player has sailed to the right place and the sun will be
+   up again in minutes, so this is an instruction, not a warning. */
+.quest--wait {
+  --quest-ink: #8affc4;
+  --quest-edge: rgba(138, 255, 196, 0.42);
+  --quest-key-bg: rgba(138, 255, 196, 0.12);
+}
+
+/* urgent: under a minute. The mooring notice's amber, because it is the
+   same voice -- the one thing on screen the player has to act on now. It
+   does not pulse: the line carries a clock, and a number going down is
+   already the most urgent thing a readout can do. */
+.quest--urgent {
+  --quest-ink: #ffcf7a;
+  --quest-edge: rgba(255, 180, 69, 0.5);
+  --quest-key-bg: rgba(255, 180, 69, 0.14);
+}
+
+/*
+ * The strip, under the line.
+ *
+ * Offset by the line's own height rather than by a guess, and it does not
+ * move when the line is hidden: a notice that jumped up 26px the moment a
+ * contract settled -- which is exactly when a notice appears -- would be
+ * the one animation on this HUD nobody asked for.
+ */
+.toast {
+  position: absolute;
+  top: calc(var(--hud-pad) + 34px);
+  left: 50%;
+  transform: translateX(-50%);
+  align-items: center;
+  padding: 5px 14px;
+  max-width: min(560px, calc(100vw - 2 * var(--hud-pad)));
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.13em;
+  text-align: center;
+  color: var(--toast-ink);
+  border: 1px solid var(--toast-edge);
+  background: rgba(3, 12, 22, 0.86);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+
+.toast:not([hidden]) {
+  display: flex;
+}
+
+.toast__text {
+  min-width: 0;
+}
+
+/* info: something started or moved. */
+.toast--info {
+  --toast-ink: #9fd8e8;
+  --toast-edge: rgba(63, 224, 255, 0.34);
+}
+
+/* good: something was earned. The purse's own brass, because that is what
+   a completed contract pays and the colour should say so before the words
+   are read. */
+.toast--good {
+  --toast-ink: var(--gold);
+  --toast-edge: rgba(255, 196, 77, 0.5);
+}
+
+/* bad: something was lost. The hull block's red, one step down in
+   saturation: a lost contract costs standing and never progress, so it
+   must not look like a hull at 1%. */
+.toast--bad {
+  --toast-ink: #ff9a8e;
+  --toast-edge: rgba(255, 74, 60, 0.45);
+}
+
+/* Clear of the helm pad and the scope on a narrow screen. The two boxes
+   step down as one, so the gap between them is preserved. */
+@media (max-width: 720px) {
+  .quest,
+  .toast {
+    font-size: 9px;
+    letter-spacing: 0.09em;
+  }
+  .quest__key {
+    font-size: 7.5px;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   The menu's fourth pane.
+
+   The root pane's rule is written `.menu:not(.menu--controls)`, which
+   stopped meaning "the root" when the harbours pane landed and needed two
+   rules to put right. A fourth pane needs the same two, written the same
+   way -- the overlay class repeated, so specificity matches the earlier
+   rule and source order decides.
+   ------------------------------------------------------------------- */
+
+.menu.menu--contracts .menu__pane--root,
+.menu.menu--contracts .menu__pane--controls,
+.menu.menu--contracts .menu__pane--harbours {
+  display: none;
+}
+
+.menu.menu--harbours .menu__pane--contracts {
+  display: none;
+}
+
+.menu.menu--contracts .menu__pane--contracts {
+  display: flex;
+}
+
+/* Standing, at the head of the page. Brass like the purse, because it is
+   the other thing a contract pays and the two should read as a pair. */
+.contracts__rep {
+  margin: 2px 0 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.16em;
+  color: var(--gold);
+}
+
+/* Three rows at most, so it cannot outgrow the panel the way 36 harbours
+   can -- but capped anyway, because a brief wraps and three wrapped
+   briefs on a short window would push BACK off the bottom of the one
+   screen whose whole job is to be easy to leave. */
+.contracts__list {
+  margin: 4px 0 2px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+/* The brief above, the status under it. Not the harbour row's one-line
+   shape: a brief is a sentence and a fix is a figure, and side by side the
+   sentence would be squeezed into three words a line. */
+.contracts__row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 6px 5px 0;
+  border-bottom: 1px solid rgba(63, 224, 255, 0.07);
+}
+
+.contracts__brief {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.contracts__status {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+/* The fix, in the HARBOURS page's voice to the letter: same size, same
+   tabular figures, same tracking. One contract seen on two pages must not
+   look like two different readings. */
+.contracts__fix {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: #8affc4;
+  white-space: nowrap;
+}
+
+.contracts__clock {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* Under a minute. The HUD line's amber, so the two agree about the same
+   contract at a glance. */
+.contracts__clock--urgent {
+  color: #ffcf7a;
+}
+
+/* The empty state, in the panel's quietest voice. A sentence and not a
+   blank box: an empty board is where most players meet this page first,
+   and "you have none" must not look like "the list failed to load". */
+.contracts__empty {
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.1em;
+  color: var(--ink-mute);
+}
+
+/* ---------------------------------------------------------------------
+   The board — what [WORK] opens at a berth.
+
+   The fishing cover's shell, reused rather than reinvented: same fixed
+   overlay, same blurred backdrop, same 16:9 picture panel, same scrim,
+   same close disc, same scale-down. What differs is the body, which is
+   two lists instead of two buttons, and therefore scrolls.
+
+   z-index 22: above the fishing cover at 20, because the two can never be
+   up together (main.ts refuses either over the other) and a rank is a
+   statement about what would win rather than a case that happens. Below
+   the fishing card at 30 for the same reason.
+   ------------------------------------------------------------------- */
+
+.questcover {
+  position: fixed;
+  inset: 0;
+  z-index: 22;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--hud-pad);
+  font-family: var(--font-mono);
+  color: var(--ink);
+}
+
+/* The UA's [hidden] is display:none, which the display:flex above would
+   otherwise beat. Same guard every other overlay carries. */
+.questcover[hidden] {
+  display: none;
+}
+
+.questcover__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 5, 11, 0.8);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+
+/*
+ * Taller than the fishing cover's 16:9, and that is the one deliberate
+ * departure from its shell.
+ *
+ * That screen holds a title, a blurb and two buttons and has room to
+ * spare; this holds two lists of up to three rows each, and at 16:9 the
+ * second list would be below the fold on every laptop. 4:3 capped at 620
+ * gives both lists a home without the panel becoming a column of text
+ * with a photograph behind it.
+ */
+.questcover__panel {
+  position: relative;
+  width: min(92vw, 760px);
+  max-height: min(88vh, 620px);
+  aspect-ratio: 4 / 3;
+  /* The fishing cover's scale, for the fishing cover's reason: the screen
+     is a width, a height cap, five font sizes, two paddings and a close
+     button, each with a second value in the narrow block below, and
+     trimming a dozen numbers by hand is a dozen chances to round one the
+     wrong way. */
+  transform: scale(0.72);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  box-shadow: var(--panel-glow);
+  overflow: hidden;
+  /* The clipped corner every panel in the world carries. */
+  clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%);
+}
+
+/*
+ * The art, and the scrim that makes it legible.
+ *
+ * The harbour plate, and not the open-water one: this screen only ever
+ * opens alongside a berth, so it is the same place the fishing cover
+ * wears when the ship is moored. One image fetched for two screens.
+ *
+ * The wash runs top-to-bottom rather than the fishing cover's
+ * corner-to-corner, because the body here is a full-width column of rows
+ * rather than text stacked into one dark corner. `background-color` under
+ * the lot is the art's own deep navy, for the first-open beat.
+ */
+.questcover__art {
+  position: absolute;
+  inset: 0;
+  background-color: #071426;
+  background-image:
+    linear-gradient(
+      rgba(2, 8, 18, 0.72) 0%,
+      rgba(2, 8, 18, 0.88) 34%,
+      rgba(2, 8, 18, 0.95) 100%
+    ),
+    url("../assets/Illustrations/Activity - Fish in harbor - Cover.webp");
+  background-size: cover;
+  background-position: center;
+}
+
+/* Top-right, over the art, on its own dark disc: the fishing cover's
+   button to the pixel, because it is the same gesture on the same kind of
+   screen. */
+.questcover__close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 2;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink);
+  background: rgba(2, 8, 18, 0.66);
+  border: 1px solid rgba(63, 224, 255, 0.3);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 120ms linear, border-color 120ms linear, background-color 120ms linear;
+}
+
+.questcover__close:hover {
+  color: var(--cyan);
+  background: rgba(2, 8, 18, 0.9);
+  border-color: rgba(63, 224, 255, 0.6);
+}
+
+/*
+ * The body scrolls and the panel does not.
+ *
+ * `container-type: inline-size` because `.fbtn` sizes its label in `cqi`
+ * -- the buttons inside the rows below are the game's buttons, and
+ * without a container here they would resolve against the nearest one
+ * outside this screen and come out a different size from every other
+ * press in the game.
+ */
+.questcover__body {
+  position: absolute;
+  inset: 0;
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 22px 26px 20px;
+  overflow-y: auto;
+}
+
+.questcover__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  /* Clear of the close disc, which floats over this corner. */
+  padding-right: 34px;
+}
+
+.questcover__title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  /* The berth's mint, not the cyan every other title carries: the heading
+     is a HARBOUR NAME, and every other reading of a harbour in this game
+     is mint. */
+  color: #8affc4;
+  text-shadow: 0 0 18px rgba(138, 255, 196, 0.4);
+}
+
+.questcover__rep {
+  margin: 0;
+  flex: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.16em;
+  color: var(--gold);
+}
+
+/* The two section headings. Quiet, because they are labels on a list and
+   not titles: POSTED HERE and IN HAND are the two halves of one screen. */
+.questcover__section {
+  margin: 8px 0 0;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: var(--ink-mute);
+}
+
+.questcover__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.questcover__empty {
+  margin: 2px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.1em;
+  color: var(--ink-mute);
+}
+
+/* ---------------------------------------------------------------------
+   One posting, and one contract in hand.
+
+   `.offerq` and `.heldq` rather than `.offer` and `.held`: the chandlery
+   already owns `.offer`, and a second meaning for that class on a screen
+   that sits in the same stylesheet is how two panels end up silently
+   restyling each other.
+   ------------------------------------------------------------------- */
+
+.offerq {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 10px;
+  border: 1px solid rgba(63, 224, 255, 0.16);
+  border-radius: 3px;
+  background: rgba(4, 12, 22, 0.5);
+}
+
+.offerq__head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+/* The tier, as a Roman numeral in a box: the shop's ladders run Mk I to
+   Mk III, and a contract's three arc bands are the same idea said about a
+   different thing, so they are said the same way. */
+.offerq__tier {
+  flex: none;
+  min-width: 22px;
+  padding: 2px 0;
+  border: 1px solid currentcolor;
+  border-radius: 2px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-align: center;
+}
+
+/* Three tiers, three of the fish book's own tier colours. Reused rather
+   than invented, because a player has already learned that ladder from
+   the Fish Book and a second scale for the same idea would be one scale
+   too many. */
+.offerq__tier--1 {
+  color: var(--tier-1);
+}
+
+.offerq__tier--2 {
+  color: var(--tier-3);
+}
+
+.offerq__tier--3 {
+  color: var(--tier-5);
+}
+
+.offerq__brief {
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+/* What the sun is doing over the target. Its own colour and its own line,
+   because this is the reading that decides whether the contract is a
+   passage or a problem and it must not be mistaken for part of the brief
+   above it. Mint, like every other statement about a harbour. */
+.offerq__sky {
+  margin: 0 0 0 31px;
+  font-size: 9.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  color: #8affc4;
+}
+
+.offerq__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-left: 31px;
+}
+
+/* The purse and the standing, in one figure. Brass, because both are
+   payments and the HUD's GOLD row has already taught that colour. */
+.offerq__pay {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.1em;
+  color: var(--gold);
+  white-space: nowrap;
+}
+
+/* Rides on .fbtn so the press is the game's press. `.fbtn` carries
+   `flex: 1 1 0` for the summary row it was authored in, which in this row
+   would stretch ACCEPT across the whole width -- the same correction
+   `.menu__btn` and `.offer__buy` make. */
+.offerq__take {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font-size: 10px;
+}
+
+.offerq__take:disabled {
+  color: var(--ink-mute);
+  border-color: rgba(111, 147, 166, 0.3);
+  background: rgba(111, 147, 166, 0.06);
+  cursor: not-allowed;
+}
+
+/* A contract in hand: brief, clock, and the way out. One row, because
+   there is no decision to make here -- the brief has already been read
+   once, on the card above, when it was accepted. */
+.heldq {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-left: 2px solid rgba(138, 255, 196, 0.4);
+  background: rgba(4, 12, 22, 0.4);
+}
+
+.heldq__brief {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.heldq__clock {
+  flex: none;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+  color: var(--ink-mute);
+  white-space: nowrap;
+}
+
+/* Magenta, the HUD's accent for a thing that takes rather than gives. It
+   costs the standing a missed deadline costs, and it should not look like
+   a neutral dismissal. */
+.heldq__drop {
+  flex: 0 0 auto;
+  padding: 5px 11px;
+  font-size: 9px;
+  color: var(--magenta);
+  border-color: var(--magenta-dim);
+  background: var(--magenta-ghost);
+}
+
+.heldq__drop:hover:not(:disabled) {
+  background: rgba(255, 79, 216, 0.2);
+  box-shadow: 0 0 14px rgba(255, 79, 216, 0.26);
+}
+
+/* The fishing cover's own narrow-viewport trim, applied to this screen's
+   equivalents. The panel is already scaled; this is the second pass that
+   keeps the two lists readable once the scale takes the rows under 10px. */
+@media (max-width: 720px) {
+  .questcover__panel {
+    width: 96vw;
+    aspect-ratio: 3 / 4;
+    max-height: 90vh;
+    transform: scale(0.9);
+  }
+  .questcover__body {
+    padding: 16px 16px 14px;
+  }
+  .questcover__title {
+    font-size: 15px;
+  }
+  .offerq__brief,
+  .heldq__brief {
+    font-size: 10px;
+  }
+  .offerq__foot,
+  .offerq__sky {
+    margin-left: 0;
+  }
+}
+
+/* END CONTRACTS */
