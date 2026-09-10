@@ -930,7 +930,7 @@ about one in three, widen the fade band before raising `WORLD_ATTEMPTS`.
 
 `hull.update` sits in the **sailing branch** of the frame loop and nowhere
 else. The frozen branch (menu, shop, fishing cover, fishing session, battle
-card) and the arena branch both return before reaching it, so fishing, a
+card) and the battle branch both return before reaching it, so fishing, a
 fight, the shop and the menu cannot wear the hull. That is the whole of the
 rule, enforced by position rather than by a flag — there is no mode `hull.ts`
 can be left stuck in, and no caller has to remember to switch one off.
@@ -1230,7 +1230,7 @@ controls.endFrame()
 `hull.update`'s position in that list is load-bearing and not a matter of
 taste. It is in the sailing branch and in neither of the two below, so the
 frozen branch (menu, shop, fishing cover, fishing session, battle card) and
-the arena branch simply never reach it. Decision 12 of
+the battle branch simply never reach it. Decision 12 of
 `docs/HARBOURS_PLAN.md` is therefore enforced by WHERE the call sits, not by
 a flag inside `hull.ts` — which means there is no mode the sim can be left
 stuck in and no caller that has to remember to switch one off. Moving this
@@ -1247,23 +1247,39 @@ overlay branch below:
 
 ```
 energy.update(dt, restingShip, env)        // the plant keeps running, on a resting hull
+weatherCells.update(dt, shipState, energyState)   // THE CLOCK. Same four calls, same order, as the sailing
+wind.update(dt, shipState, energyState, cells.stormAtShip)   //   branch: cells before wind, wind before weather,
+weather.update(dt, wind.state, cells.state)                  //   weather before hazards. A squall can arrive mid-duel
+hazards.update(dt, shipState, energyState, wind.state, stormOdds)  // maelstroms barred near the ring; crests are not
 battleSim.update(dt, battleUi.input(controls.input))   // only while inArena: the fire edge plus W/S
+crestShoves(playerHull) / crestShoves(aiHull)      // a real crest crossing a hull shoves it, through battlesea's own pulse
 settleOutcome(...)                         // once, the frame `outcome` first becomes non-null
 battleScene.update(dt, battleSim.state)
 battleUi.update(battleSim.state)
 hud.update(shipState, energyState, windState)
-timeDial.update(shipState, env)            // redrawn, not advanced, as under an overlay
-postFx.render(dt, inArena ? battleScene.scene : scene, inArena ? battleScene.camera : view.camera)
+globe.update(dt, env, wind.state, battleWeather(weather.state), cells.state, shipState, battleScene.camera)  // advances env: the sun moves. Weather is FOG/RAIN-CAPPED here -- the fight's quality floor
+rain.update(...) / lightning.update(...) / reflection.update(...) / docks.update(...)
+wake.update(dt, shipState, env, renderer)  // not optional: the water SAMPLES the wake map, and a branch that skips this freezes a foam streak onto the sea
+timeDial.update(shipState, env)
+postFx.render(dt, scene, inArena ? battleScene.camera : view.camera)   // ONE scene. The fight is in the world
 controls.endFrame()
 ```
 
-It is tested first because it is the more specific state, and because it is
-the one branch that renders a **different scene**: it therefore cannot share
-the frozen branch's `postFx.render(0, scene, camera)`, and it renders LIVE
-rather than at dt 0, because the arena is the game while it is up. A fight and
-a card can never be up together anyway: a contact halts the ship and freezes
-the world synchronously, and no contact can happen under an overlay because
-the sim does not run there. See **AI boats and the battle**.
+It is tested first because it is the more specific state. It no longer renders
+a different scene — that is the whole of docs/ROADMAP.md's step 1, and see
+**The fight happens in the world**. What it renders is the world, through the
+fight's own camera, LIVE rather than at dt 0.
+
+Four things deliberately do NOT appear above, and each is the pause contract
+rather than an oversight: `ship.update` (the hull is halted and `battle.ts` is
+steering it), `hull.update` and `quests.update` (sailing branch only, so a
+deadline cannot expire and a hull cannot wear while the player is fighting),
+and `aiBoats.update`/`aiHulls.update` (the other raiders would close on a ship
+that cannot steer, and `aiHulls` would reclaim the hull this fight borrowed).
+
+A fight and a card can never be up together anyway: a contact halts the ship
+and freezes the world synchronously, and no contact can happen under an
+overlay because the sim does not run there. See **AI boats and the battle**.
 
 What a contact freezes the world WITH is `battleCover.isOpen`, not
 `battleUi.isOpen`. A ram raises the cover card and the fight itself is opened

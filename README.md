@@ -154,9 +154,12 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   more often in a full storm, and **wandering** orange raiders nearly three
   times as often — but a red one, the sort that comes for you, is never made
   likelier by the sky. A storm makes the sea busier, not more hostile.
-  A fight carries the storm you were in when you were rammed: the arena's
-  water goes dark and grey under it. It never carries the fog, because a
-  white-out over a twenty-unit ring would hide the boat you are shooting at.
+  A fight is fought in the weather you are actually in, and it keeps changing
+  while you fight: the sun moves, a storm darkens the water, rain falls on you
+  mid-duel. The one thing held back is visibility — fog and heavy rain are
+  capped for the length of a fight, because a white-out over a twenty-unit
+  ring hides the boat you are shooting at. That is a harder fight to see, not
+  a harder fight.
 - **Rain, and a bolt to go with the flash.** A storm you can see from the
   deck. Rain begins at a tenth of a storm's depth rather than a quarter, so
   ordinary weather is wet instead of only greying the sky, and the curtain is
@@ -198,42 +201,47 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   raises the sea as well as pushing the hull, so the water tells you what the
   weather is doing before the panel does. The weather is seeded, so the same
   world always blows the same way.
-- **Rough water.** Every second the sea rolls for trouble. A strong wave rises
-  three times in ten, a great wave three times in twenty, and a maelstrom one
-  time in fifty.
-  Only one of each is ever on the water at once, so what a roll a second buys
-  is that the next one is up almost as soon as the last one has gone: the sea
-  is nearly always running something, and the wait for a maelstrom is under a
-  minute. **Waves run with the wind**, always, which is the whole reason to keep
-  an eye on the arrow: they rise upwind of you and come down on the hull, so
-  the wind tells you where to look and which way you will be thrown. A wave is
-  a crest twenty units long travelling at 6 knots, steep on the face and long
-  in the back: take it on the bow and it shoves you the way the water
-  went — five knots for a strong one, ten for a great one, over the three or
-  five seconds it breaks up against you, which is thirty units of the scope for
-  the big one. You keep the helm the whole time; the crest is spent once it has
-  hit you. **No two waves are the same size any more**: every one rolls its own
-  width, anywhere from a single unit — a slap you are through before you have
-  finished heeling — to twelve, four hull lengths of water taking two full
-  seconds to pass under you. It rolls its own life too, five to nine and a half
-  seconds, so a wave you decide to outrun is a different bet each time and
-  watching two of them tells you nothing about the third. A wide wave is not a
-  harder one, mind: the shove is the same five or ten knots either way. It is
-  just much harder to be missed by. **A wave breaks on
-  the shore the instant it reaches it** — and only the part of it that got
-  there: run a twenty-unit front onto a headland and the arm over the rock is
-  gone at once while the rest keeps coming, shortening as it goes, until there
-  is nothing of it left. Land is cover, and a wave you put an island between
-  yourself and is a wave that arrives half as wide. A maelstrom is
-  twenty units of funnel that opens over three seconds and stays for thirty. Go
-  into it and the helm is not yours any more: the hull spirals in for six
-  seconds, sinks, and the screen goes black. You come back stopped, somewhere
-  else entirely, with a quarter of the power you had — the backup cell, the
-  gold and the fish book are untouched. All of it is real water, displaced in
-  the same sea the ship rides, so a wave lifts the hull and the funnel tips it
-  bow-down. A berth is immune to all of it, and the scope marks both in magenta
-  while there is still time to steer around them. The rolls are seeded, so the
-  same world throws up the same weather.
+- **Rough water.** Every second the sea rolls for trouble — five separate
+  chances at a wave and one at a maelstrom. **Up to five crests can be running
+  at once**, and a single second can raise all five, so a squall does not
+  build, it arrives. In fair weather the water carries about three and a half
+  crests and is full about a fifth of the time; in a full storm it is four and
+  a half and full most of the time. That is what a storm buys — not angrier
+  water, fuller water. **Waves run with the wind**, always, which is the whole
+  reason to keep an eye on the arrow: they rise upwind of you and come down on
+  the hull, so the wind tells you where to look and which way you will be
+  thrown.
+  **No two waves are the same.** Each one rolls its own front, twelve to
+  twenty-four units of it; its own width across your track, two to twelve —
+  two is a slap you are through before you have finished heeling, twelve is
+  four hull lengths taking two full seconds to pass under you; its own height;
+  and its own speed, two knots to nearly eleven. That last one is the number to
+  read, because **the shove is the speed**: a slow wave nudges you, and the
+  fastest in the sea throws you nine knots the way the water went. The fastest
+  is also quicker than your own ten knots flat out, so the top of the sea
+  cannot simply be outrun — it has to be steered around. Waves also **grow
+  while they live**, gaining length and height off their own age, so a front
+  worth dodging ten seconds ago is worth dodging harder now. You keep the helm
+  the whole time; the crest is spent once it has hit you.
+  **A wave breaks on the shore rather than being deleted by it.** Run a
+  twenty-unit front onto a headland and the arm over the rock does not vanish
+  between frames: it retreats down the crest line at about a hull length and a
+  half a second, and the end that is being eaten SAGS as it goes, coming down
+  toward nothing while the middle of the front still stands. A wave driven
+  entirely aground grinds itself out of existence inside a second. Land is
+  cover, and a wave you put an island between yourself and is a wave that
+  arrives half as wide.
+  **A maelstrom** is twenty units of funnel and four deep — a real hole in the
+  sea, with a near rim, a shaded inner wall and a far wall that catches the
+  light. It opens over three seconds and stays for thirty. Go into it and the
+  helm is not yours any more: the hull spirals in for six seconds, sinks, and
+  the screen goes black. You come back stopped, somewhere else entirely, with a
+  quarter of the power you had — the backup cell, the gold and the fish book
+  are untouched. All of it is real water, displaced in the same sea the ship
+  rides, so a wave lifts the hull and the funnel tips it bow-down. A berth is
+  immune to all of it, and the scope marks both in magenta while there is still
+  time to steer around them. The rolls are seeded, so the same world throws up
+  the same weather.
 - **Raiders.** You are not alone out here. Every ten seconds the sea rolls for
   a boat, and the two colours are an order of magnitude apart: **24% for an
   orange one and 3.2% for a red**. An orange boat is weather — it is out there
@@ -274,17 +282,21 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   tap of the throttle in that window and it lands on water you have left.
   Their helm is not flawless either; one decision in four is a coin flip
   rather than a solved course, so watch it long enough and it visibly picks
-  the wrong way. And the sea is not still under either of you. **Up to three
-  crests run at once**, from three directions and at their own speeds — three
-  knots to ten — and each one is only as long as it happens to be rolled: a
-  fifth of the ring at the shortest, the whole width at the longest. A short
-  one you can be on the far side of, and a full-width one cannot be dodged at
-  all, so the sea is something to read rather than a beat to count. Whatever
-  passes over you shoves the hull a few units off its line before it settles
-  back — a real wall of water, the same wave the open ocean raises, with a
-  steep front, a lip that breaks into froth and streaks running down the face,
-  standing on a sea built from the same three ridged layers you sail on outside
-  the fight. **Three to six rafts of flotsam drift through**, no two the same
+  the wrong way. And the sea is not still under either of you — because it is
+  the same sea. **The fight happens where you were rammed**, on the world's own
+  water, under the world's own sky, with the clock still running. There is no
+  cut to somewhere else and no arena sea pretending to be this one. The waves
+  that roll through the ring are the ocean's own, rolling on from wherever the
+  wind raised them, and one that crosses your hull shoves you off your line
+  exactly as it would outside — so a front you can see coming is a front worth
+  steering for. A maelstrom is the one thing barred from opening inside the
+  ring: a duel should be decided by the duel, not by the hull being swallowed
+  mid-broadside.
+  The ring itself is not drawn. It is still there — both boats are held to it
+  and it still closes — but it is a constraint you feel rather than a circle
+  painted on the sea. If the sea where you were caught is too tight for a
+  fight, the ring slides to the nearest open water rather than laying a
+  duelling circle across a headland. **Three to six rafts of flotsam drift through**, no two the same
   size or the same speed, and they are the only obstacle now: one will swallow
   a ball that crosses it, and fouls whatever hull runs into it — half speed and
   a dead gun for a couple of seconds. As one is sunk or carried out the far
