@@ -56,7 +56,8 @@ These were settled with the owner on 2026-09-09 and are not open:
     above**. It never stacks past 2x.
 14. The speed caps ignore every upgrade (Trim, Overdrive). The wind still adds.
 15. Below 25% the fishing START and AGAIN buttons are dead.
-16. Repair is free at a berth at the same 2%/s shore power runs at. A paid fix
+16. Repair is free at a berth at the same rate shore power runs at (2%/s when
+    this was written; 5%/s since). A paid fix
     is sold in every shop: 100 gold per 10%, in 10% steps or all at once,
     rounded up to the next 10%.
 17. Durability is saved and survives a world change.
@@ -379,7 +380,7 @@ The sim. A float `value` in [1, 100].
 
 ```
 update(dt, docked, weathered):
-  if docked:            value += HULL_REPAIR_RATE * dt      // 2.0 %/s, same as DOCK_RATE's net
+  if docked:            value += HULL_REPAIR_RATE * dt      // same as DOCK_RATE's net
   else:                 value -= HULL_WEAR * dt * (weathered ? 2 : 1)   // 0.25 %/min or 0.50
   clamp [1, 100]
 damage(points): value = max(1, value - points)
@@ -416,7 +417,8 @@ engine integrates, untouched. The `accel` line below it already handles a
 non-default top speed. Reverse is capped by the same number because it reads
 `effMaxForward` too.
 
-`energy.ts` exports `DOCK_NET_RATE = 0.02` so `hull.ts` can name the same
+`energy.ts` exports `DOCK_NET_RATE` (0.02 when this was written, 0.05 since)
+so `hull.ts` can name the same
 figure rather than copy it.
 
 ### The battle
@@ -620,7 +622,7 @@ possible; rolling lazily per visit could not promise Trim exists anywhere.
   16's rounding). Both buttons disabled at 100 with title `Hull is sound`,
   and disabled when the purse is short with the usual `Needs N gold`.
 - Buying repair while moored is allowed and simply stacks with the free
-  2%/s; the shop does not need to know.
+  the same rate shore power runs at; the shop does not need to know.
 
 ### `chart.ts`
 
@@ -730,7 +732,7 @@ the sim and the cover.
 | `HULL_WEAR` | 0.25 / 60 %/s | `hull.ts` | rate |
 | `HULL_WEATHER_GAIN` | 2 | `hull.ts` | factor |
 | `HULL_WEATHER_THRESHOLD` | 0.5 | `main.ts` | envelope |
-| `HULL_REPAIR_RATE` | 2.0 %/s (= `DOCK_NET_RATE * 100`) | `hull.ts` | rate |
+| `HULL_REPAIR_RATE` | `DOCK_NET_RATE * 100` (2.0 %/s when written, 5.0 since) | `hull.ts` | rate |
 | `HULL_MIN` | 1 | `hull.ts` | percent |
 | `HULL_CAP_WORN` / `FAILING` / `CRITICAL` | 10 / 5 / 1 | `hull.ts` | ship-scale, units/s |
 | `HULL_WORN_BELOW` / `HULL_FAILING_BELOW` | 50 / 25 | `hull.ts` | percent |

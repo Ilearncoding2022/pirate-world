@@ -160,20 +160,30 @@ const SOLAR_FULL_SECONDS = 200;
 /**
  * Seconds from empty to full alongside a berth.
  *
- * 50 s, so shore power nets exactly **2% of the tank per second**. NET, like
+ * 20 s, so shore power nets exactly **5% of the tank per second**. NET, like
  * SOLAR_FULL_SECONDS and for the same reason: DOCK_RATE below adds the hotel
  * load back, so this is the number the HUD prints rather than a gross yield
  * the player never sees.
  *
- * A berth remains far and away the fastest charge in the world, four times the
- * best the sun ever manages, but it is a stop measured in tens of seconds
- * rather than a tap of the brakes, so when to break a passage is a real
- * choice.
+ * It was 50 s and 2%/s (the owner's call, 2026-09-10). What that traded away
+ * is the argument the old number carried: that a berth is "a stop measured in
+ * tens of seconds rather than a tap of the brakes, so when to break a passage
+ * is a real choice". Twenty seconds is still a stop and still ten times the
+ * best the sun ever manages, but the decision it asks for is a smaller one,
+ * and topping up in passing is now cheap enough to be the default.
+ *
+ * **This is two rates, not one.** `hull.ts` derives `HULL_REPAIR_RATE` from
+ * `DOCK_NET_RATE` below precisely so the tank and the hull can never claim
+ * different speeds, so moving this moves repair with it: a harbour now undoes
+ * eight hours of sailing in twenty seconds rather than fifty. That is the
+ * design working as written rather than a side effect to be trimmed -- but it
+ * is a real change to the durability economy and it is recorded here so the
+ * next reader does not have to discover it from `hull.ts`.
  */
-const DOCK_FULL_SECONDS = 50;
+const DOCK_FULL_SECONDS = 20;
 
 /**
- * Shore power's NET climb, tank fractions per second. Exactly 0.02.
+ * Shore power's NET climb, tank fractions per second. Exactly 0.05.
  *
  * The one figure outside this module that anything is allowed to know about a
  * berth, and it exists for exactly one consumer: `hull.ts` repairs at the
@@ -181,10 +191,10 @@ const DOCK_FULL_SECONDS = 50;
  * two. `HULL_REPAIR_RATE` is this times 100.
  *
  * NET, and this is the trap it exists to avoid. `DOCK_RATE` below is the
- * GROSS yield, 1/50 + IDLE_DRAIN = 0.020397, because the hotel load is still
+ * GROSS yield, 1/20 + IDLE_DRAIN = 0.050397, because the hotel load is still
  * being paid alongside; the tank climbs by 1/DOCK_FULL_SECONDS. A consumer
- * that reached for `DOCK_RATE` would repair 2% faster than it claimed, and it
- * would be off by the one quantity nobody looking at a repair rate would
+ * that reached for `DOCK_RATE` would repair 0.8% faster than it claimed, and
+ * it would be off by the one quantity nobody looking at a repair rate would
  * think to check.
  *
  * Derived from DOCK_FULL_SECONDS rather than typed as 0.02 so that retuning
@@ -256,8 +266,8 @@ const SOLAR_PEAK = 1 / SOLAR_FULL_SECONDS + IDLE_DRAIN;
  * IDLE_DRAIN is added back for the same reason SOLAR_PEAK adds it: the hotel
  * load is drawn alongside the berth as it is everywhere else, so a gross
  * 1/DOCK_FULL_SECONDS would net slightly under the figure that constant
- * claims. 1/50 + 0.000397 = 0.020397 gross, which nets exactly 0.0200 -- the
- * 2%/s the HUD reads alongside.
+ * claims. 1/20 + 0.000397 = 0.050397 gross, which nets exactly 0.0500 -- the
+ * 5%/s the HUD reads alongside.
  */
 const DOCK_RATE = 1 / DOCK_FULL_SECONDS + IDLE_DRAIN;
 

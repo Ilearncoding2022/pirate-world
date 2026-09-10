@@ -123,15 +123,21 @@ export const HULL_WEATHER_GAIN = 2;
  *
  * DERIVED from `energy.ts`'s net shore-power rate rather than typed, because
  * the claim being made is that the hull and the tank fill at the same speed:
- * fifty seconds alongside, from empty to full, for both. Two numbers would
+ * twenty seconds alongside, from empty to full, for both. Two numbers would
  * let that claim quietly stop being true the first time either was retuned,
  * and the README states it as one figure.
  *
+ * That derivation is why this moved when nobody edited this file. Shore power
+ * went from 2%/s to 5%/s (`energy.ts`, DOCK_FULL_SECONDS) and repair went
+ * with it, which is the arrangement working rather than failing -- the whole
+ * point of reading the number instead of copying it.
+ *
  * `DOCK_NET_RATE` is in tank fractions per second and this is in percent per
- * second, hence the 100. Free, at any berth, and 480 times the ordinary wear:
- * a harbour undoes eight hours of sailing in fifty seconds, which is what
- * makes the paid fix in the chandlery a convenience for mid-ocean rather than
- * the normal way to keep a hull.
+ * second, hence the 100. Free, at any berth, and 1200 times the ordinary
+ * wear: a harbour undoes eight hours of sailing in twenty seconds. That still
+ * leaves the paid fix in the chandlery a convenience for mid-ocean rather
+ * than the normal way to keep a hull, but the gap has narrowed -- a berth was
+ * already the answer to a worn hull and is now a quicker one.
  */
 export const HULL_REPAIR_RATE = DOCK_NET_RATE * 100;
 

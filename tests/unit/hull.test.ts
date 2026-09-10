@@ -105,7 +105,7 @@ describe('hull: the rates', () => {
     // gross DOCK_RATE were ever picked up here instead of the net one, this
     // would be 2% adrift.
     expect(HULL_REPAIR_RATE).toBeCloseTo(DOCK_NET_RATE * 100, 12);
-    expect(HULL_REPAIR_RATE).toBeCloseTo(2, 12);
+    expect(HULL_REPAIR_RATE).toBeCloseTo(5, 12);
 
     const hull = createHull(HULL_MIN);
     // 1 + 25.1 * 2 = 51.2. The half-second is there on purpose: the target is

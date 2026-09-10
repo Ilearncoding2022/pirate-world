@@ -344,9 +344,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   Being made fast is what connects shore power, opens `[SHOP]`, mends the hull
   and shelters the ship, and it holds the hull dead still: no helm, no
   throttle, and nothing the wind or the sea can do about it. Shore
-  power runs at two percent of the reserve a second, so fifty seconds alongside
-  fills the tank from empty — four times the best the sun ever manages, and it
-  mends the hull at the same rate for nothing. Berths
+  power runs at five percent of the reserve a second, so twenty seconds
+  alongside fills the tank from empty — ten times the best the sun ever
+  manages, and it mends the hull at the same rate for nothing. Berths
   are plotted on the radar, so the scope is also the fuel map.
 - **A new sea every time you open it.** The world is drawn from a fresh seed
   on every load: new coastlines, new islands, thirty-six harbours in new

@@ -941,11 +941,13 @@ doubles the wear and it never stacks: three multiplying envelopes would put a
 ship at 8x in the one condition it already cannot see out of.
 
 Repair is derived, not typed. `HULL_REPAIR_RATE` is `DOCK_NET_RATE * 100`,
-because the claim is that the hull and the tank fill at the same speed — fifty
-seconds alongside for both — and two independent numbers would let that stop
-being true the first time either was retuned. Note that `energy.ts`'s
-`DOCK_RATE` is GROSS (it carries the hotel load); `DOCK_NET_RATE` is the 2%/s
-the README actually claims.
+because the claim is that the hull and the tank fill at the same speed —
+twenty seconds alongside for both — and two independent numbers would let that
+stop being true the first time either was retuned. That derivation is why
+raising shore power from 2%/s to 5%/s moved the repair rate with it, without
+`hull.ts` being edited. Note that `energy.ts`'s `DOCK_RATE` is GROSS (it
+carries the hotel load); `DOCK_NET_RATE` is the 5%/s the README actually
+claims.
 
 ### What running it caught that neither test tier did
 
