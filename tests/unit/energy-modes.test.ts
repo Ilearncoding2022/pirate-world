@@ -147,7 +147,18 @@ describe('energy.ts — the mode ladder', () => {
     expect(energy.state.mode).toBe('mooring');
     expect(energy.state.dock).toBeNull();
 
+    // Dwell served. The ring's verdict is in -- `berthReady` -- but the mode
+    // is still `mooring`, because since 2026-09-09 eligibility is not arrival:
+    // the helm has to make the ship fast before `docked` is true of it.
     run(energy, 1.5, ship(), DAY);
+    expect(energy.state.berthReady).toBe(true);
+    expect(energy.state.mode).toBe('mooring');
+
+    // The key press. `toggleMooring` is the one door into `docked`, and the
+    // mode is written by `update`, so the rung appears on the next frame
+    // rather than on the press itself.
+    expect(energy.toggleMooring()).toBe(true);
+    run(energy, 0.1, ship(), DAY);
     expect(energy.state.mode).toBe('docked');
     expect(energy.state.dock).not.toBeNull();
   });
@@ -172,6 +183,8 @@ describe('energy.ts — the mode ladder', () => {
     // word, derived from `level`, and it is deliberately not a mode.
     const energy = createEnergy(berthedTowns(), createBattery(0));
     run(energy, 3, ship(), DAY);
+    expect(energy.toggleMooring()).toBe(true);
+    run(energy, 0.1, ship(), DAY);
     expect(energy.state.level).toBe(1);
     expect(energy.state.mode).toBe('docked');
   });

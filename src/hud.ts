@@ -579,7 +579,7 @@ function formatRate(rate: number): string {
  * to confirm that Rustwharf is what they found.
  *
  * The tail of the phrase is taken from `PWR_TAG` rather than written again
- * here, so CHARGING and CONNECTING stay one string each. Splitting on the
+ * here, so CHARGING and MAKE FAST stay one string each. Splitting on the
  * separator is what makes that possible without a second table keyed to the
  * same two modes — a table that could only ever drift out of step with the one
  * above it.

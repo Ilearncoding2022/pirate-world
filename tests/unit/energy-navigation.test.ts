@@ -160,11 +160,25 @@ describe('energy.ts — the weather on the panels', () => {
     expect(low).toBeLessThan(0.9);
 
     // Then alongside, at night, in the worst weather there is.
+    //
+    // The dwell is served first and the made-fast key pressed after it, in
+    // that order, because `toggleMooring` refuses until `berthReady` says the
+    // ring is satisfied. Those seconds are still hotel load -- lying in a
+    // berth is not being plugged into it -- so the reading the charge is
+    // measured against is taken at the press and not at sea. `low` is kept as
+    // the weaker claim it always was: the berth does not merely slow the
+    // drain in a storm at night, it climbs back past where the sea left off.
     alongside = true;
+    for (let i = 0; i < 30; i++) {
+      stormy.update(0.1, stoppedShip(), envWithSun(-1, 0), false, 0, weatherWith(1, 1));
+    }
+    expect(stormy.toggleMooring()).toBe(true);
+    const madeFast = stormy.state.level;
     for (let i = 0; i < 200; i++) {
       stormy.update(0.1, stoppedShip(), envWithSun(-1, 0), false, 0, weatherWith(1, 1));
     }
     expect(stormy.state.mode).toBe('docked');
+    expect(stormy.state.level).toBeGreaterThan(madeFast);
     expect(stormy.state.level).toBeGreaterThan(low);
   });
 });

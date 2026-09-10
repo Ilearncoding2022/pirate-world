@@ -177,7 +177,7 @@ describe('formatHullRate — minutes for wear, seconds for a repair', () => {
 describe('powerTagText — the berth name in the power tag', () => {
   it('puts the harbour where the word BERTH was', () => {
     expect(powerTagText('docked', 'Rustwharf')).toBe('RUSTWHARF - CHARGING');
-    expect(powerTagText('mooring', 'Rustwharf')).toBe('RUSTWHARF - CONNECTING');
+    expect(powerTagText('mooring', 'Rustwharf')).toBe('RUSTWHARF - MAKE FAST');
   });
 
   it('upper-cases whatever the name table holds, apostrophes included', () => {
@@ -189,7 +189,7 @@ describe('powerTagText — the berth name in the power tag', () => {
      in it, not an empty phrase. */
   it('falls back to the shipped phrase with no name to hand', () => {
     expect(powerTagText('docked', null)).toBe('BERTH - CHARGING');
-    expect(powerTagText('mooring', null)).toBe('BERTH - CONNECTING');
+    expect(powerTagText('mooring', null)).toBe('BERTH - MAKE FAST');
   });
 
   it('leaves every tag that is not about a place alone', () => {
@@ -203,11 +203,15 @@ describe('powerTagText — the berth name in the power tag', () => {
    * tag can ever say is worth pinning: it is what `#hud-pwr-mode`'s ellipsis
    * clamp in style.css exists for, and if the name table grows a longer entry
    * this is where that shows up.
+   *
+   * MAKE FAST rather than CHARGING because it is the longer tail of the two by
+   * one character -- ` - MAKE FAST` to ` - CHARGING` -- so the mooring rung is
+   * still the one that sets the budget, as it was when it read CONNECTING.
    */
-  it('reaches its widest at the longest name plus CONNECTING', () => {
+  it('reaches its widest at the longest name plus MAKE FAST', () => {
     const longest = HARBOUR_NAMES.reduce((a, b) => (b.length > a.length ? b : a));
     expect(longest.length).toBe(HARBOUR_NAME_MAX_LENGTH);
-    expect(powerTagText('mooring', longest).length).toBe(HARBOUR_NAME_MAX_LENGTH + 13);
+    expect(powerTagText('mooring', longest).length).toBe(HARBOUR_NAME_MAX_LENGTH + 12);
   });
 });
 
