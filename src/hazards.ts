@@ -229,7 +229,7 @@ const CAPACITY: Record<HazardKind, number> = {
  * are why this is not simply `speed * lead`. SPAWN_DIST_MIN is beyond the
  * hull's own stopping distance and outside the chase camera's usual framing,
  * so a 2-knot wave never simply appears on top of the player; SPAWN_DIST_MAX
- * is FADE_NEAR exactly, so even a 12-knot wave born at the far end of its
+ * is FADE_NEAR exactly, so even the fastest wave born at the far end of its
  * lead is born at FULL strength rather than materialising out of the distance
  * fade. At the 6 units/s every other number here is anchored on, the pair
  * reproduces the old 18-to-30 band precisely.
@@ -288,11 +288,22 @@ const SPAWN_TRIES = 24;
  *
  * Every wave used to travel at a flat 6, and the argument for that number was
  * that it is slower than the hull's 10 so a wave can always be outrun
- * downwind. Rolled between 2 and 12 that guarantee is deliberately given up
- * at the top of the range: a 12-knot wave is faster than the ship can run and
- * has to be steered out of the way of rather than fled from, which is the
- * point of a sea that is no longer one speed. Two thirds of the range is
- * still slower than the hull.
+ * downwind. Rolled between 2 and CREST_SPEED_MAX that guarantee is
+ * deliberately given up at the top of the range: the fastest wave is faster
+ * than the ship can run and has to be steered out of the way of rather than
+ * fled from, which is the point of a sea that is no longer one speed. Three
+ * quarters of the range is still slower than the hull.
+ *
+ * The ceiling is 10% off the 12 this shipped with, on the owner's call that
+ * the fastest waves were too fast. 10.8 keeps the design point that mattered
+ * -- it is still over the hull's MAX_FORWARD of 10, so the top of the sea
+ * cannot simply be outrun -- while taking the margin from two knots to under
+ * one, which is the difference between a wave that overhauls a fleeing ship
+ * and one that gains on it slowly enough to be worth trying. Nothing else
+ * needs retuning behind it: the push is derived from the speed rather than
+ * rolled beside it (see PUSH_PEAK), so the hardest shove in the game comes
+ * down from 10 to 9 by arithmetic, and the spawn distance is a lead TIME, so
+ * a slower ceiling simply raises less water at the far end of the band.
  *
  * CREST_SPEED_REF is not a speed anything travels at. It is the anchor every
  * other constant in this file was tuned against, and it is used in exactly
@@ -300,7 +311,7 @@ const SPAWN_TRIES = 24;
  * wave rolling 6 behaves precisely as every wave did before this change.
  */
 const CREST_SPEED_MIN = 2;
-const CREST_SPEED_MAX = 12;
+const CREST_SPEED_MAX = 10.8;
 const CREST_SPEED_REF = 6;
 
 /**
@@ -320,10 +331,16 @@ const CREST_SPEED_REF = 6;
  *
  * The two life clamps only bite at the ends of the speed range. At the
  * 6 units/s this was tuned at they are nowhere near: 34 to 57 units is 5.7 to
- * 9.5 seconds, the band this file always had. At 12 knots the fastest wave is
- * over in under three seconds; at 2 the slowest would run for 28 and is held
+ * 9.5 seconds, the band this file always had. At CREST_SPEED_MAX the fastest
+ * wave is over in about three; at 2 the slowest would run for 28 and is held
  * at 20, which still carries it 40 units -- past its own spawn distance and
  * out through the fade.
+ *
+ * Only the upper clamp still bites. CREST_LIFE_MIN was sized against a
+ * 12-knot ceiling, which crossed CREST_TRAVEL_MIN in 2.8 seconds; at 10.8
+ * the shortest life the distance can produce is 3.15, so the floor is now
+ * slack. It is kept rather than retuned -- it is a floor, and a floor that
+ * never fires is the correct state for one.
  */
 const CREST_TRAVEL_MIN = 34;
 const CREST_TRAVEL_MAX = 57;
@@ -362,12 +379,19 @@ const HEIGHT_GROWTH = 0.05;
  * profile from is half of whatever is drawn here.
  *
  * `hazardfield.ts` used to hand every wave the same 5-unit width, and a sea
- * of identical waves is a sea a player reads once. One unit is a wave a hull
- * is through before it has finished heeling -- a slap rather than a wall --
- * and twelve is four hull lengths of water to cross, which at CREST_SPEED_REF is
- * two full seconds under it. Both ends are deliberately past what reads as
- * "a wave": the point is the spread, and the ordinary middle of the range is
- * still about the five units this always was.
+ * of identical waves is a sea a player reads once. Twelve is four hull
+ * lengths of water to cross, which at CREST_SPEED_REF is two full seconds
+ * under it. The top end is deliberately past what reads as "a wave": the
+ * point is the spread, and the ordinary middle of the range is still about
+ * the five units this always was.
+ *
+ * The floor is doubled from the 1 this shipped with, on the owner's reading
+ * that the narrowest waves were too narrow. One unit was the width of a third
+ * of the hull -- the ship was through it before it had finished heeling, so
+ * it landed as a slap rather than as a wall, and the shove it delivered was
+ * over before the player could connect it to the water that caused it. Two
+ * units is still the quick end of the sea and is long enough to be read as
+ * the thing that did it.
  *
  * What the width does NOT change is how hard the wave hits. The push is
  * derived from the wave's SPEED and the height is rolled on its own, so a
@@ -376,7 +400,7 @@ const HEIGHT_GROWTH = 0.05;
  * 12-unit wave is genuinely harder to be missed by, which is the honest
  * consequence of it being wider water.
  */
-export const CREST_WIDTH_MIN = 1;
+export const CREST_WIDTH_MIN = 2;
 export const CREST_WIDTH_MAX = 12;
 
 /**
@@ -387,6 +411,14 @@ export const CREST_WIDTH_MAX = 12;
  * short one tends to be a straight stub, which is what a wave spreading out
  * from wherever it was raised actually looks like: the further round the
  * front you can see, the more of its curvature is in front of you.
+ *
+ * `rollBow` normalises the length over CREST_HALF_LENGTH_MIN..MAX, so
+ * doubling that floor moved this without touching either number here: the
+ * shortest wave in the sea is now the middle of the old range, and it draws
+ * the bow the middle of the range used to. That is the right answer rather
+ * than an accident to correct -- the stubs the straight end existed for are
+ * the very waves that were removed, and what is left is short FRONTS, which
+ * bend.
  *
  * It is a tendency and not a formula, which is the whole reason there are two
  * numbers here instead of one division. The bow is a genuine draw off `rng`,
@@ -464,8 +496,8 @@ const CREST_MIN_EXTENT = 0.75;
  *
  * The anchor is chosen so nothing gets stronger than the game already
  * shipped. At the 6 units/s every wave used to travel at the peak is exactly
- * the 5 it always was; at the 12 of the fastest roll it is 10, which is
- * precisely what the great wave was worth. What is new is everything in
+ * the 5 it always was; at the 10.8 of the fastest roll it is 9, just under
+ * the 10 the great wave was worth. What is new is everything in
  * between, and the bottom of the range: a 2-knot wave peaks at 1.7 and
  * carries the hull about three units, which is a wave felt rather than a wave
  * survived.

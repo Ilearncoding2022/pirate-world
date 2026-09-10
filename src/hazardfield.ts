@@ -72,9 +72,18 @@ export const CREST_HALF_WIDTH = 2.5;
  * `CREST_HALF_LENGTH` above is no longer the length of every wave; it is the
  * middle of this range and the reference every other size here is still
  * argued against. A wave now draws its own half-length uniformly between
- * these two -- 6 to 24 world units of front, against a 3.1-unit hull -- for
+ * these two -- 12 to 24 world units of front, against a 3.1-unit hull -- for
  * the same reason it already drew its own width: a sea in which every wave is
  * the same twenty units long is a sea a player reads once.
+ *
+ * The MIN is doubled from the 3 this shipped with, on the owner's reading
+ * that the shortest waves were too narrow to be waves. It was 6 world units
+ * of front against a hull half that long: a wave the ship could simply pass
+ * by the end of, and one that read as a lump in the water rather than as a
+ * front worth altering course for. 12 units is four hull lengths, which is
+ * the least that still asks a question of the helm. The MAX is deliberately
+ * untouched, so this narrows the rolled range rather than sliding it: the sea
+ * loses its stubs and keeps everything it had above them.
  *
  * The CAP is what stops item 3's growth running away. A crest gains 10% of
  * its length a second and the longest-lived one on the slowest roll is on the
@@ -84,7 +93,7 @@ export const CREST_HALF_WIDTH = 2.5;
  * units has ends hanging in undisplaced water. 20 of half-length is that 40,
  * and it is twice the wave this file shipped with.
  */
-export const CREST_HALF_LENGTH_MIN = 3;
+export const CREST_HALF_LENGTH_MIN = 6;
 export const CREST_HALF_LENGTH_MAX = 12;
 export const CREST_HALF_LENGTH_CAP = 20;
 
