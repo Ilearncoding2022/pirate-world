@@ -286,6 +286,19 @@ export function createWater(
     uSpecPower: { value: 300 },
     uSpecStrength: { value: 1.1 },
     uFoamWidth: { value: 0.024 },
+    // The displacement patch's footprint, OWNED here so the two materials
+    // share one object apiece by reference -- the same argument the offsets
+    // and `uWaveIntensity` are shared on, and the reason this lives in the
+    // sphere's uniform set rather than in `waterpatch.ts`'s: the sphere is
+    // the side that has to READ them, to cut its shell away under the patch
+    // (see `waterSurface`). `waterpatch.ts` writes all four every frame.
+    //
+    // `uPatchCull` at 0 means "no patch": the sphere draws its whole shell,
+    // which is what a build with the patch disabled has to keep doing.
+    uPatchCentre: { value: new THREE.Vector3(0, 0, GLOBE_RADIUS) },
+    uPatchEast: { value: new THREE.Vector3(1, 0, 0) },
+    uPatchNorth: { value: new THREE.Vector3(0, 1, 0) },
+    uPatchCull: { value: 0 },
     // Aerial perspective (`fogglsl.ts`'s contract): one shared object so the
     // water and the land (once Stream C lands) always agree on the fog.
     ...fogUniforms,

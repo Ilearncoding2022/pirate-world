@@ -62,6 +62,16 @@ export const WATER_UNIFORMS: string[] = [
   'uniform float uSpecPower;',
   'uniform float uSpecStrength;',
   'uniform float uFoamWidth;',
+  // The ship-following patch's footprint, written by `waterpatch.ts` into the
+  // uniforms it SHARES with the sphere. The sphere reads them to cut its own
+  // shell away underneath the patch -- see `waterSurface` -- and the patch,
+  // which compiles this same string with WATER_DISPLACED defined, never reads
+  // them at all. `uPatchCull` is 0 until a patch exists, which is what makes
+  // the cut opt-in rather than a hole in a sea nothing is covering.
+  'uniform vec3 uPatchCentre;',
+  'uniform vec3 uPatchEast;',
+  'uniform vec3 uPatchNorth;',
+  'uniform float uPatchCull;',
   'varying vec3 vDir;',
   'varying vec3 vWorldPos;',
 ];
@@ -165,6 +175,30 @@ export function waterWavefield(freqSwell: string, freqWave: string, freqChop: st
 export function waterSurface(): string[] {
   return [
     'void main() {',
+    // ---- the patch cut ---------------------------------------------------
+    // The sphere does not draw where the displacement patch is going to.
+    //
+    // Both meshes are the same shell and the patch is only nudged toward the
+    // camera by a depth bias (`waterpatch.ts`'s polygon offset), so anything
+    // the patch pushes DOWN -- a maelstrom's funnel, and nothing else in the
+    // game -- ends up behind the sphere's own flat water and is depth-killed
+    // by it. A crest is unaffected because it goes up, which is exactly why
+    // this was invisible until someone looked at a funnel: the sea was
+    // drawing a 6-unit hole and then filling it in again.
+    //
+    // Guarded by the define rather than by a second shader, because the patch
+    // compiles this identical string with WATER_DISPLACED set and must never
+    // cut itself away. `uPatchCull` is the half-size of the square footprint
+    // and sits inside the patch's own half-extent by a margin (see
+    // `waterpatch.ts`), so the two still overlap along the seam and there is
+    // no line of sphere left showing between them.
+    '#ifndef WATER_DISPLACED',
+    '  if (uPatchCull > 0.0) {',
+    '    vec3 patchRel = vWorldPos - uPatchCentre;',
+    '    if (abs(dot(patchRel, uPatchEast)) < uPatchCull &&',
+    '        abs(dot(patchRel, uPatchNorth)) < uPatchCull) discard;',
+    '  }',
+    '#endif',
     '  vec3 n = normalize(vDir);',
     '  vec3 toCam = cameraPosition - vWorldPos;',
     '  float camDist = length(toCam);',

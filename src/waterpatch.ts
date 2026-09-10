@@ -54,6 +54,37 @@ const SKIRT_START = 0.85;
 const PATCH_POLYGON_OFFSET_FACTOR = -1;
 const PATCH_POLYGON_OFFSET_UNITS = -4;
 
+/**
+ * Half-size of the square footprint the SPHERE stops drawing inside, world
+ * units, so the patch alone owns those pixels. Read by `waterSurface()` in
+ * `waterglsl.ts` through `uPatchCull`.
+ *
+ * The polygon offset above is why this has to exist at all. It is a depth
+ * BIAS -- a few units in the depth buffer -- and it is enough to stop the
+ * skirt z-fighting the shell it fades into, which is all it was ever asked
+ * to do. It is nothing at all against a maelstrom, which pushes this patch
+ * SIX WORLD UNITS below that shell: every pixel of the funnel's inside is
+ * then behind the sphere's own flat water along the view ray, and the depth
+ * test throws it away. The funnel drew its foam ring and its spiral onto a
+ * surface that was never allowed to descend, which is exactly how a 20-unit
+ * hole reads as a decal on flat sea from the deck.
+ *
+ * A crest never showed the fault because a crest goes UP, where nothing is
+ * in front of it. That is why doubling FUNNEL_DEPTH from 3.0 to 6.0 bought
+ * nothing on screen: both depths were behind the same shell.
+ *
+ * Inset from the patch's own half-extent rather than equal to it, and the
+ * margin is not decoration. The patch's vertices are projected onto the
+ * sphere (`normalize(tangentPos)`), so its true footprint measured the way
+ * the cut measures it -- a dot product against the tangent axes -- comes up
+ * about 0.05 units SHORT of 40 at the mid-edge and further short at the
+ * corners. Cutting at exactly 40 would leave a thread of unpainted space
+ * between the two. 1.5 units is far past that curvature error and still well
+ * outside SKIRT_START, so everything cut away is covered by patch that is
+ * either undisplaced or within a rounding error of it.
+ */
+const PATCH_CULL_HALF = PATCH_EXTENT * 0.5 - 1.5;
+
 const _raw = new THREE.Vector3();
 const _delta = new THREE.Vector3();
 const _north = new THREE.Vector3();
@@ -111,13 +142,23 @@ export function createWaterPatch(water: Water, quality: Quality): WaterPatch {
   const segments = Math.max(2, quality.patchSegments);
   const geometry = new THREE.PlaneGeometry(PATCH_EXTENT, PATCH_EXTENT, segments - 1, segments - 1);
 
+  // `uPatchCentre`, `uPatchEast` and `uPatchNorth` are deliberately NOT
+  // re-declared here. They belong to the sphere's uniform set (`water.ts`)
+  // and arrive through the spread, so writing them below writes the objects
+  // the sphere is reading -- which is the whole mechanism by which the sphere
+  // knows where to cut its shell away. Shadowing them with fresh objects here
+  // would leave the sphere reading a patch that never moves off the origin,
+  // and the symptom would be a hole in the sea a thousand units away.
+  //
+  // `uPatchUp` is the exception and is the patch's alone: only the vertex
+  // shader below reads it, and the sphere has no use for it.
   const uniforms: Record<string, THREE.IUniform> = {
     ...sphereMaterial.uniforms,
-    uPatchCentre: { value: new THREE.Vector3(0, 0, GLOBE_RADIUS) },
-    uPatchEast: { value: new THREE.Vector3(1, 0, 0) },
-    uPatchNorth: { value: new THREE.Vector3(0, 1, 0) },
     uPatchUp: { value: new THREE.Vector3(0, 0, 1) },
   };
+  // The sphere may stop drawing its shell now that this patch exists to cover
+  // it. See PATCH_CULL_HALF.
+  uniforms.uPatchCull.value = PATCH_CULL_HALF;
 
   const vertexShader = [
     'uniform vec3 uOffsetSwell;',
