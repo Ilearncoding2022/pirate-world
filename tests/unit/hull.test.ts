@@ -100,24 +100,25 @@ describe('hull: the rates', () => {
   });
 
   it('repairs at the berth at exactly the rate shore power charges at', () => {
-    // The claim the README makes as one figure: fifty seconds alongside takes
+    // The claim the README makes as one figure: twenty seconds alongside takes
     // the tank and the hull from empty to full together. If `energy.ts`'s
     // gross DOCK_RATE were ever picked up here instead of the net one, this
-    // would be 2% adrift.
+    // would be 0.8% adrift.
     expect(HULL_REPAIR_RATE).toBeCloseTo(DOCK_NET_RATE * 100, 12);
     expect(HULL_REPAIR_RATE).toBeCloseTo(5, 12);
 
     const hull = createHull(HULL_MIN);
-    // 1 + 25.1 * 2 = 51.2. The half-second is there on purpose: the target is
-    // kept off a whole number so a floor cannot be pushed to the percent below
-    // by the last bit of a 1506-step sum.
-    run(hull, 25.1, true, false);
+    // 1 + 10.05 * 5 = 51.25. The part-second is there on purpose: the target
+    // is kept off a whole number so a floor cannot be pushed to the percent
+    // below by the last bit of a 603-step sum. 10.05 is a whole number of
+    // 1/60 steps, so `run` does not round the duration either.
+    run(hull, 10.05, true, false);
     expect(hull.state.percent).toBe(51);
     expect(hull.state.mode).toBe('repairing');
-    expect(hull.state.rate).toBeCloseTo(2, 12);
+    expect(hull.state.rate).toBeCloseTo(5, 12);
 
-    // Fifty seconds from the floor is the whole way, and it stops there.
-    run(hull, 25, true, false);
+    // Twenty seconds from the floor is the whole way, and it stops there.
+    run(hull, 10, true, false);
     expect(hull.state.percent).toBe(100);
     expect(hull.state.mode).toBe('full');
     run(hull, 10, true, false);
@@ -126,11 +127,11 @@ describe('hull: the rates', () => {
 
   it('lets docked beat weathered, whatever the weather is doing', () => {
     const hull = createHull(50);
-    run(hull, 10.1, true, true);
-    // Repairing at 2%/s, not wearing at 0.5%/min: 20 points up, not down.
+    run(hull, 4.05, true, true);
+    // Repairing at 5%/s, not wearing at 0.5%/min: 20 points up, not down.
     expect(hull.state.percent).toBe(70);
     expect(hull.state.mode).toBe('repairing');
-    expect(hull.state.rate).toBeCloseTo(2, 12);
+    expect(hull.state.rate).toBeCloseTo(5, 12);
   });
 
   it('reads the rate off what the value is actually doing, not what it was told', () => {
