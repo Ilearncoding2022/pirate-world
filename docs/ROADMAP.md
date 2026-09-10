@@ -8,7 +8,9 @@ have already been made and which have not.
 
 Every claim below was checked against the code on the day it was written, not
 recalled. Where something is absent, the check that proves it absent is named
-so you can re-run it rather than trust this file.
+so you can re-run it rather than trust this file. The two exceptions are
+**Where this sits in its genre** and **Commercialisation**, which are readings
+of a market rather than of a codebase and say so where they start.
 
 ## Where the project stands
 
@@ -55,6 +57,239 @@ items that were on the improvement list before it:
 
 It did **not** add audio, a goal, a settings menu, CI, or any performance work.
 Those were never in its scope.
+
+## Where this sits in its genre
+
+The two sections above say what is built. This one says what is *distinctive*
+about it, because the answer changes which of the gaps below are worth closing
+first.
+
+**A caution about evidence.** Every other section of this file is checked
+against the code and names the check. This one cannot be. It is a reading of a
+market, made in September 2026 from store pages and genre roundups, and it has
+a shelf life. Treat it as a considered opinion, not as a verified claim.
+
+### The ingredients are common
+
+Every pillar of this game has established competition:
+
+| Pillar | Who already holds it |
+|---|---|
+| Pirate ship, naval combat | Sea of Thieves, Skull and Bones, AC IV: Black Flag, Windrose |
+| Procedural pirate world, upgrade ladders | King of Seas, Sail Forth, Salt, Windward |
+| Fuel-limited harbour hopping, run-to-run legacy | Sunless Sea, the closest structural match to "a new sea every time, but your harbours persist" |
+| Fishing inside a sailing game | Sea of Thieves, Sail Forth, Dredge |
+| Sail and wind simulation | Sailwind, A Painted Ocean |
+| Trade, upgrade, duel | Sid Meier's Pirates!, the ancestor of the whole loop |
+
+Asked "is there a pirate game where you sail, fish, fight broadsides and buy
+upgrades", the answer is yes, dozens.
+
+### The combination is not
+
+Five things here have few or no neighbours. Each is a consequence of a decision
+already made rather than a feature waiting to be built, which is why they are
+worth defending.
+
+1. **A genuinely small sphere.** Most sailing games are a flat plane with a
+   faked horizon. The handful that use a sphere (Ocean Exploration Simulator,
+   A Painted Ocean) use Earth-scale ones, where the sphere is a map-wrapping
+   detail. Here `GLOBE_RADIUS` is 200 (`geo.ts:21`) against a 3-unit hull, and
+   the curvature is a gameplay fact rather than a rendering one: the visible
+   horizon sits 25 degrees below horizontal (`horizon.ts:10`), the terminator
+   is somewhere you can be on either side of, and sailing east genuinely
+   shortens your day. No other game found does this.
+2. **Solar power instead of wind.** Pirate games treat weather as propulsion or
+   as scenery. Here it is a power problem: `STORM_SOLAR_CUT = 0.95` and
+   `FOG_SOLAR_CUT = 0.5` (`energy.ts:385`). That inversion is unusual, and its
+   nearest cousins are survival games rather than pirate ones.
+3. **This fidelity in a browser.** Displaced water the hull actually rides,
+   per-pixel coastal shading, fog as standing slices, camera-scaled rain.
+   WebGL ocean *demos* are everywhere. Finished WebGL ocean *games* are not.
+4. **A duel with no helm.** Throttle-only positioning on a closing ring against
+   an opponent that reads you two seconds late and telegraphs every shot. That
+   is a reading contest wearing naval combat's clothes, and no other pirate
+   game found removes steering from a fight on purpose.
+5. **A world that is thrown away and a set of harbours that is not.** Sunless
+   Sea keeps a legacy across captains. This keeps one across *worlds*: 36 named
+   harbours that survive a coastline which no longer exists.
+
+### The risk this creates
+
+The risk is positioning, not competition. Nothing above is a direct competitor;
+each overlaps on one axis. But the *surface* of this game reads as another
+pirate game, so anyone skimming a feature list files it beside King of Seas and
+moves on. The rare parts are invisible in a screenshot.
+
+Two consequences for the work below:
+
+- Anything that makes the planet or the power economy more legible is worth
+  more than its size suggests, because it is also the pitch.
+- **The name is part of the problem.** "Pirate World" is generic, effectively
+  unregistrable as a trademark, and impossible to search for. Renaming is
+  cheap now and expensive after a store page exists.
+
+## Strengthening what is unique
+
+Six items, ordered by payoff against effort. Each names what it would cost the
+rest of the game, because none of them is free. These interleave with the gap
+lists above rather than replacing them; the combined order is in **Suggested
+order**.
+
+### 1. Fish that depend on where and when you are
+
+Fishing is currently identical at the equator at noon and at the pole at
+midnight. Twenty species across five tiers, and the globe contributes nothing
+to which of them you see. Gate spawns on latitude, on water depth (the height
+field already knows it) and on day or night.
+
+- **Why it is worth it.** Turns the fish book from a slot machine into a reason
+  to sail somewhere specific, which is most of what "no reason to sail
+  somewhere" is asking for. Uses data that already exists. No new rendering.
+  Makes 36 harbours feel geographically distinct without authoring anything.
+- **What it costs.** Grind, if a legendary sits behind water no tank can reach.
+  And it is invisible unless the fishing cover screen says what these waters
+  hold, which is new UI on `fishcover.ts`.
+- **Risk to what already works.** None. Purely additive to `fishsim.ts` and
+  `species.ts`.
+
+### 2. Latitude as a power gradient
+
+The seasonal tilt is zeroed, so the sun permanently circles the equator, so
+**the poles are already a solar desert and the game has never said so**. At high
+latitude `sunElevation` stays near zero, and `charge` with it
+(`energy.ts:552`).
+
+Lean into it. Equator: cheap power, safe sailing. High latitude: a power
+problem where the Moonglass Array and the backup cells stop being optional. The
+two fixed pole harbours, Marine Stronghold and No Man's Land, become
+expeditions rather than trivia.
+
+- **Why it is worth it.** A difficulty gradient that falls out of physics
+  already simulated, at close to zero implementation cost. It couples both
+  unique properties: the shape of the planet decides the energy budget. It also
+  gives the shop ladders a purpose beyond larger numbers.
+- **What it costs.** Nothing, unless it stays undiscoverable. It needs the power
+  panel to name it (`IDLE - LOW SUN` beside the existing ladder) and the day
+  dial to make it readable.
+- **Risk to what already works.** Low. Do not make the poles mandatory, or an
+  expedition becomes a chore.
+
+### 3. Let the player chase the daylight
+
+`daynight.ts:45` states the terminator's ground speed itself,
+`2*PI*GLOBE_RADIUS / DAY_LENGTH`, which at 1200 s is **1.05 world units per
+second**.
+A circumnavigation is about 1257 units and takes about two minutes at 10 knots,
+so the ship makes roughly 10.5 units per second.
+
+**The ship is about ten times faster than the sunset.** It can outrun night.
+Almost no game can say that, and this one can only say it because the planet is
+small.
+
+Nothing rewards it today, because `charge` is gated on `ship.speed === 0`
+(`energy.ts:538`). A small trickle charge under way below some speed threshold,
+tuned so a slow westward cruise near dawn is roughly power-neutral, turns the
+day dial from an ornament into a navigation instrument and invents a real
+strategy: race the terminator west, or stop and let it pass over.
+
+- **Why it is worth it.** The most distinctive mechanic available, and it exists
+  purely because of the two properties above. It is a headline, and it gives
+  "sailing east shortens your day" a consequence rather than leaving it a
+  curiosity.
+- **What it costs.** Tuning care. Too generous and the power economy collapses,
+  because perpetual westward sailing becomes free travel. Cap it hard: trickle
+  only below about half speed, and never more than a fraction of `SOLAR_PEAK`.
+- **Risk to what already works.** Real, and the highest on this list.
+  `energy.ts` is what every other cost in the game is balanced against. Build it
+  behind a URL flag and measure a full session before committing.
+
+### 4. The fight, in the live world
+
+The reason to do this is not realism. It is **continuity**. The distinctive
+thing about this game is a small, continuous, always-running planet, and every
+modal cut to a separate screen throws that away for its duration. The battle is
+the worst offender, because `battlescene.ts` is architecturally forbidden from
+touching the real ocean:
+
+> **This is not the globe water.** It must never import `water.ts` or
+> `waterpatch.ts`
+
+That is a good engineering decision and a bad product decision, and both are
+true at once.
+
+- **Why it is worth it.** Removes the largest continuity break in the game.
+  Weather, time of day and sea state become fight inputs for nothing, so the
+  weather system pays off twice. Eventually deletes most of `battlesea.ts`,
+  `battlewave.ts` and `battlescene.ts` (2 503 lines that exist only to
+  re-create a sea the game already has).
+- **What it costs.** `battle.ts` is a pure sim in flat arena metres, DOM-free
+  and Three-free, and the best-tested part of the codebase; putting it on the
+  sphere entangles it with `geo.ts`. Performance, because globe water plus
+  displacement patch plus reflection cube plus rain plus two hulls plus balls
+  is a much heavier frame than an empty flat sea. Readability, because the
+  reason fog is excluded from a fight (a white-out over a 20-unit ring hides
+  the target) does not go away, it compounds with night and storm.
+- **Risk to what already works.** High if taken in one step. Take it in three:
+
+  1. **Keep the ring, drop the cut.** Render the fight in the world scene at the
+     ship's real position, on the real water, under the real sky, with the clock
+     still running. The ring becomes a visible constraint drawn on the sea
+     rather than a separate place. `battle.ts` keeps its flat arena maths and
+     only needs its `x`/`z` mapped onto the tangent plane at the contact point.
+     Low risk, most of the payoff.
+  2. **Feed the real weather in.** Wind bearing sets crest direction, wind speed
+     sets crest height, storm darkens the water. `WeatherState` and `WindState`
+     are already carried through the frame loop.
+  3. **Replace flotsam with real debris**, and only then consider dropping the
+     ring.
+
+  Set a quality floor for step 1 (fog capped, minimum ambient light) so a fight
+  is never unreadable. That is a design rule, not a compromise.
+
+### 5. Contracts that are spherical by construction
+
+**Player-facing work** item 2 already wants port contracts. The point here is
+that they should not be generic fetch quests. Make each one a question about
+the planet: deliver to a harbour more than 90 degrees of arc away on one tank;
+arrive somewhere while it is still daylight *there*; reach a pole and return;
+chart a given fraction of the globe (`chart.ts` already knows it).
+
+- **Why it is worth it.** Closes the largest design gap using only systems that
+  exist, and does it in a way a flat-ocean game could not copy. Great-circle
+  navigation becomes a skill rather than a rendering detail.
+- **What it costs.** It needs the notification layer (**Player-facing work**
+  item 4) first, or a contract is a silent number change.
+- **Risk to what already works.** Low, with one rule: failure costs gold, never
+  progress. A timed contract must not import a fail state into a game that has
+  deliberately never had one.
+
+### 6. Shareable seeds, and a circumnavigation record
+
+The seed is drawn at random on every load and is unreferenceable afterwards.
+`?seed=` already exists as a dev flag, and the chart is already seed-keyed.
+Promote it: a shareable world, a daily seed, a best circumnavigation time.
+
+- **Why it is worth it.** The browser is a distribution advantage the premium
+  pirate games structurally cannot have, and it is currently spent on nothing.
+  "Here is my planet, beat my time" is a link, and a link is a growth loop. The
+  two-minute circumnavigation is already the pitch; this makes it a scored
+  thing.
+- **What it costs.** Nearly nothing to build. It invites cheating, because it is
+  all client-side. Accept that: this is a sharing feature, not a ladder.
+- **Risk to what already works.** None.
+
+### What not to build
+
+Named here because each is a plausible-sounding idea that would damage the
+distinctiveness above:
+
+- **Multiplayer.** Sea of Thieves owns it, it would consume the whole project,
+  and it is orthogonal to both unique properties.
+- **A trading economy.** The most-copied pirate mechanic there is. It would make
+  this look *more* like the crowded shelf, not less.
+- **A larger world.** The smallness is the product.
+
 
 ## Player-facing work not yet done
 
@@ -272,26 +507,203 @@ nothing tests for it at boot. A machine without WebGL2 throws inside the
 un-awaited `startGame()` promise and **sits on the splash screen forever** with
 no message. There is no `webglcontextlost` handler either.
 
+## Commercialisation
+
+Everything above is about the game. This section is about selling it, and it is
+kept separate because almost nothing in it is an engineering problem.
+
+The engineering half of this project is in better shape than most commercial
+indie work: 405 unit tests, no TODO comments, an authoritative architecture
+document, two runtime dependencies. That is not what blocks a release. What
+blocks it is the surrounding layer, which has had no attention at all.
+
+### The open question, before anything else
+
+**The provenance of the art is unknown and unrecorded**, and it is the highest
+commercial risk in the repository. The files are
+`assets/Illustrations/*.webp` (four cover illustrations) and
+`assets/pirateship_beginner.png`, the concept art `tools/build_ship.py` derives
+the hull from. Nothing in the repository records where any of them came from;
+verified by searching for a licence, credits or attribution file at the root
+and in `assets/`, and there is none.
+
+The answer decides whether the rest of this section is worth reading:
+
+- **Authored in-house, or commissioned with a rights assignment.** Fine. Record
+  it in `assets/CREDITS.md` so it stays recorded.
+- **AI-generated.** Sellable in most jurisdictions, but Steam requires the store
+  page to disclose AI-generated content, and the output cannot be claimed as
+  copyright in the US. Workable, needs disclosure.
+- **Stock library.** Check the licence permits redistribution inside a
+  commercial product. Many stock licences do not permit it for art that is
+  *primary* to a paid product, which cover illustrations are.
+- **Found online.** Stop and replace before doing anything else in this section.
+
+Until this is answered, treat every plan below as conditional.
+
+### Hard blockers
+
+These are not preferences. Each will individually sink a paid release.
+
+| Blocker | Verified state | Why it is fatal |
+|---|---|---|
+| **No licence, no third-party notices** | No `LICENSE`, `COPYING` or `NOTICE` at the root; `ls` proves it | `three` and `simplex-noise` are MIT, and MIT *requires* shipping the copyright notice. The build currently does not. Trivial to fix, real exposure until it is. |
+| **No audio** | **Player-facing work** item 1 | A paid game with no sound reads as an unfinished tech demo. Every review will lead with it. |
+| **No goal** | **Player-facing work** item 2 | A sandbox with no objective, no win state and no failure state cannot be charged for. This is the largest gap in the project, commercial or otherwise. |
+| **No settings, no pause, no accessibility** | **Player-facing work** item 5 | Storefronts surface accessibility fields now. No remappable keys, no colourblind aid and no volume control is a refund driver, and the red-versus-orange raider read is already documented as invisible to a deuteranope. |
+| **Save is one `localStorage` slot, no export, no import** | **Technical work** item 7 | Tolerable when the game is free. For a paid copy, one cache clear destroys a customer's progress and earns a refund and a review. |
+| **No CI, no crash reporting, no analytics** | **Technical work** items 4 and 5; `grep -riE 'analytics\|gtag\|plausible\|posthog\|sentry' src/ index.html` returns nothing | Patches to paying customers cannot rest on a manual test run on one machine, and a crash on hardware nobody owns is currently invisible. |
+| **Nowhere to play it** | **Technical work** item 5 | There is no deploy configuration and no `vite.config.*`, so the emitted absolute `/assets/…` paths would break on a project page. Nothing can be sold that cannot be served. |
+
+The **name** belongs on this list too, for the reason given under **Where this
+sits in its genre**: generic, unregistrable, unsearchable.
+
+### The content depth question
+
+Be honest about session length before pricing anything. A player plausibly sees
+everything built today inside 60 to 90 minutes: sail, fish, fight, shop, moor,
+repeat. The shop ladders and the twenty-species book stretch that, but they
+stretch it by repeating the same four activities.
+
+Rough thresholds:
+
+| Price | Distinct play needed | Standing today |
+|---|---|---|
+| Free, ad revenue share | No more than exists | Met |
+| 3 to 5 | 2 to 4 hours | Close, once there is a goal |
+| 10 to 15 | 8 hours or more, plus audio and polish | Not close |
+
+Which of these is the target decides everything downstream, including whether
+half the items in this file are worth doing at all.
+
+### Distribution paths
+
+**A. Free on web portals** (CrazyGames, Poki, Newgrounds, itch.io)
+
+- *For.* No porting work: the game is already a browser game with a
+  phone-width layout and on-screen touch controls. These portals pay revenue
+  share and, more valuably, send traffic. Their audience wants short sessions,
+  which the two-minute circumnavigation matches unusually well. Fastest route
+  to real feedback, which is needed before pricing anything.
+- *Against.* Revenue per player is very low. Portal SDK integration touches
+  `save.ts`. Some portals want exclusivity windows. And the 929 KB bundle plus
+  the 5.1 MB hull is a bounce problem on traffic measured in seconds, which
+  makes **Technical work** items 2 and 6 prerequisites rather than nice to have.
+
+**B. Premium on Steam**, wrapped in Tauri or Electron
+
+- *For.* Where the pirate and sailing audience actually spends money: Sunless
+  Sea, Sail Forth and King of Seas all live there. Wishlists give a launch
+  signal before the work is committed. Cloud saves, achievements and controller
+  support come largely from the platform.
+- *Against.* 100 USD Direct fee, 30% cut, and a store page needing a trailer and
+  capsule art that do not exist. Requires every hard blocker fixed, plus
+  controller support, plus the content depth above. And it discards the browser
+  advantage: on Steam this competes on the crowded shelf without the "click a
+  link and you are sailing" edge. Wrapping adds a build pipeline, code signing
+  and Apple notarisation (99 USD/year), which is a class of problem this project
+  does not currently have.
+
+**C. Free web build as the demo, premium desktop build.** The recommended path.
+
+- *For.* Uses the browser build as what it already is: the best demo an indie
+  sailing game could have, with no install and no download. The free version
+  drives wishlists, which is the metric that decides whether a launch works.
+  Portal revenue and premium sales both. And the free version can ship long
+  before the paid one is ready.
+- *Against.* Two builds to maintain and a decision about what the free one
+  withholds. Content-gating a procedural game is awkward: the obvious cut, ten
+  harbours free and 36 paid, is unsatisfying. Doubles the QA surface. Risks
+  cannibalising sales if the free build is too complete.
+
+**D. Mobile app stores.** Not recommended. The touch controls and phone-width
+layout are already there, but store fees, review cycles and discovery are
+brutal, and WebView-wrapped WebGL performs poorly on mid-range Android, which
+**Technical work** item 1 makes worse.
+
+### The unglamorous layer
+
+All mandatory, all easy to forget:
+
+- A business entity, or at minimum a sole-trader registration, before taking
+  money.
+- Tax forms. Steam and Apple both require them.
+- An age rating. IARC self-assessment covers most storefronts and is free.
+- A privacy policy the moment analytics exist, and GDPR consent for EU players.
+- Payment and refund handling. Storefronts do this; selling direct from a
+  website does not, which is on its own a sufficient argument against it.
+
+### Phasing
+
+**Phase 1, ship it free.** Licence file and third-party notices, rename,
+audio, notification layer, a minimum goal (a chart-completion milestone plus
+port contracts, both cheap on substrate v0.19.0 already shipped), settings menu
+with volume and remapping, save export and import, asset compression, CI, a
+deploy target, a portal release.
+
+**Phase 2, measure.** Add analytics. Learn the real session length, where
+players quit, and whether anyone completes a circumnavigation. Do not price
+anything before this is known.
+
+**Phase 3, decide.** If the free build retains players, build the premium
+desktop version against real data. If it does not, nothing has been lost and
+the thing that mattered has been learned.
+
+- *For this sequencing.* It front-loads the cheap legal and polish work, buys
+  feedback before months are spent on content depth, and defers the expensive
+  Steam decision until there is evidence for it.
+- *Against.* It delays revenue by months, and a free portal release spends some
+  of the novelty a paid launch would otherwise have.
+
+
 ## Suggested order
 
 If the next stretch is one person working alone, this is the sequence with the
 best ratio of felt improvement to risk. Each is independently shippable.
 
-1. **CI, linter and strict mode.** Do this first, not because it is exciting
+It is also, deliberately, **Commercialisation** Phase 1 in build order. The
+first eight items are the free portal release; nothing below is included
+because it looks good on a store page rather than because it improves the game.
+
+1. **The licence file and third-party notices.** An hour, and the only item
+   here that is a legal exposure rather than a gap. `three` and `simplex-noise`
+   are MIT and their notices are not currently shipped.
+2. **CI, linter and strict mode.** Do this early, not because it is exciting
    but because everything after it is safer and the release ritual currently
    rests on one machine. Half a day.
-2. **Audio.** The largest felt change available, no asset pipeline, no
+3. **Audio.** The largest felt change available, no asset pipeline, no
    architectural risk.
-3. **Settings menu with quality auto-detection.** These are one job: detection
+4. **The notification layer.** Small, and a prerequisite for items 6 and 7:
+   without it a contract, a first-visit and a caught fish are all silent
+   number changes.
+5. **Settings menu with quality auto-detection.** These are one job: detection
    is only safe once the player can override it. Fixes the worst
-   user-hostility left and the worst performance exposure at once.
-4. **Compress the ship and add a deploy target.** Cuts first load by roughly
-   four fifths and finally puts the game somewhere other than localhost.
-5. **Contracts between named harbours.** The first actual goal, built entirely
-   on substrate v0.19.0 already shipped.
-6. **The Battle tab** from `SHOP_PLAN.md`, now that its blocker is gone.
-7. **World generation in a Worker**, using the split that already exists.
-8. Everything else, by taste.
+   user-hostility left and the worst performance exposure at once. Save export
+   and import belongs here too, as the same menu.
+6. **Compress the ship and add a deploy target.** Cuts first load by roughly
+   four fifths and finally puts the game somewhere other than localhost. A
+   prerequisite for any portal release, where bounce is measured in seconds.
+7. **Contracts between named harbours**, shaped as **Strengthening what is
+   unique** item 5 rather than as generic fetch quests. The first actual goal,
+   built entirely on substrate v0.19.0 already shipped.
+8. **Shareable seeds and a circumnavigation record.** Nearly free, and the
+   thing that turns a browser build into a link worth sending.
+9. **Fish by latitude, depth and time**, then **latitude as a power
+   gradient**. Two cheap changes that make the globe matter, in that order
+   because the second needs a power-panel string the first does not.
+10. **The fight in the live world, step 1 only**: the ring kept, the cut
+    dropped. Steps 2 and 3 wait for evidence that step 1 held its frame rate.
+11. **The Battle tab** from `SHOP_PLAN.md`, now that its blocker is gone.
+12. **World generation in a Worker**, using the split that already exists.
+13. **Trickle charge under way**, behind a URL flag and measured over a full
+    session before it is allowed near `energy.ts` for real. The highest-payoff
+    and highest-risk item in the file, which is why it is last rather than
+    first.
+14. Everything else, by taste.
+
+**The rename is not on this list because it is not sequenced.** It should
+happen before a store page, a portal submission or a trailer exists, and it
+gets cheaper the sooner it is done.
 
 ## A standing warning
 
