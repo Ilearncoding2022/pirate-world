@@ -243,7 +243,7 @@ test.describe('game smoke', () => {
      * below are conditions with their own ceilings; this only stops the
      * harness cutting them off first.
      */
-    test.setTimeout(240_000);
+    test.setTimeout(300_000);
     const problems = collectConsoleProblems(page);
 
     /*
@@ -263,7 +263,21 @@ test.describe('game smoke', () => {
      * was run, and why the shoal assertion below is no longer optional.
      */
     await boot(page, `/?hunt=shoal&quality=low&clock=13&${SEED}`);
-    await waitForLiveFrame(page);
+
+    /*
+     * No `waitForLiveFrame` before the wait below, and its absence is load
+     * bearing rather than an omission.
+     *
+     * That helper samples a full page screenshot every 250 ms, which on this
+     * tier's software rasteriser at 1600x900 costs more than a frame does --
+     * so it does not merely take time, it STARVES the loop it is waiting on.
+     * The shoal is released three SIMULATED seconds in and `dt` is capped at
+     * 0.1 s, so thirty frames have to run; screenshotting through them pushed
+     * that past a 90 s ceiling and failed the case. `boot` has already waited
+     * for the splash to come down, which is downstream of the first rendered
+     * frame, so nothing here needs the check anyway. The shot below is taken
+     * once the shoal is up, which is the picture worth having.
+     */
 
     /*
      * A CONDITION, never a sleep, and this one has to be: `?hunt=` releases
@@ -280,7 +294,7 @@ test.describe('game smoke', () => {
           return w.__pirateWorld?.hunt?.phase === 'drifting' ? w.__pirateWorld.hunt : null;
         },
         null,
-        { timeout: 90_000 },
+        { timeout: 150_000 },
       )
       .then((handle) => handle.jsonValue() as Promise<{ phase: string; shadows: number }>)
       .catch(() => null);
@@ -294,7 +308,7 @@ test.describe('game smoke', () => {
      * is missing or the force is broken, and both of those are worth a red run
      * rather than a silent skip of everything below.
      */
-    expect(laid, '?hunt=shoal laid a shoal within 90 s').not.toBeNull();
+    expect(laid, '?hunt=shoal laid a shoal').not.toBeNull();
     {
       expect(laid!.shadows, 'shadows laid by ?hunt=shoal').toBeGreaterThan(0);
 
