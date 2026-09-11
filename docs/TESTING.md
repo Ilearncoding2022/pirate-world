@@ -17,13 +17,32 @@ Measured on the owner's machine, at the sizes and settings checked in:
 | Command | What it is | Cost |
 |---|---|---|
 | `npm test` | Unit tier. Node, no WebGL. | ~5 s, 528 tests |
-| `npm run test:all` | Build, unit tier, browser tier. | ~2.3 min |
+| `npm run test:all` | Build, unit tier, browser tier. | ~2.3 min, plus ~2.9 min since the hunt (see below) |
 | `npm run shots` | Screenshots only, no assertions. | ~29 s |
 | `npm run build` | Alone. | ~2 s |
 
 If a change pushes `test:all` past about two minutes, delete tests until it
 comes back. A suite nobody will wait for is a suite that gets skipped, and a
 skipped suite catches nothing.
+
+**The leviathan hunt's browser case breaks that rule and is flagged rather than
+hidden.** `hunt=armed` measures 2.9 minutes on its own, which roughly doubles
+the browser tier. Almost all of it is the boot plus thirty simulated frames on
+a software rasteriser, and the case has already been cut once: an earlier
+version steered the hull at the shoal and cost 3.3 minutes to test nothing,
+because the ship reached a coastline and everything after the steering sat
+behind an `if`.
+
+What it buys is five bugs the unit tier structurally could not see: a gate that
+could not be met at point blank, shadows drawn under a displaced sea, a needle
+that moved one pixel, a dial that cannot arm on a fresh save, and a warning
+colour the cascade was eating. Every one of those needed pixels, a real
+keystroke, or the game's actual starting state.
+
+Whether that is worth doubling the tier is the owner's call and not the
+implementer's. If it goes, the thing to keep is the assertion on
+`hunt.sprites`: absent and illegible look identical in a screenshot and only
+one of them is a design trade.
 
 ## The three tiers, and what belongs in each
 

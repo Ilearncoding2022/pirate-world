@@ -5680,9 +5680,18 @@ body.in-battle .dbtn--right {
   letter-spacing: 0.08em;
 }
 
-/* Under the sound threshold: the number is a warning, and it says so in the
-   colour a frame before the shoal says so by leaving. */
-.hunt__hint--risk {
+/*
+ * Under the sound threshold: the number is a warning, and it says so in the
+ * colour a frame before the shoal says so by leaving.
+ *
+ * Scoped under `.hunt--armed` rather than written bare, and that is not
+ * tidiness. `.hunt--armed .hunt__hint` above is two classes and a bare
+ * `.hunt__hint--risk` is one, so the cascade gave the armed rule the colour
+ * and this one never applied -- exactly and only while the dial was armed,
+ * which is the only time a risk figure exists. A screenshot of the armed bar
+ * showing a white 13 is what caught it.
+ */
+.hunt--armed .hunt__hint--risk {
   color: var(--red);
 }
 
