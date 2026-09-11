@@ -2505,6 +2505,7 @@ async function startGame(): Promise<void> {
           banked: leviathan.state.banked,
           markRange,
           markOffBow,
+          sprites: shadowField.visible,
         };
       }
       window.__pirateWorld.weather = {

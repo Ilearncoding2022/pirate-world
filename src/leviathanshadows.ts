@@ -119,6 +119,16 @@ const _basis = new Matrix4();
 export interface ShadowField {
   /** After `ship.update`, before `globe.update`. Places the sprites. */
   update(dt: number, state: HuntState): void;
+  /**
+   * How many planes were left visible by the last `update`.
+   *
+   * Published on the debug hook, and it exists to answer one question that
+   * nothing else can: when a shoal is on the water and the sea looks empty,
+   * is the shoal not being DRAWN, or is it being drawn and not being SEEN?
+   * Those have completely different fixes -- a wiring bug against a legibility
+   * problem -- and from a screenshot they are identical.
+   */
+  readonly visible: number;
   /** Drops the geometry, both textures and both materials. */
   dispose(): void;
 }
@@ -243,6 +253,7 @@ export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>):
   postFx?.adopt(group as unknown as Object3D);
 
   let elapsed = 0;
+  let visibleCount = 0;
 
   /**
    * Write one shadow's world transform.
@@ -271,6 +282,7 @@ export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>):
   return {
     update(dt: number, state: HuntState): void {
       elapsed += dt;
+      visibleCount = 0;
 
       const shadows = state.shadows;
       for (let i = 0; i < slots.length; i++) {
@@ -320,7 +332,12 @@ export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>):
         else bodyMaterial.opacity = BODY_ALPHA * envelope;
 
         mesh.visible = true;
+        visibleCount++;
       }
+    },
+
+    get visible(): number {
+      return visibleCount;
     },
 
     dispose(): void {

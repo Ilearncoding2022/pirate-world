@@ -263,6 +263,15 @@ declare global {
         markRange: number;
         /** Signed angle from the bow to the marked shadow, degrees; negative is to port. */
         markOffBow: number;
+        /**
+         * Planes `leviathanshadows.ts` actually left visible last frame.
+         *
+         * The one number that separates "the shoal is not being drawn" from
+         * "the shoal is being drawn and cannot be seen". A screenshot of empty
+         * water is identical either way and the two have nothing in common as
+         * bugs, so this is here rather than in a comment about how to guess.
+         */
+        sprites: number;
       };
       /**
        * The live weather: the envelopes at the ship, and every cell with its
