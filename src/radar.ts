@@ -5,6 +5,7 @@ import type {
   AiBoatState,
   CellsState,
   HazardState,
+  SalvageState,
   ShipState,
   Towns,
   WeatherState,
@@ -211,6 +212,37 @@ const ORANGE_BOAT_FILL = 'rgb(255, 154, 60)';
  * looks down, and a filled shape with no edge disappears into a beach.
  */
 const BOAT_EDGE = 'rgba(255, 255, 255, 0.5)';
+
+/**
+ * A raft of salvage: brass, the purse's own colour.
+ *
+ * The one warm figure on the telemetry panel is the purse, in brass, and this
+ * is the same fact in the other instrument -- a mark that means gold. It is
+ * deliberately neither of the raiders' two (those mean a hull), nor the
+ * hazards' magenta (which means steer around it), nor the instrument's own
+ * cyan: a salvage mark is the only thing on the scope the player is meant to
+ * steer TOWARD.
+ */
+const SALVAGE_FILL = 'rgb(214, 178, 96)';
+
+/**
+ * A raft, in scope radii, as a small diamond about its own centre.
+ *
+ * Not `blipPath`, and that is the point: an arrowhead means a hull with a bow
+ * and a heading, and a raft has neither. A diamond is the smallest shape that
+ * is obviously not a boat, reads at the size a blip does, and needs no
+ * rotation -- which is also why this one is issued without a transform while a
+ * raider's is issued under one.
+ */
+function raftPath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const r = 0.075;
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r, y);
+  ctx.closePath();
+}
 
 /**
  * The hull arrowhead, in scope radii, pointing at 12 o'clock.
@@ -420,6 +452,7 @@ export interface Radar {
     weather?: WeatherState,
     cells?: CellsState,
     chart?: Chart,
+    salvage?: SalvageState,
   ): void;
 }
 
@@ -932,6 +965,7 @@ export function createRadar(
     weather?: WeatherState,
     cells?: CellsState,
     chart?: Chart,
+    salvage?: SalvageState,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
@@ -1468,6 +1502,42 @@ export function createRadar(
       ctx.restore();
     }
 
+    // ---- Salvage, from the LIVE frame -------------------------------------
+    /*
+     * Drawn after the raiders and under the compass, on the raiders' own terms:
+     * live rather than held back to the raster's frame, because a raft is a mark
+     * the player is steering AT and one that lagged the bow through a turn would
+     * lag exactly while it was being aimed for.
+     *
+     * `salvage` is optional so a hand-built call in a test draws a scope with no
+     * salvage on it rather than throwing -- the same courtesy `boats` gets, for
+     * the same reason. `live` is at most three entries and empty on most frames.
+     */
+    if (liveFrame && salvage && salvage.live.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.lineWidth = 0.9 / R;
+      ctx.strokeStyle = BOAT_EDGE;
+      ctx.fillStyle = SALVAGE_FILL;
+
+      for (let i = 0; i < salvage.live.length; i++) {
+        const raft = salvage.live[i];
+        if (!projectLive(raft.position)) continue;
+        // The same envelope the timber itself is scaled by, so a raft arrives on
+        // the scope as it arrives on the water and sinks off it the same way --
+        // which matters more here than for a raider: a mark that outlived the
+        // thing it stood for would send the player at a patch of empty sea.
+        ctx.globalAlpha = raft.envelope < 0 ? 0 : raft.envelope > 1 ? 1 : raft.envelope;
+        raftPath(ctx, hazPoint.x, hazPoint.y);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Puts back the alpha, the line width, the styles and the clip together.
+      ctx.restore();
+    }
     // ---- Wind arrow, on the true bearing, from the LIVE frame -------------
     /*
      * Deliberately not held back to the raster's frame the way the terrain and

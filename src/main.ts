@@ -37,6 +37,10 @@ import { createWaterHazardPlugin } from './waterhazard';
 import { createBlackout } from './blackout';
 import { createAiBoats } from './aiboats';
 import { createAiHulls } from './aihulls';
+import { createSalvage } from './salvage';
+import { createSalvageRafts } from './salvagerafts';
+import { ITEM_LABEL, rollSalvage } from './salvagebounty';
+import type { SalvageItem } from './salvagebounty';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
 import { CALM, LIVE, ROUGH, SWAY_MAX, SWAY_MIN } from './battlesea';
@@ -49,6 +53,7 @@ import { createToast } from './toast';
 import { QUEST_URGENT_BELOW } from './hud';
 import { solarPhase } from './solartime';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
+import { mulberry32 } from './towns';
 import type {
   AiBoat,
   AiBoatKind,
@@ -647,6 +652,108 @@ async function startGame(): Promise<void> {
     onContact,
   });
 
+  /*
+   * The salvage, built from the same four things the raiders and the hazards
+   * are, and suppressed by the same verdict. It sits here rather than with the
+   * scene modules because it is a SIM: `salvagerafts.ts`, built further down, is
+   * what puts timber where this says.
+   *
+   * `onTake` is the whole of what a raft is worth, and it is wired straight
+   * into the stores rather than raised as an event, because every one of them
+   * already exists by now and nothing else in the game needs to know.
+   */
+  /**
+   * The stream a raft's contents come off.
+   *
+   * Seeded and fixed, so a given world pays the same salvage twice -- the
+   * argument `wind.ts` makes for WIND_SEED and `salvage.ts` for its own. It is
+   * deliberately NOT `salvage.ts`'s stream: what floats and what is aboard are
+   * two questions, and sharing one stream would make the contents of a raft
+   * depend on how many rafts had been rolled before it.
+   *
+   * `bounty.ts` is handed `Math.random` for a battle purse instead, and the
+   * difference is honest: a fight is an event the player walked into, and its
+   * tiered purse is meant to be a gamble. A raft is part of the world.
+   */
+  const salvageHaulRng = mulberry32(0x5a1f60);
+
+  /**
+   * Whether a found consumable has anywhere to go.
+   *
+   * One place, so the grant below and the roll that decides what floated cannot
+   * develop two opinions of a full locker -- which would silently drop the find.
+   */
+  function salvageRoom(item: SalvageItem): boolean {
+    switch (item) {
+      case 'cell':
+        return !records.battery.isFull;
+      case 'harpoons':
+        return records.harpoons.canBuy;
+      case 'anchor':
+        return records.seaAnchor.canBuy;
+      case 'overdrive':
+        return records.overdrive.canBuy;
+      case 'chum':
+        return records.chumDrum.canBuy;
+      case 'barbed':
+        return records.barbedHeads.canBuy;
+    }
+  }
+
+  /** Stows one found consumable. The mirror of `salvageRoom`, in the same order. */
+  function salvageStow(item: SalvageItem): void {
+    switch (item) {
+      case 'cell':
+        records.battery.charge();
+        break;
+      case 'harpoons':
+        records.harpoons.buy();
+        break;
+      case 'anchor':
+        records.seaAnchor.buy();
+        break;
+      case 'overdrive':
+        records.overdrive.buy();
+        break;
+      case 'chum':
+        records.chumDrum.buy();
+        break;
+      case 'barbed':
+        records.barbedHeads.buy();
+        break;
+    }
+  }
+
+  /**
+   * How many rafts have been taken this session.
+   *
+   * Published on the debug hook and read by nothing else. A headless look can
+   * see a raft appear on its own, but "the payout fired" is not visible in a
+   * screenshot -- and a notice strip that has already timed out is not evidence
+   * either.
+   */
+  let salvageTaken = 0;
+
+  const salvage = createSalvage({
+    terrain,
+    heightMap: globe.heightMap,
+    waterBodies: globe.waterBodies,
+    towns: globe.towns,
+    onTake: () => {
+      salvageTaken++;
+      const haul = rollSalvage(salvageHaulRng, salvageRoom);
+      records.wallet.add(haul.gold);
+      if (haul.item !== null) salvageStow(haul.item);
+      // Three shapes, and the third is the reason `soldOn` exists: a player
+      // whose lockers are full is told their cell was sold on rather than
+      // being handed a number with no story attached to it.
+      const gold = `SALVAGE RECOVERED - ${haul.gold} g`;
+      if (haul.item !== null) toast.push(`${gold} AND ${ITEM_LABEL[haul.item]}`, 'good');
+      else if (haul.soldOn !== null) {
+        toast.push(`${gold} - ${ITEM_LABEL[haul.soldOn]} SOLD ON, NO ROOM`, 'good');
+      } else toast.push(gold, 'good');
+    },
+  });
   // The sheet a wreck happens behind. It owns nothing but its own element and
   // the promise that `onBlack` runs when the screen is actually opaque.
   const blackout = createBlackout();
@@ -761,6 +868,9 @@ async function startGame(): Promise<void> {
    * in docs/ARCHITECTURE.md exists to protect.
    */
   const aiHulls = createAiHulls(scene, () => ship.cloneHull(), postFx);
+  // Beside the raider hulls and for the same reason: scene objects only, placed
+  // from a sim that has already decided where everything is.
+  const salvageRafts = createSalvageRafts(scene, postFx);
   const battleScene = createBattleScene(quality, postFx);
   const battleUi = createBattleUi({ onContinue });
   /*
@@ -890,6 +1000,25 @@ async function startGame(): Promise<void> {
     boatQuery === 'red' || boatQuery === 'orange' ? boatQuery : null;
   /** `?battle=1`: an orange boat put ON the hull, so the fight starts at once. */
   let forcedBattle = battleParams.get('battle') === '1';
+  /**
+   * `?salvage=1` -- one raft 25 units ahead -- and `?salvage=take`, which puts
+   * one ON the hull so it is collected at once.
+   *
+   * A raft is a 0.5% draw every ten seconds in clear air, about one every half
+   * hour, so waiting for one is a vigil rather than a test: the same argument
+   * `?hazard=` and `?cell=` are here on.
+   *
+   * The two values exist because they answer different questions, and the pair
+   * is `?boat=`/`?battle=1` again. `1` is for LOOKING at one: 25 units ahead,
+   * on the water, in frame. `take` is for the payout -- the wallet, the locker
+   * and the notice -- which cannot be reached by sailing at the first one in a
+   * headless browser: the wind carries the hull sideways several units a second
+   * (`wind.ts`'s `across`), so a run that holds the throttle down passes a
+   * dead-ahead raft about fifteen units off and nothing ever fires.
+   */
+  const salvageQuery = battleParams.get('salvage');
+  let forcedSalvage: 'look' | 'take' | null =
+    salvageQuery === '1' ? 'look' : salvageQuery === 'take' ? 'take' : null;
   /** Seconds of sailing before either fires. The same beat the forced hazard waits. */
   let boatCountdown = 3;
   /**
@@ -2246,7 +2375,7 @@ async function startGame(): Promise<void> {
     // force is transported and tested for contact on the very frame it lands,
     // which is what makes `?battle=1` open the arena rather than merely put a
     // hull on the water.
-    if (forcedBoat !== null || forcedBattle) {
+    if (forcedBoat !== null || forcedBattle || forcedSalvage !== null) {
       boatCountdown -= dt;
       if (boatCountdown <= 0) {
         if (forcedBoat !== null && aimAtShip(BOAT_FORCE_DISTANCE)) {
@@ -2255,8 +2384,24 @@ async function startGame(): Promise<void> {
         if (forcedBattle && aimAtShip(BATTLE_FORCE_DISTANCE)) {
           aiBoats.force('orange', _forceCentre, _forceNorth);
         }
+        /*
+         * `FORCE_DISTANCE` -- the forced hazard's 25 units -- rather than the
+         * raider's 45: a raft is a thing to be steered at and then touched, so
+         * it wants to be close enough to reach while still being visibly out
+         * there. Nothing is aimed, so there is no chase to preserve.
+         *
+         * `take` puts it a unit off instead, which is `BATTLE_FORCE_DISTANCE`'s
+         * own trick: well inside `salvage.ts`'s TAKE_RADIUS, so the very next
+         * `salvage.update` collects it and the payout path runs without anybody
+         * having to steer.
+         */
+        if (forcedSalvage !== null) {
+          const reach = forcedSalvage === 'take' ? BATTLE_FORCE_DISTANCE : FORCE_DISTANCE;
+          if (aimAtShip(reach)) salvage.force(_forceCentre);
+        }
         forcedBoat = null;
         forcedBattle = false;
+        forcedSalvage = null;
       }
     }
     // Hazards sit between the wind and the ship, for both of the wind's own
@@ -2276,6 +2421,15 @@ async function startGame(): Promise<void> {
         kind: h.kind,
         envelope: h.envelope,
       }));
+      window.__pirateWorld.salvage = {
+        rafts: salvage.state.live.map((raft) => ({
+          distance:
+            Math.acos(Math.max(-1, Math.min(1, raft.position.dot(ship.state.position)))) *
+            GLOBE_RADIUS,
+          envelope: raft.envelope,
+        })),
+        taken: salvageTaken,
+      };
       window.__pirateWorld.weather = {
         kind: weather.state.kind,
         storm: weather.state.storm,
@@ -2304,6 +2458,11 @@ async function startGame(): Promise<void> {
     // happens: `onContact` calls `ship.halt()` and flips the overlay, and the
     // `ship.update` below then runs on a hull that is already stopped.
     aiBoats.update(dt, ship.state, energy.state, hazards.state, suppressed(), stormOdds);
+    // Beside the raiders, on the same verdict, and before the ship for the
+    // mirror of the raiders' reason: a raft reached this frame pays this frame,
+    // and the notice it raises belongs to the frame the timber went under the
+    // bow rather than the one after it.
+    salvage.update(dt, ship.state, wind.state, suppressed(), weather.state);
     // The Navigation offers' one read this frame: the higher of Trim &
     // Sheathing's tier and an Overdrive Coil's burn speed -- never their sum,
     // see `types.ts`'s `PropulsionState` -- and whether a Sea Anchor is still
@@ -2326,6 +2485,7 @@ async function startGame(): Promise<void> {
     // meshes from the state the sim wrote above, and nothing reads them until
     // the render at the foot of the frame.
     aiHulls.update(dt, aiBoats.state);
+    salvageRafts.update(dt, salvage.state);
     globe.update(
       dt,
       env,
@@ -2378,6 +2538,7 @@ async function startGame(): Promise<void> {
       weather.state,
       weatherCells.state,
       chart,
+      salvage.state,
     );
     // After globe.update, which is what writes `env.sunDirection`. Reading it
     // before would put the dial a frame behind the sky it is describing.

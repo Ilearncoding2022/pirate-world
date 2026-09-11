@@ -329,6 +329,26 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   thousand gold either way. In all three you come back to the exact spot and
   heading you were rammed at, stopped, with the other boat gone and half a
   minute before anything else comes looking.
+- **Salvage.** Dirty weather leaves things floating. Every ten seconds the sea
+  rolls for a raft of debris, and the odds are the sky's: half a percent in
+  clear air, and three percent more for each of rain, storm and fog you are
+  actually in, up to nine and a half. That is a raft every half hour on a clear
+  day and one every two minutes in the worst weather the globe has — a **19:1**
+  gradient, which is the whole point of it. Three can be adrift at once, each
+  drifting downwind at a fifth of the wind's speed, each afloat for two minutes
+  before it sinks unclaimed.
+  You take one by **sailing into it**. There is no key and no ring: the scope
+  marks it in brass — the purse's own colour, and the only mark on the
+  instrument you are meant to steer toward rather than around — and the timber
+  is a dark pile on the water you have to pick out yourself. A raft pays
+  **100 to 1000 gold**, and one in twenty also carries something off the
+  chandlery's shelf: half of those a backup cell, the rest an even split of
+  harpoons, a Sea Anchor, an Overdrive Coil, a Chum Drum or Barbed Heads. A
+  locker with no room does not waste the find — the item is sold on for its own
+  shop price instead, and the notice says so.
+  At the ceiling that is about 310 gold a minute, which is under a fishing
+  session's rate and well under a won battle: salvage is a side income for
+  sailing through weather you were going to sail through anyway, not a career.
 - **Ship wake** that follows the curve of the planet and fades behind you. It
   is drawn into the water rather than laid on top of it, so it tilts the
   surface and raises its own foam, and the foam sits still in the sea instead

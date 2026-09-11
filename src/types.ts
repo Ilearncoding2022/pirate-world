@@ -1162,6 +1162,39 @@ export interface AiBoatState {
   readonly grace: number;
 }
 
+/* ------------------------------------------------------------------ */
+/* Salvage and the derelict                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One raft of salvage adrift on the open sea, owned by `salvage.ts` and
+ * mutated in place for as long as it floats. Hold the object, never a copy of
+ * its vectors.
+ *
+ * The same pile of timber the arena floats — `raftmesh.ts` draws both — but a
+ * different thing in the rules: an arena raft fouls a hull and stops a ball,
+ * and this one is taken by touching it and pays. See docs/SALVAGE_PLAN.md.
+ */
+export interface SalvageRaft {
+  /** Unit direction of the raft's centre. */
+  readonly position: Vector3;
+  /** Its own rolled radius, world units. Drives the mesh's scale and nothing else. */
+  readonly radius: number;
+  /** Fixed at birth, radians: which way the pile happens to be lying. */
+  readonly yaw: number;
+  /** Seconds since it was rolled. */
+  readonly age: number;
+  /** Seconds left before it sinks unclaimed. */
+  readonly life: number;
+  /** Fade in and out, 0..1, so a raft arrives and leaves rather than popping. */
+  readonly envelope: number;
+}
+
+/** The salvage afloat, mutated in place for the life of the run. */
+export interface SalvageState {
+  /** Live rafts, at most `LIVE_MAX` of them. */
+  readonly live: readonly SalvageRaft[];
+}
 /**
  * One side of a battle, in the arena's flat world units.
  *

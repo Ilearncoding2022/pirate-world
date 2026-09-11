@@ -262,6 +262,21 @@ declare global {
         encounters: number;
         cells: { kind: string; radius: number; strength: number; distance: number }[];
       };
+      /**
+       * The salvage afloat, on the same terms as `hazards` above and for the
+       * same reason.
+       *
+       * `?salvage=1` releases a raft three SIMULATED seconds in, which on the
+       * software rasteriser the browser tier runs is about thirty seconds of
+       * wall clock, so a look at one has to wait for the thing rather than for
+       * a clock. `taken` counts what has actually happened, which is the only
+       * way a headless run can tell that the payout fired rather than that
+       * something merely appeared.
+       */
+      salvage?: {
+        rafts: { distance: number; envelope: number }[];
+        taken: number;
+      };
     };
   }
 }
