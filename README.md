@@ -32,6 +32,7 @@ the first frame you are handed does not stutter.
 | on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds. On the helm pad, under REVERSE |
 | on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time. On the helm pad, over THRUST |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
+| `Space` | Loose a harpoon at a shoal, while the hunt's bar is lit. The bar lights only when the marked shadow is within four hull lengths AND within 30 degrees of the bow, so holding a target is steering |
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. Up to three a second, and the locker never runs out |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
 | `Esc` | Open the menu — and the controls guide inside it. Also ends a fishing session or closes any panel; it will not get you out of a battle |
@@ -486,6 +487,26 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   below that — though the record beside it never is, because a flat battery is
   exactly when you want to read it. The panels keep charging while you fish, at
   the elevation the sun was frozen at. There is no refund for quitting early.
+- **The leviathan hunt.** The one activity that does not stop the world. Sail
+  open water and a shoal of shadows may resolve out of it, thirty to
+  forty-five units off — inside the scope's range, so you see the marks before
+  you see the water. They drift at four knots on one heading and turn, up to
+  sixty degrees either way, every five to ten seconds. One shadow at a time
+  wears a cyan ring, and a bar at the bottom of the screen lights **only** when
+  that one is within four hull lengths of you and within thirty degrees of the
+  bow. Nothing is paused: the wind still blows, the sun still crosses, raiders
+  still close, and you are steering the whole time. That is the point of it —
+  it is the only thing in this game played with the actual helm.
+  When the bar lights, a needle sweeps it on a two-second sine, red through
+  yellow to green and back, and `Space` looses a harpoon worth what the needle
+  was on: 100 dead centre, nothing at either end. Five targets, banked, and
+  the shoal pays ten gold a point. But a press worth under 25 scatters it —
+  five is a ceiling, not a promise — and you keep only what you had banked.
+  Harpoons come out of the **same locker the fishing card draws from**, one per
+  press, five per hunt, which is exactly one bundle. A full hunt is 500 damage
+  and 5,000 gold; an empty locker means the bar never lights, and the strip
+  says so. A maelstrom, a fight, or simply sailing seventy units away all end a
+  hunt the same way, paying what it had earned.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the
   world is built from. Under it, a dial shows where the ship stands in its own

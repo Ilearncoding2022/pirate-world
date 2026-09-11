@@ -33,12 +33,13 @@ off that list on 2026-09-10**, when harbour-issued contracts landed
 (`docs/QUESTS_PLAN.md` Phase 1). The game still has no win condition and no
 failure state, and both of those are choices rather than gaps.
 
-Eight unit cases fail on this commit and failed before it: two in
-`aiboats.test.ts`, three in `energy-*.test.ts` and three in `hull-hud.test.ts`.
-They are pre-existing and unrelated to contracts — `git stash && npm test`
-reproduces the same eight — and they are the first thing item 2 of **Suggested
-order** should pick up, because a red suite is how a second red failure goes
-unnoticed.
+~~Eight unit cases fail on this commit~~ **Fixed before v0.22.0.** This file
+recorded eight failures — two in `aiboats.test.ts`, three in `energy-*.test.ts`
+and three in `hull-hud.test.ts` — as of v0.19.0. They are gone: `npm test` on
+v0.22.0 is green, and the leviathan-hunt branch measured it at 52 files and 581
+cases before adding a line of its own. The standing rule the note existed to
+carry is unchanged and worth keeping: a red suite is how a second red failure
+goes unnoticed, so no branch may leave one behind.
 
 ## What v0.19.0 delivered
 
@@ -461,12 +462,25 @@ Verified: no `requestPointerLock`, no `getGamepads`, and **no pinch gesture**,
 which means the nine-times zoom range the game is designed around is
 unreachable on a phone.
 
-### 7. Content breadth
+### 7. Content breadth — **partly closed**
 
 One hull. Two raiders that are the same mesh recoloured. Twenty fish. The
 36 harbours now have names and their own upgrade stock, which is the first
-identity any location in this game has had, but there is still nothing to
-*find*: no wrecks, no landmarks, no ruins, no NPCs.
+identity any location in this game has had.
+
+**The leviathan hunt is the first thing on the water worth going to.** See
+`docs/LEVIATHAN_PLAN.md` and **The leviathan hunt** in `docs/ARCHITECTURE.md`.
+A shoal of shadows drifts across open water; a timing dial arms only while the
+marked one is inside harpoon range and inside the bow's arc, so it is the first
+activity in the project played with the actual helm and the first that spends
+distance as a great-circle arc rather than as flat metres. It costs no asset:
+the shadows are procedurally textured quads, and the animal the feature is named
+for is still Phase 2.
+
+What it does NOT close: there are still no wrecks, no landmarks, no ruins and no
+NPCs, and the hunt's own figures are first guesses with no playtest behind them
+— the same caveat this file already carries for `questconstants.ts`, and now
+carried twice.
 
 ### 8. Shadows
 

@@ -240,6 +240,31 @@ declare global {
        */
       hazards?: { kind: string; envelope: number }[];
       /**
+       * The live hunt: its phase, how many shadows are on the water, the
+       * marked one's distance and bearing off the bow, and the dial.
+       * Refreshed every frame, on the same terms as `hazards` above and for
+       * exactly the same reason.
+       *
+       * A shoal is a 6% draw every ten seconds and has to clear a coast, a
+       * reachability test and a berth clearance before it lands, so a shot of
+       * one cannot be taken on a timer -- and unlike a crest, a shoal that
+       * scattered on the frame after it was laid leaves NOTHING behind to
+       * photograph, which is a failure a fixed sleep reports as an empty sea.
+       * This is the condition to wait for instead, per docs/TESTING.md rule 2.
+       */
+      hunt?: {
+        phase: string;
+        shadows: number;
+        armed: boolean;
+        dial: number;
+        target: number;
+        banked: number;
+        /** Great-circle arc from the hull to the marked shadow, world units. */
+        markRange: number;
+        /** Signed angle from the bow to the marked shadow, degrees; negative is to port. */
+        markOffBow: number;
+      };
+      /**
        * The live weather: the envelopes at the ship, and every cell with its
        * kind, radius, strength and distance from the hull. Refreshed every
        * frame, on the same terms as `hazards` above and for the same reason

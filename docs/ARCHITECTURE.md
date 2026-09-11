@@ -294,6 +294,9 @@ shader.
 | `hazards.ts` | `createHazards(deps)`, `HazardsDeps`, `Hazards` | the rough-water sim: the roll, spawning, transport, contact and push, capture and the spiral, `pickRespawn`. Owns `HazardState`, mutated in place; DOM-free and scene-free, like `wind.ts` — see **Hazards**. `update`'s optional fifth argument is `stormOdds`, a multiplier on the roll's COMPARISON only (the draw stays unconditional, so the stream still replays) |
 | `aiboats.ts` | `createAiBoats(deps)`, `AiBoatsDeps`, `AiBoats`, `ROLL_PERIOD`, the spawn and pursuit constants | the raider sim: the roll, spawning, transport, pursuit, conversion, contact and the post-fight grace. Owns `AiBoatState`, mutated in place; DOM-free, scene-free and seeded, exactly as `hazards.ts` is; see **AI boats and the battle** |
 | `aihulls.ts` | `createAiHulls(scene, cloneHull)`, `AiHulls` | the raiders as things you can see: at most two hull clones from `ship.cloneHull()`, placed on the globe from `AiBoatState` each frame, neon recoloured, `rimglow.ts` installed. `hullOf(boat)` is what the arena borrows |
+| `leviathan.ts` | `createLeviathan(deps)`, `LeviathanDeps`, `Leviathan`, `HuntLocker`, `damageAt`, `huntGold`, the roll, shoal, gate and purse constants | the hunt sim: the roll, the shoal's drift and heading reroll, the mark, the range-and-arc gate, the dial, the damage, the scatter and the purse figure. Owns `HuntState`, mutated in place; DOM-free, scene-free and seeded, cut from `aiboats.ts`; see **The leviathan hunt** |
+| `leviathanshadows.ts` | `createShadowField(scene, postFx?)`, `ShadowField` | the shoal as things you can see: a pool of `SHOAL_COUNT` flat planes with two procedurally drawn textures, placed on the globe from `HuntState` each frame. No asset file, no mesh |
+| `leviathandial.ts` | `createHuntDial(deps)`, `HuntDial`, `HuntDialDeps` | the hunt's bar: the bands, the needle, the targets-left and damage strip, and the Space binding — which is LIVE, acting only while `HuntState.armed` is true |
 | `rimglow.ts` | `installRimGlow(root, color, strength?)`, `RimGlow`, `RIM_STRENGTH` | the Fresnel `onBeforeCompile` patch that lights a whole silhouette in one colour. Installed BEFORE `postFx.adopt` chains its own hook; see **Post-processing** |
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the gun's cadence, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
 | `battleconstants.ts` | `ARENA_R`, `ARENA_R_MIN`, `ARENA_SHRINK`, `ARENA_OMEGA`, `THROTTLE_GAIN`, `HITS_TO_LOSE`, `FIRE_COOLDOWN`, `BALL_SPEED`, `HIT_RADIUS`, `BATTLE_TIMEOUT` | the numbers the cannon fight is built out of, split out of `battle.ts` by the rework so that `battleai.ts` and `battlesea.ts` can read the ring's dimensions without importing the module that imports them. No logic, only tuning decisions with the reasoning attached; `battle.ts` re-exports the lot so every existing importer keeps working. The AI's own constants deliberately do NOT live here — they describe a gunner rather than an arena, and sit in `battleai.ts` |
@@ -3533,6 +3536,191 @@ paragraph above names, arrived at from the one direction it did not anticipate.
 `hud.ts` was the only file that had written the escape and the only one still
 correct, which is the argument for the escape by itself. `tests/smoke/game.spec.ts`
 is what finally caught it, asserting `10 000` on a real click.
+
+
+## The leviathan hunt
+`docs/LEVIATHAN_PLAN.md` is the brief; this section is the contract the rest of
+the codebase has to keep. Three modules, no HUD button, and **no branch in the
+frame loop** — which is the whole of what makes it different from everything
+above it.
+
+### It is not an overlay, and that is the feature
+Fishing, the chandlery, the contract board, the fish book and the menu are all
+the same shape: a card over a frozen world, listed in **The pause contract**. A
+fight is the one thing that is not, and it is only half not — since the
+`battlescene.ts` rework the clock runs through a duel, but the player has no
+helm in one (`battle.ts` computes in flat metres in a tangent frame pinned at
+the ring's centre, and W/S only move a combatant along the circle).
+
+A hunt runs on the **sailing branch**. Nothing is halted, nothing is dimmed,
+and the player is steering the entire time. It is therefore the first activity
+in this project played with the actual helm, and the first whose distance is a
+great-circle arc rather than flat metres. Both of those are load-bearing rather
+than decorative: the activity IS the pursuit, and an implementer who moves it
+behind a cover screen has deleted the feature while leaving every line of it
+compiling.
+
+### The gate is the design
+`leviathan.state.armed` is true only when all four of these hold:
+
+1. the marked shadow is within `HARPOON_RANGE` (12 units, four hull lengths);
+2. it is within `BOW_ARC` (30 degrees) of the bow;
+3. the locker has at least one spare;
+4. `main.ts`'s `suppressed()` is false.
+
+Two and three are the interesting ones. Without the **arc**, the dial is
+`fishsim.ts:684`'s sine with a different readout and the helm does nothing:
+proximity alone is the fishing card played outdoors. The shoal reroll (a turn
+of up to 60 degrees every 5 to 10 seconds) is what keeps satisfying the arc a
+continuous act of steering rather than a one-time approach.
+
+Without the **locker check**, an empty locker would be a press that silently
+did nothing. Instead the bar stays dark and a `dry` event puts one line on the
+strip naming the chandlery, once per shoal. A player can always fish, because a
+fishing session has ten harpoons of its own, so an empty locker is never a
+soft-lock — it is the shop teaching itself.
+
+### One ramp, five bands
+`damageAt(p) = round(100 * (1 - |p|))`. The five colour stops `style.css` paints
+are a READOUT of that and nothing reads them back, so the palette retunes
+without the ruleset moving.
+
+The dial is a **sine**, `sin(2*PI*t/DIAL_PERIOD)`, and that is not an arbitrary
+easing choice. A sine lingers near its extremes and crosses zero fastest, so the
+green band is harder than its width suggests: a press at a uniformly random
+moment averages `100 * (1 - 2/PI)`, about **36 damage**, where a linear sweep
+would average 50. The skill gradient is steeper for free.
+
+`t` resets to zero every time the dial arms. A player who loses the target and
+comes round again gets the sweep from a known start rather than from wherever a
+free-running clock happened to be — the same argument `fishsim.ts` makes for
+stopping `swingClock` while the rope is out, and for the same reason: a skill
+whose phase depends on how long the approach took is not learnable.
+
+### One locker, one bundle, one hunt
+Harpoons come out of `harpoons.ts`, the same store the fishing card draws
+spares from. One press is one harpoon and `HUNT_TARGETS` is 5, which is exactly
+one `HARPOON_BUNDLE`. There is deliberately **no second constant** for the
+per-hunt ceiling: two numbers that must agree are two numbers that can be
+half-changed.
+
+The locker is debited as the shot fires and never reserved up front, which is
+`fishing.ts`'s rule and the reason a hunt and a session can never disagree about
+what a spare is.
+
+### The purse, and why it is ten a point
+`huntGold(banked) = round50(banked * 10)`. A perfect hunt is 500 damage and
+5 000 gold; a player pressing blind banks about 182 and takes 1 820.
+
+Fifty a point was proposed and rejected: it tops out at 25 000, which beats
+`bounty.ts`'s best won fight (20 000) while carrying no stake at all, and an
+activity that pays more than the jackpot and risks nothing makes the other four
+irrelevant. Ten lands just above the fight's ~2 800 expected value and level
+with the best contract, and `questconstants.ts` already holds exactly this line
+for deliveries.
+
+**No reputation.** `REPUTATION_BY_TIER` tops out at 40 plus a 5 window bonus,
+so the proposed `damage / 10` would have had one hunt beat the best contract in
+the game. `reputation.ts` records that the scale is earned before it is spent
+precisely so Phase 2 has a history to gate on, and flooding it before it means
+anything would set that baseline wrong. Gold only.
+
+### The five ways a hunt ends
+All five pay what was banked, and all five pay exactly once — the purse settles
+on the transition INTO `settling`, so the fade that follows cannot pay twice.
+
+| Ending | Where |
+|---|---|
+| Five targets banked | `fire`, `settled` |
+| A press under `SOUND_BELOW` (25 damage) | `fire`, `sounded` |
+| Sailed more than `DESPAWN_RANGE` from the mark | `update` |
+| `suppressed()` went true: docked, a blackout, or a maelstrom | `update` |
+| A fight started | `main.ts`'s `onContact` calls `leviathan.scatter()` |
+
+The last row is the one that needs saying. The battle branch runs the world but
+does not run `leviathan.update`, and must not: the hull is halted and
+`battle.ts` is steering it, so there is no helm to hold a target with, and a
+shoal frozen through ninety seconds of a moving sea would be the one object on
+the water that did not live through the fight.
+
+An **overlay** is deliberately the opposite case and is not in that table. The
+frozen branch stops the whole world, the shoal with it, and the player comes
+back to the sea exactly as they left it. That is the pause contract doing its
+job rather than a hunt being spared, and it is why nothing hunt-shaped appears
+in the frozen branch's five calls.
+
+### Who owns Space
+`leviathandial.ts` binds Space for the life of the run and acts on it **only
+while `state.armed` is true**. That is the same discipline **One owner for the
+Escape key** keeps, applied to a key with more claimants:
+
+| State | Space means | Owner |
+|---|---|---|
+| Inside a berth ring, nothing else open | make fast / cast off | `main.ts`'s own listener |
+| A fishing session | fire the harpoon | `fishing.ts` |
+| A battle | fire a broadside | `battleui.ts` |
+| A shoal inside range and arc | loose a harpoon | `leviathandial.ts` |
+
+They cannot collide, but the reason is worth writing down because one half of
+it was a bug first. The moor listener already refuses while any overlay, menu,
+fight or maelstrom owns the screen; the dial refuses unless armed, and
+`leviathan.ts` holds `armed` false while docked and while suppressed. A shoal is
+also never laid within `BERTH_MARGIN` (25 units) plus the widest berth radius of
+a dock, which is a second guard on the same thing.
+
+What that misses is the **frozen branch**. `huntDial.update` is only called
+while sailing, so an overlay freezes the bar without clearing its `armed` flag,
+and a Space aimed at the fishing card would reach `leviathan.fire()` as well as
+`fishing.ts`. The guard is therefore in `main.ts`'s `fireHarpoon`, which is the
+moor key's list exactly and sits where this file already owns the knowledge of
+who has the screen. Ticking the dial inside the frozen branch would have been
+the other fix and is the wrong one: it puts a sixth call in the pause contract's
+five to repair something that belongs to the caller.
+
+### Rendering, and the artefact it accepts
+`leviathanshadows.ts` is a pool of `SHOAL_COUNT` flat `PlaneGeometry` quads with
+two procedurally drawn `CanvasTexture`s, placed through the same surface basis
+`aihulls.ts` writes for a raider: local +X starboard, +Y the surface normal, +Z
+astern, with the quarter turn baked into the geometry once so the per-frame path
+composes nothing.
+
+No glTF, no rig, no asset file. That is the MVP's entire economy: the ironwhale
+the feature is named for is Phase 2 work and the shadows exist to answer the one
+question that has to be answered before paying for it.
+
+**The accepted artefact.** A translucent dark plane sitting `SHADOW_LIFT` (0.05
+units) ABOVE the water is an approximation of a shape below it, and near the
+ship the sea is genuinely displaced by the wave patch, so a crest can swallow a
+shadow. This is listed as a known limitation of the phase rather than tuned away
+by raising the lift until it always clears — a shadow floating a metre over the
+swell reads worse than one a wave occasionally hides. The real fix is a
+darkening term inside the water shader through the plugin contract
+`waterhazard.ts` already uses, which reads as genuinely under the surface.
+
+### What `?hunt=shoal` does
+Lays a shoal at `SHOAL_SPAWN_MIN` off the bow three simulated seconds in, and
+**re-lays it two seconds after every one ends**. That standing behaviour is the
+one thing it does not share with `?hazard=` and `?cell=`, and it is not
+convenience: a forced shoal heads back down the bow, so it closes, passes a
+stationary hull and is past `DESPAWN_RANGE` about twenty-five simulated seconds
+later. On the software rasteriser the smoke tier runs at, that is most of two
+minutes of wall clock, so a one-shot lays its shoal during the boot and has
+taken it away again before anything gets to look at it. The smoke case caught
+exactly that, by failing.
+
+If the point off the bow is not sailable the force falls back to the ordinary
+compass search rather than laying one on a beach. A shoal is also cleared to its
+FULL radius at spawn (the centre plus four cardinal points at `SHOAL_RADIUS`),
+not just at its centre: a shadow sits up to nine units off the middle and
+`update` ends a hunt the moment the marked one is aground, so a centre-only test
+put shoals on coasts that scattered on the next frame and reached the player as
+a notice about a shoal they never saw.
+
+`window.__pirateWorld.hunt` publishes the phase, the shadow count, the dial and
+the two numbers the gate is made of (`markRange`, and `markOffBow` SIGNED, with
+negative to port), so a shot can wait on a condition rather than on a clock, per
+rule 2 in docs/TESTING.md. It exists only under `?quality=` or `?debug`, like
+the rest of that hook.
 
 
 ## The chandlery

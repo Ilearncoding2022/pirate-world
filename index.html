@@ -556,6 +556,41 @@
         <span class="toast__text" id="hud-toast-text"></span>
       </div>
 
+      <!-- HUNT -->
+      <!-- ===================== THE HUNT'S DIAL =====================
+           The leviathan hunt's one piece of interface, and the only activity
+           UI in this game that is NOT a card over a frozen world: the hunt
+           runs on the sailing branch, so this sits on the live HUD beside the
+           helm while the player is steering. See docs/LEVIATHAN_PLAN.md.
+
+           Bottom centre, above the helm pad and clear of the mooring notice.
+           Fixed rather than anchored under the shadow it belongs to, because
+           nothing in src/ projects world space to screen space yet and a
+           player reading this should not have to take their eye off the water
+           to do it.
+
+           The bands are a five-stop gradient, red through yellow to green and
+           back, and they are a READOUT of leviathan.ts's one damage ramp
+           rather than a rule: nothing reads the stops, so the palette moves
+           without the ruleset moving.
+
+           Ships hidden, and hidden the same way .moor and .toast are: the UA's
+           [hidden] rule is display:none at author-origin strength and an
+           author `display` here would beat it, leaving an empty box on the HUD
+           of every player who has never met a shoal. -->
+      <div class="hunt" id="hud-hunt" role="status" hidden>
+        <div class="hunt__head">
+          <span class="hunt__key" aria-hidden="true">HUNT</span>
+          <span class="hunt__targets" id="hud-hunt-targets">5 LEFT</span>
+          <span class="hunt__banked" id="hud-hunt-banked">0 DMG</span>
+        </div>
+        <div class="hunt__bar" aria-hidden="true">
+          <span class="hunt__needle" id="hud-hunt-needle"></span>
+        </div>
+        <span class="hunt__hint" id="hud-hunt-hint">STEER ONTO THE MARK</span>
+      </div>
+      <!-- /HUNT -->
+
     </div>
 
     <!-- ===================== FISHING CARD =====================

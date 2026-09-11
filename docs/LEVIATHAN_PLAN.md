@@ -1,6 +1,13 @@
 # Leviathan hunt: implementation plan
 
-Status: **proposed, not approved.** Nothing below has been built.
+Status: **built.** `src/` now holds `leviathan.ts`, `leviathanshadows.ts` and
+`leviathandial.ts`, with five new types in `types.ts`, a `<!-- HUNT -->` block
+in `index.html` and `style.css`, a shoal mark on the scope, the `?hunt=shoal`
+dev query and a `window.__pirateWorld.hunt` hook. 32 unit cases in
+`tests/unit/leviathan.test.ts`. **The leviathan hunt** in
+`docs/ARCHITECTURE.md` is the authoritative description of what was actually
+built; this file is kept as the brief it was, plus the list of departures at
+the end.
 
 This document is the complete brief for the MVP. An implementing agent should
 not need the conversation it came from. Read `docs/ARCHITECTURE.md` first,
@@ -527,11 +534,19 @@ Two insertions, and one non-insertion:
 - **`shadowField.update(dt, leviathan.state)`** goes beside `aiHulls.update`,
   after `ship.update` and before `globe.update`, for `aihulls.ts`'s reason: it
   only places and lights things, and the camera has already been moved.
-- **Nothing goes in the frozen branch, and nothing goes in the battle branch.**
-  A hunt does not survive an overlay opening over it or a fight starting in the
-  middle of it: both scatter the shoal through the `suppressed()` path. That is
-  the pause contract holding, not an oversight, and it should be written into
-  the contract's own list as such.
+- **Nothing goes in the frozen branch, and nothing goes in the battle branch**,
+  and the two are not the same case.
+
+  An **overlay** simply freezes a hunt with everything else: the frozen branch
+  never calls `leviathan.update`, so the shoal is exactly where it was when the
+  card closes. That is the pause contract doing its job, and it is the right
+  answer: a player who opened the menu should not lose a hunt for it.
+
+  A **fight** must END one, and cannot be left to the same mechanism. The battle
+  branch runs the world (`weatherCells`, `wind`, `weather`, `hazards`, `globe`)
+  but halts the hull, so a frozen shoal would be the one object on the water not
+  living through the fight, and there would be no helm to hunt with in any case.
+  `main.ts`'s `onContact` calls `leviathan.scatter()` explicitly.
 
 ## Tests
 
@@ -618,6 +633,86 @@ Named here so the MVP's shape carries them, and so nobody re-derives them.
 6. **A shop row.** Nothing in the MVP is bought. A heavier harpoon head that
    widens the green band is the obvious first item, and `barbedheads.ts` is the
    shape to copy.
+
+## Departures from this plan, as built
+
+Ten, each with the reason. Nothing else in the document was contradicted.
+
+1. **An overlay freezes a hunt; it does not end one.** The plan said both an
+   overlay and a fight end a hunt "through the `suppressed()` path", and that is
+   simply not how the loop works: `suppressed()` is never evaluated on the
+   frozen branch because `leviathan.update` is not called there at all. Freezing
+   is also the better behaviour and the consistent one. A fight is the genuine
+   exception and gets an explicit `leviathan.scatter()` in `onContact`. See the
+   corrected text under **`main.ts`: the frame loop after integration**.
+
+2. **An empty locker is a fourth arming condition, and a fifth event kind.** The
+   plan said one press is one harpoon and did not say what happens with nothing
+   in the locker. Deciding it in `fire` would have made the press silently do
+   nothing, so the locker is checked in the GATE instead: the bar stays dark and
+   a `dry` event puts one line on the strip, once per shoal, naming the
+   chandlery. There is no soft-lock, because a fishing session has ten harpoons
+   of its own and can always earn the bundle.
+
+3. **`markOffBow` on the debug hook is signed.** Written unsigned first, which
+   makes "steer onto the mark" a coin toss for anything driving the game from
+   outside. It is signed off the starboard vector rather than off a bearing
+   subtraction, so it means the same thing at a pole.
+
+4. **`?hunt=shoal` is a standing mode, and falls back to the compass search.**
+   The plan had it lay one shoal at `SHOAL_SPAWN_MIN` off the bow, full stop.
+   Two things were wrong with that, and both were found by running it rather
+   than by reading it. The point dead ahead is a coin toss near a coast, so it
+   now falls back to the ordinary placement instead of laying one on a beach.
+   And a forced shoal closes, passes a stationary hull and is past
+   `DESPAWN_RANGE` about twenty-five simulated seconds later, which on the
+   software rasteriser is most of two minutes: a one-shot laid its shoal during
+   the boot and had taken it away before the smoke case looked. It re-lays two
+   seconds after every hunt ends while the query is set.
+
+5. **`BERTH_MARGIN` is 25, not `aiboats.ts`'s 4.** The plan listed a
+   `TOWN_CLEARANCE` of 25 as its own constant; it is the same idea and it is
+   named for what `aiboats.ts` already calls it, so there is one word for one
+   thing. The value is the plan's.
+
+6. **No `leviathanconstants.ts`.** The plan already argued for this and the
+   build confirmed it: `leviathan.ts` owns its numbers and the two views import
+   the handful they need, exactly as `aihulls.ts` imports from `aiboats.ts`.
+   `SHADOW_LENGTH`, `SHADOW_WIDTH` and `SHADOW_LIFT` turned out to be purely the
+   renderer's and live in `leviathanshadows.ts` instead.
+
+7. **The shadow planes are `frustumCulled = false`.** Not in the plan and not
+   optional: Three culls a bare `Mesh` against a bounding sphere computed from
+   the geometry at the ORIGIN, and every slot is written a fresh world matrix
+   200 units out each frame. `aihulls.ts` never needed this because a `Group`
+   carries its children's bounds.
+
+8. **`main.ts` guards the press, not the dial.** Trap 2 assumed the dial's own
+   `armed` flag was enough. It is not: `huntDial.update` runs on the sailing
+   branch only, so an overlay freezes the bar without clearing the flag and a
+   Space aimed at the fishing card reaches `leviathan.fire()` too. The guard is
+   `main.ts`'s `fireHarpoon`, carrying the moor key's list verbatim. Found by
+   reading the wiring, and **still not covered by a test**: it lives in
+   `main.ts`, which has no unit tier, and the smoke case presses Space while
+   sailing rather than under a card. Worth a smoke case of its own.
+
+9. **A shoal's whole footprint is cleared at spawn, not just its centre.** Four
+   cardinal samples at `SHOAL_RADIUS`. A shadow sits up to nine units off the
+   centre and `update` ends a hunt the moment the MARKED one is aground, so a
+   centre-only test laid shoals that scattered on the next frame and reached
+   the player as a notice about a shoal they never saw. Pinned by a test
+   against the real coastline.
+
+10. **A hunt that banked nothing says nothing.** The plan had every ending
+    reach the strip. A shoal drifting onto a coast or out of range without ever
+    being fired at is one the player either never engaged or deliberately
+    sailed past, and the strip is for what they would otherwise miss.
+
+One thing the plan flagged as needing the owner's word was built as flagged and
+is still open to it: **a press under `SOUND_BELOW` ends the whole hunt** rather
+than costing only that target (decision 6). It is the failure state and it is
+the sharpest thing in the feature; it is also the single figure most likely to
+want softening after a playtest.
 
 ## Out of scope
 

@@ -5514,3 +5514,189 @@ body.in-battle .dbtn--right {
 }
 
 /* END CONTRACTS */
+
+/* ===================== THE HUNT'S DIAL ===================== */
+/* HUNT */
+/*
+ * The leviathan hunt's bar, and the only activity interface in this project
+ * that sits on the LIVE HUD rather than on a card over a frozen world. The
+ * hunt runs on the sailing branch (docs/LEVIATHAN_PLAN.md, decision 1), so
+ * everything here has to be readable by someone whose hands are on the helm
+ * and whose eyes are mostly on the water.
+ *
+ * Bottom centre and above the mooring notice, which is the one other thing
+ * that claims this edge. The two never show together in practice -- `armed` is
+ * false while docked and a shoal is never laid within BERTH_MARGIN of a berth
+ * -- but the offset is here rather than relying on that, because a rule
+ * enforced in two files is a rule that gets half-changed.
+ */
+.hunt {
+  position: absolute;
+  bottom: calc(var(--hud-pad) + 52px);
+  left: 50%;
+  transform: translateX(-50%);
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 8px 14px 7px;
+  width: min(340px, calc(100vw - 2 * var(--hud-pad)));
+  border-radius: 3px;
+  border: 1px solid rgba(63, 224, 255, 0.24);
+  background: rgba(3, 12, 22, 0.84);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  color: var(--ink-mute);
+}
+
+.hunt:not([hidden]) {
+  display: flex;
+}
+
+.hunt__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+}
+
+/* The block's name, in the same chip the contract line wears. */
+.hunt__key {
+  color: var(--cyan);
+  opacity: 0.8;
+}
+
+.hunt__targets {
+  margin-left: auto;
+  color: var(--ink);
+}
+
+.hunt__banked {
+  color: var(--gold);
+}
+
+/*
+ * The bands.
+ *
+ * Five stops, red through yellow to green and back, laid as one gradient
+ * rather than five boxes so the spectrum is CONTINUOUS -- which is what the
+ * damage ramp behind it is. The stops are where the colour changes and
+ * nothing in `leviathan.ts` reads them: `damageAt` is one ramp and these are
+ * its readout, so retuning the look here cannot retune the game.
+ *
+ * The two hard notches at 12.5% and 87.5% are SOUND_BELOW, the point at which
+ * a press scatters the shoal. Drawn rather than explained, so the consequence
+ * is visible before it is suffered.
+ */
+.hunt__bar {
+  position: relative;
+  width: 100%;
+  height: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+  opacity: 0.35;
+  transition: opacity 140ms linear;
+  background:
+    linear-gradient(
+      to right,
+      transparent 0,
+      transparent calc(12.5% - 1px),
+      rgba(255, 255, 255, 0.85) calc(12.5% - 1px),
+      rgba(255, 255, 255, 0.85) calc(12.5% + 1px),
+      transparent calc(12.5% + 1px),
+      transparent calc(87.5% - 1px),
+      rgba(255, 255, 255, 0.85) calc(87.5% - 1px),
+      rgba(255, 255, 255, 0.85) calc(87.5% + 1px),
+      transparent calc(87.5% + 1px),
+      transparent 100%
+    ),
+    linear-gradient(
+      to right,
+      #ff4a3c 0%,
+      #ffb445 27.5%,
+      #4bf0a6 50%,
+      #ffb445 72.5%,
+      #ff4a3c 100%
+    );
+}
+
+/* Lit only when the dial is live, so a dark bar is itself the message that
+   the mark is out of range or off the bow. */
+.hunt--armed .hunt__bar {
+  opacity: 1;
+}
+
+/*
+ * The needle.
+ *
+ * Moved by `transform` alone: compositor-only, no layout and no paint.
+ *
+ * The element is the FULL WIDTH of the bar and the visible line is its
+ * ::before, which is not a flourish -- it is the only way the transform can be
+ * written as a percentage. A percentage translate resolves against the
+ * element's OWN width, so a 2px-wide needle told to move 50% moves one pixel.
+ * At 100% of the bar it moves half the bar, which is what `leviathandial.ts`
+ * means when it writes `translateX(37%)`.
+ *
+ * The line's own centring is `margin-left: -1px` on the pseudo-element rather
+ * than a second transform, so the one transform the compositor animates stays
+ * a single function with one number in it.
+ */
+.hunt__needle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  transform: translateX(50%);
+}
+
+.hunt__needle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #ffffff;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+
+.hunt__hint {
+  min-height: 1.4em;
+  line-height: 1.4;
+  color: var(--ink-mute);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Armed, the hint is the live damage figure rather than an instruction, so it
+   is typeset as a reading and not as prose. */
+.hunt--armed .hunt__hint {
+  color: var(--ink);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+}
+
+/* Under the sound threshold: the number is a warning, and it says so in the
+   colour a frame before the shoal says so by leaving. */
+.hunt__hint--risk {
+  color: var(--red);
+}
+
+/* Narrow screens: the helm pad and the scope step in from the edges, so the
+   bar steps down with them rather than crowding either. */
+@media (max-width: 720px) {
+  .hunt {
+    width: min(280px, calc(100vw - 2 * var(--hud-pad)));
+    font-size: 8.5px;
+    letter-spacing: 0.1em;
+  }
+
+  .hunt--armed .hunt__hint {
+    font-size: 12px;
+  }
+}
+/* /HUNT */

@@ -234,6 +234,140 @@ test.describe('game smoke', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   });
 
+  test('hunt=shoal lays a shoal and lights its bar clean', async ({ page }) => {
+    /*
+     * The one case in this file that needs longer than the 60 s default, and
+     * it is not slack: `?hunt=` releases the shoal three SIMULATED seconds in
+     * and this tier software-renders at a fraction of real time, so the wait
+     * for it is tens of seconds before the helm has turned at all. Both waits
+     * below are conditions with their own ceilings; this only stops the
+     * harness cutting them off first.
+     */
+    test.setTimeout(240_000);
+    const problems = collectConsoleProblems(page);
+
+    /*
+     * The shoal's own shader path is two `MeshBasicMaterial`s carrying
+     * procedurally drawn `CanvasTexture`s, adopted by the composer after its
+     * one-time scene walk. That is a genuinely different compile from anything
+     * the cases above reach, and an unadopted material renders a stop dark
+     * rather than throwing -- so the console list below is most of what this
+     * case is for.
+     */
+    /*
+     * `quality=low` is not only for speed here: `window.__pirateWorld` is
+     * published ONLY under `?quality=` or `?debug` (`quality.ts`), and every
+     * wait below reads the hunt off that hook. Without it this case waits 90
+     * seconds for a condition that can never be true and then passes on the
+     * console check alone -- which is precisely what it did the first time it
+     * was run, and why the shoal assertion below is no longer optional.
+     */
+    await boot(page, `/?hunt=shoal&quality=low&clock=13&${SEED}`);
+    await waitForLiveFrame(page);
+
+    /*
+     * A CONDITION, never a sleep, and this one has to be: `?hunt=` releases
+     * the shoal three SIMULATED seconds in, `dt` is capped at 0.1 s a frame,
+     * and this tier software-renders at a fraction of real time. A fixed wait
+     * either photographs empty water or spends half a minute not needing to.
+     * `window.__pirateWorld.hunt` exists for exactly this, per rule 2 in
+     * docs/TESTING.md.
+     */
+    const laid = await page
+      .waitForFunction(
+        () => {
+          const w = window as unknown as { __pirateWorld?: { hunt?: { phase: string } } };
+          return w.__pirateWorld?.hunt?.phase === 'drifting' ? w.__pirateWorld.hunt : null;
+        },
+        null,
+        { timeout: 90_000 },
+      )
+      .then((handle) => handle.jsonValue() as Promise<{ phase: string; shadows: number }>)
+      .catch(() => null);
+
+    /*
+     * NOT optional, unlike the arena case's `#battle` wait.
+     *
+     * `?hunt=` walks the bow out to `SHOAL_SPAWN_MIN` and, if that point is
+     * aground, falls back to the ordinary compass search -- so on a pinned
+     * seed in reachable water a shoal always lands. A null here means the hook
+     * is missing or the force is broken, and both of those are worth a red run
+     * rather than a silent skip of everything below.
+     */
+    expect(laid, '?hunt=shoal laid a shoal within 90 s').not.toBeNull();
+    {
+      expect(laid!.shadows, 'shadows laid by ?hunt=shoal').toBeGreaterThan(0);
+
+      // The bar is up whenever a shoal is, armed or not: the dark bar with its
+      // hint line is the only place the range-and-arc rule is ever stated.
+      await expect(page.locator('#hud-hunt')).toBeVisible();
+      await screenshot(page, 'hunt-shoal');
+
+      /*
+       * Steer onto the mark and press.
+       *
+       * This is the one case in this file that plays the game rather than
+       * booting it, and it is here because the hunt's whole design is the
+       * gate: `armed` cannot be reached by waiting, only by steering, so a
+       * test that never turns the helm never compiles the armed path at all.
+       * `markOffBow` is signed -- negative to port -- which is why the hook
+       * publishes it signed.
+       */
+      await page.keyboard.down('KeyW');
+      let helm: 'KeyA' | 'KeyD' | null = null;
+      const deadline = Date.now() + 45_000;
+      let armed = false;
+      while (Date.now() < deadline) {
+        const state = await page.evaluate(() => {
+          const w = window as unknown as {
+            __pirateWorld?: { hunt?: { phase: string; armed: boolean; markOffBow: number } };
+          };
+          return w.__pirateWorld?.hunt ?? null;
+        });
+        if (state === null || state.phase !== 'drifting') break;
+        if (state.armed) {
+          armed = true;
+          break;
+        }
+        const want = state.markOffBow > 3 ? 'KeyD' : state.markOffBow < -3 ? 'KeyA' : null;
+        if (want !== helm) {
+          if (helm !== null) await page.keyboard.up(helm);
+          if (want !== null) await page.keyboard.down(want);
+          helm = want;
+        }
+        await page.waitForTimeout(150);
+      }
+      if (helm !== null) await page.keyboard.up(helm);
+      await page.keyboard.up('KeyW');
+
+      // Also allowed to fail without failing the run: the shoal can drift onto
+      // a coast or out of range while the helm is coming round, which is the
+      // sim behaving rather than a regression.
+      if (armed) {
+        await expect(page.locator('#hud-hunt')).toHaveClass(/hunt--armed/);
+        await screenshot(page, 'hunt-armed');
+
+        const before = await page.evaluate(() => {
+          const w = window as unknown as { __pirateWorld?: { hunt?: { target: number } } };
+          return w.__pirateWorld?.hunt?.target ?? 0;
+        });
+        await page.keyboard.press('Space');
+        await page.waitForTimeout(600);
+        const after = await page.evaluate(() => {
+          const w = window as unknown as { __pirateWorld?: { hunt?: { target: number } } };
+          return w.__pirateWorld?.hunt?.target ?? 0;
+        });
+        // One press is one target, and the press has to reach the sim through
+        // the dial's own window listener -- the only wiring in this feature
+        // that no unit case can cover.
+        expect(after, 'targets banked after one Space').toBeGreaterThan(before);
+        await screenshot(page, 'hunt-fired');
+      }
+    }
+
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+
   test('the dev gold row is invisible and inert without ?dev', async ({ page }) => {
     /*
      * A regression test for a bug that shipped, and for the reason it shipped.

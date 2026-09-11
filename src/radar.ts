@@ -5,6 +5,7 @@ import type {
   AiBoatState,
   CellsState,
   HazardState,
+  HuntState,
   ShipState,
   Towns,
   WeatherState,
@@ -211,6 +212,42 @@ const ORANGE_BOAT_FILL = 'rgb(255, 154, 60)';
  * looks down, and a filled shape with no edge disappears into a beach.
  */
 const BOAT_EDGE = 'rgba(255, 255, 255, 0.5)';
+
+/* ------------------------------------------------------------------ */
+/* The hunt's shoal                                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A shoal of shadows, and the one of them the dial will arm against.
+ *
+ * The body is a dim slate with no hue of its own, because a shoal is neither a
+ * hazard nor a raider and must not borrow either one's warning colour: a
+ * player glancing at the scope has to be able to tell "something to hunt" from
+ * "something to avoid" without reading the shape.
+ *
+ * The MARK is the instrument cyan, and that is the one deliberate exception to
+ * the rule above. It is the same cyan `leviathanshadows.ts` rings the marked
+ * shadow with on the water, so the thing the player is steering at looks the
+ * same in both places -- which is the whole of how a hunt is navigated.
+ *
+ * Written out here rather than read off a custom property, for the reason the
+ * raider pair gives: this canvas has no cascade to read.
+ */
+const SHOAL_FILL = 'rgba(159, 179, 200, 0.55)';
+const SHOAL_MARK = 'rgb(63, 224, 255)';
+const SHOAL_MARK_EDGE = 'rgba(63, 224, 255, 0.45)';
+
+/**
+ * Mark radii in scope radii: an ordinary shadow, and the ring drawn round the
+ * marked one.
+ *
+ * The body is smaller than a raider's arrowhead on purpose. Fourteen of them
+ * at a raider's size would be a blot where the plot should be, and the shoal's
+ * job on the scope is to say "there, and roughly that big", with the mark
+ * carrying everything the player actually steers by.
+ */
+const SHOAL_DOT = 0.012;
+const SHOAL_RING = 0.03;
 
 /**
  * The hull arrowhead, in scope radii, pointing at 12 o'clock.
@@ -420,6 +457,7 @@ export interface Radar {
     weather?: WeatherState,
     cells?: CellsState,
     chart?: Chart,
+    hunt?: HuntState,
   ): void;
 }
 
@@ -932,6 +970,7 @@ export function createRadar(
     weather?: WeatherState,
     cells?: CellsState,
     chart?: Chart,
+    hunt?: HuntState,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
@@ -1401,6 +1440,60 @@ export function createRadar(
      * rather than throwing. `live` is at most two entries, so this loop costs
      * nothing and is empty on almost every frame of a run.
      */
+    /*
+     * The hunt's shoal, drawn UNDER the raiders and over the crests.
+     *
+     * Under the raiders because the two say different things about urgency: a
+     * red hull is a fight closing on you and a shoal is an opportunity sitting
+     * there, and where they overlap the fight is the one that has to be read.
+     *
+     * Live, for the raiders' reason: a shoal is a moving thing attached to
+     * nothing on the rastered picture, and the whole point of the mark is to
+     * steer by it. A mark that lagged the bow through a turn would be lagging
+     * at exactly the moment the player is turning to hold the target in the
+     * arc, which is the one moment this instrument exists for.
+     *
+     * `hunt` is optional so a hand-built call in a test, and the world before
+     * `leviathan.ts` has been wired, both draw a scope with no shoal on it
+     * rather than throwing.
+     */
+    if (liveFrame && hunt && hunt.shadows.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.clip();
+
+      for (let i = 0; i < hunt.shadows.length; i++) {
+        const shadow = hunt.shadows[i];
+        if (!projectLive(shadow.position)) continue;
+        const sx = hazPoint.x;
+        const sy = hazPoint.y;
+
+        // The same envelope the sprites are faded by, so a shoal arrives on
+        // the scope as it resolves out of the water and leaves the same way.
+        ctx.globalAlpha = shadow.envelope < 0 ? 0 : shadow.envelope > 1 ? 1 : shadow.envelope;
+
+        ctx.beginPath();
+        ctx.arc(sx, sy, shadow.marked ? SHOAL_DOT * 1.4 : SHOAL_DOT, 0, Math.PI * 2);
+        ctx.fillStyle = shadow.marked ? SHOAL_MARK : SHOAL_FILL;
+        ctx.fill();
+
+        // The ring is the mark, and it is drawn large enough to be found
+        // without the player having to compare fourteen dot sizes.
+        if (shadow.marked) {
+          ctx.beginPath();
+          ctx.arc(sx, sy, SHOAL_RING, 0, Math.PI * 2);
+          ctx.lineWidth = 1.1 / R;
+          ctx.strokeStyle = SHOAL_MARK_EDGE;
+          ctx.stroke();
+        }
+      }
+
+      // Puts back the alpha, the line width and the clip together, the same
+      // contract the blocks either side of this one rely on.
+      ctx.restore();
+    }
+
     if (liveFrame && boats && boats.live.length > 0) {
       // Clipped to the bezel, like the towns and the crests: a boat straddling
       // the rim is drawn cut rather than spilling onto the panel around the

@@ -26,9 +26,16 @@ import { BARBED_HEADS_DRAIN_SCALE } from './barbedheads';
  * any of that, and the renderer does not either: three modules read one
  * `FishingState` and none of them can contradict the others about it.
  *
- * This is the ONLY place gold is earned. `wallet.ts` is the only writer of the
- * figure and this is its only caller in a session, so "where did that gold
- * come from" has exactly one answer.
+ * This is the only place a CATCH is paid for, and the only caller of
+ * `wallet.add` in a fishing session, so "where did the gold from that fish come
+ * from" has exactly one answer.
+ *
+ * It is not the only place gold is earned in the game, and the comment here
+ * used to say it was. `main.ts` pays a won fight's bounty at `onContinue` and a
+ * worked shoal's purse at `onHuntEvent` -- three activities, three callers of
+ * `wallet.add`, and no fourth. The rule that actually holds is the useful one:
+ * `wallet.ts` is the single writer of the figure and every caller of `add` is
+ * an activity's own completion, so the question is always answerable by grep.
  */
 
 /**

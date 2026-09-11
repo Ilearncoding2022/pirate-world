@@ -1162,6 +1162,80 @@ export interface AiBoatState {
   readonly grace: number;
 }
 
+/* ------------------------------------------------------------------ */
+/* The leviathan hunt                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Where a hunt is. See docs/LEVIATHAN_PLAN.md.
+ *
+ * `idle` is no shoal on the water, `drifting` is a live one, and `settling`
+ * is the fade after a shoal has scattered or the last target has been banked.
+ * The purse is paid on the transition INTO `settling`, never during it, so a
+ * fade that is cut short by a reload cannot pay twice.
+ */
+export type HuntPhase = 'idle' | 'drifting' | 'settling';
+
+/** One shadow in the water. */
+export interface Shadow {
+  /** Unit direction of the shadow's centre. */
+  readonly position: Vector3;
+  /**
+   * Unit tangent: the direction it is travelling.
+   *
+   * Tangent at ITS OWN position, not at the shoal's centre. Every shadow
+   * transports itself, so a shoal nine units wide does not accumulate the
+   * two and a half degrees that sharing one tangent would cost it.
+   */
+  readonly forward: Vector3;
+  /** Whether this is the one the dial will arm against. Exactly one at a time. */
+  readonly marked: boolean;
+  /** Fade in and out, 0..1. Drives the sprite's opacity and the scope's alpha. */
+  readonly envelope: number;
+}
+
+/**
+ * The hunt as everything downstream sees it. One object, mutated in place for
+ * the life of the run, exactly as `AiBoatState` and `HazardState` are.
+ */
+export interface HuntState {
+  readonly phase: HuntPhase;
+  /** Live shadows. Empty while `idle`. */
+  readonly shadows: readonly Shadow[];
+  /** Targets banked so far, 0..HUNT_TARGETS. */
+  readonly target: number;
+  /** Damage banked so far, 0..100 * HUNT_TARGETS. */
+  readonly banked: number;
+  /**
+   * Whether the dial is armed THIS frame.
+   *
+   * True only when the marked shadow is inside harpoon range AND inside the
+   * bow's arc AND the locker has a spare AND nothing is suppressing the hunt.
+   * It is the whole of the pursuit: see docs/LEVIATHAN_PLAN.md, decision 3.
+   */
+  readonly armed: boolean;
+  /** Dial position in [-1, 1]. Zero, and meaningless, while `armed` is false. */
+  readonly dial: number;
+  /** Seconds of spawn suppression left after a hunt settles. */
+  readonly grace: number;
+}
+
+/**
+ * What just happened, for `main.ts` to pay and announce.
+ *
+ * `hit` is one harpoon landing and carries no gold: the purse settles once, at
+ * the end, so a hunt cannot pay twice for the same damage.
+ */
+export type HuntEventKind = 'hit' | 'sounded' | 'settled' | 'dry';
+
+export interface HuntEvent {
+  readonly kind: HuntEventKind;
+  /** Damage on a `hit`; the hunt's total on `sounded` and `settled`; 0 on `dry`. */
+  readonly damage: number;
+  /** Gold earned. Zero on a `hit` and on a `dry`. */
+  readonly gold: number;
+}
+
 /**
  * One side of a battle, in the arena's flat world units.
  *

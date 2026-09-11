@@ -37,6 +37,9 @@ import { createWaterHazardPlugin } from './waterhazard';
 import { createBlackout } from './blackout';
 import { createAiBoats } from './aiboats';
 import { createAiHulls } from './aihulls';
+import { createLeviathan } from './leviathan';
+import { createShadowField } from './leviathanshadows';
+import { createHuntDial } from './leviathandial';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
 import { CALM, LIVE, ROUGH, SWAY_MAX, SWAY_MIN } from './battlesea';
@@ -55,6 +58,7 @@ import type {
   ActiveQuest,
   BattleOutcome,
   HazardKind,
+  HuntEvent,
   PropulsionState,
   QuestOffer,
   ShipState,
@@ -647,6 +651,78 @@ async function startGame(): Promise<void> {
     onContact,
   });
 
+  /*
+   * The leviathan hunt: the sim, and nothing else yet.
+   *
+   * Built beside `aiBoats` because it is the same KIND of thing -- a seeded
+   * roll that puts something on the water near the player and carries it by
+   * parallel transport -- and `leviathan.ts` is cut from that module for
+   * exactly that reason. The two views it drives are built further down, with
+   * the rest of the scene and the rest of the HUD.
+   *
+   * It is handed the harpoon locker whole. That is the shared one, the same
+   * store the fishing card draws its spares from: one press is one harpoon and
+   * a hunt may take five, which is exactly one `HARPOON_BUNDLE`. A player who
+   * spends a bundle on a hunt has spent it, and the choice at the chandlery is
+   * the point rather than an oversight (docs/LEVIATHAN_PLAN.md, decision 5).
+   *
+   * `onHuntEvent` is declared below and hoisted into here, as `onContact` is
+   * above it: it moves gold and raises notices, and neither the wallet nor the
+   * strip is `leviathan.ts`'s business to know about.
+   */
+  const leviathan = createLeviathan({
+    terrain,
+    heightMap: globe.heightMap,
+    waterBodies: globe.waterBodies,
+    towns: globe.towns,
+    harpoons: records.harpoons,
+    onEvent: (event) => onHuntEvent(event),
+  });
+
+  /**
+   * What a hunt just did, in gold and in words.
+   *
+   * The ONLY place a hunt's gold moves, which keeps "where did that gold come
+   * from" answerable by grep: `fishing.ts` pays a catch, the battle bounty is
+   * paid at `onContinue`, and this pays a shoal. Three callers of
+   * `wallet.add`, three activities, and no fourth.
+   *
+   * A `hit` is deliberately silent on the strip. Five notices in twenty
+   * seconds would push everything else off it, and the dial is already showing
+   * the damage as it lands -- the strip is for what a player would otherwise
+   * miss, which is the purse and the reason the shoal left.
+   */
+  function onHuntEvent(event: HuntEvent): void {
+    if (event.kind === 'hit') return;
+
+    if (event.kind === 'dry') {
+      // Said once per shoal, and only when an empty locker is the single
+      // thing standing between the player and an armed dial. It names the
+      // chandlery because a player who has never bought a bundle has no other
+      // way to learn that this is what the bundle is for.
+      toast.push('NO HARPOONS. BUY A BUNDLE AT ANY BERTH', 'bad');
+      return;
+    }
+
+    if (event.gold > 0) records.wallet.add(event.gold);
+
+    if (event.kind === 'settled') {
+      toast.push(`SHOAL WORKED OUT  ${event.damage} DMG  +${event.gold} GOLD`, 'good');
+      return;
+    }
+    /*
+     * `sounded` covers every other ending: a red press, a maelstrom, a coast,
+     * and sailing out of range. They read the same to the player because they
+     * ARE the same -- the shoal is gone and this is what it was worth.
+     *
+     * A hunt that banked NOTHING says nothing. A shoal drifting onto a coast
+     * or out of range without ever being fired at is one the player either
+     * never engaged or deliberately sailed past, and the strip is for what
+     * they would otherwise miss -- not for narrating the sea.
+     */
+    if (event.gold > 0) toast.push(`SHOAL SCATTERED  +${event.gold} GOLD`, 'info');
+  }
+
   // The sheet a wreck happens behind. It owns nothing but its own element and
   // the promise that `onBlack` runs when the screen is actually opaque.
   const blackout = createBlackout();
@@ -761,6 +837,52 @@ async function startGame(): Promise<void> {
    * in docs/ARCHITECTURE.md exists to protect.
    */
   const aiHulls = createAiHulls(scene, () => ship.cloneHull(), postFx);
+
+  /*
+   * The shoal as things you can see, and the bar it is hunted through.
+   *
+   * `shadowField` is built here rather than beside the sim for `aiHulls`'s
+   * reason: it needs `scene` and `postFx`, and both are the world's rather
+   * than the hunt's. It builds two materials of its own after the composer's
+   * one-time scene walk, so it takes the same `adopt` a raider's recoloured
+   * neon does and for the identical reason.
+   *
+   * `huntDial` binds Space, and binds it LIVE: the key does something only
+   * while `leviathan.state.armed` is true, which that module holds false while
+   * docked, while suppressed and while the marked shadow is outside the bow's
+   * arc. That is the same discipline **One owner for the Escape key** below
+   * keeps -- the key belongs to whatever is currently showing the affordance
+   * for it.
+   *
+   * It is not quite enough on its own, and `fireHarpoon` below is the rest of
+   * it. Read that comment before touching either.
+   */
+  const shadowField = createShadowField(scene, postFx);
+  const huntDial = createHuntDial({ onFire: () => fireHarpoon() });
+
+  /**
+   * A Space press from the hunt's bar, guarded.
+   *
+   * `leviathandial.ts` refuses unless its own `armed` flag is set, and that
+   * flag is only ever written from the SAILING branch. Which is exactly the
+   * hole: an overlay freezes the world without clearing it, so the bar goes on
+   * showing the dial it was showing and a Space aimed at the fishing card
+   * would otherwise reach `leviathan.fire()` too, spending a harpoon against a
+   * frozen needle.
+   *
+   * So the guard lives here, where `main.ts` already owns the knowledge of who
+   * has the screen, and it is the moor key's list exactly. The alternative --
+   * ticking the dial inside the frozen branch to clear the flag -- would put a
+   * sixth call in the pause contract's five to fix a bug that belongs to the
+   * caller.
+   */
+  function fireHarpoon(): void {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (questCover.isOpen || menu.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
+    leviathan.fire();
+  }
   const battleScene = createBattleScene(quality, postFx);
   const battleUi = createBattleUi({ onContinue });
   /*
@@ -1040,6 +1162,22 @@ async function startGame(): Promise<void> {
   function onContact(boat: AiBoat): void {
     ship.halt();
     contactBoat = boat;
+    /*
+     * A fight ends a hunt, and pays what it banked.
+     *
+     * The battle branch runs the world -- wind, weather, hazards, the sun --
+     * but it does not run `leviathan.update`, and it must not: the hull is
+     * halted and `battle.ts` is steering it, so there is no helm to hold a
+     * target with. Leaving the shoal frozen through ninety seconds of a
+     * moving sea and handing it back would be the one object on the water
+     * that did not live through the fight.
+     *
+     * An OVERLAY is the opposite case and is deliberately not handled here:
+     * the frozen branch stops the whole world, the shoal with it, and the
+     * player comes back to the sea exactly as they left it. That is the pause
+     * contract doing its job rather than a hunt being spared.
+     */
+    leviathan.scatter();
     /*
      * Where the fight will be staged, decided HERE rather than three seconds
      * later when the fade puts it there.
@@ -1798,6 +1936,9 @@ async function startGame(): Promise<void> {
    * first frame of it.
    */
   const FORCE_DISTANCE = 25;
+  /** Scratch for the debug hook's bearing to the marked shadow. Never allocated per frame. */
+  const _markBearing = new THREE.Vector3();
+  const _markStarboard = new THREE.Vector3();
   const _forceAxis = new THREE.Vector3();
   const _forceCentre = new THREE.Vector3();
   const _forceNorth = new THREE.Vector3();
@@ -1876,6 +2017,49 @@ async function startGame(): Promise<void> {
    */
   let cellEncounters = 0;
   let inCell = false;
+
+  /*
+   * `?hunt=shoal` -- one forced shoal ahead of the bow, on the same
+   * three-second beat as `?hazard=` and `?cell=`.
+   *
+   * A shoal is a 6% draw every ten seconds and has to clear a coast, a
+   * reachability test and a 25-unit berth clearance before it lands, so
+   * waiting for one is the vigil docs/TESTING.md's budget exists to forbid.
+   *
+   * Unlike those two it is a STANDING mode: see `HUNT_RELAY_SECONDS` below.
+   *
+   * `leviathan.force` does its own aiming rather than borrowing `aimAtShip`,
+   * because the two want different things at the same point: a forced crest
+   * needs a centre with a tangent pointing BACK at the hull so it arrives, and
+   * a forced shoal needs the whole fourteen-shadow lay built about that
+   * centre and cleared to its full radius. The distance it uses is
+   * `SHOAL_SPAWN_MIN`, so the query puts the shoal exactly where a player
+   * would have had to sail to find one -- and when that point is aground it
+   * falls back to the ordinary compass search rather than laying one on a
+   * beach, since a shoal that scatters on the next frame leaves nothing at
+   * all to photograph.
+   */
+  const huntQuery = new URLSearchParams(window.location.search).get('hunt');
+  const forcedHunt = huntQuery === 'shoal' || huntQuery === '1';
+  let huntCountdown = 3;
+  /**
+   * Seconds between re-lays while `?hunt=` is set, world units of frame time.
+   *
+   * The query is a STANDING mode and not a one-shot, which is the opposite of
+   * `?hazard=` and `?cell=` and is a deliberate difference. A forced shoal is
+   * laid at `SHOAL_SPAWN_MIN` heading back down the bow, so it closes, passes
+   * a stationary hull and is past `DESPAWN_RANGE` about twenty-five SIMULATED
+   * seconds later. On the software rasteriser the smoke tier runs at, twenty-
+   * five simulated seconds is most of two minutes of wall clock -- so a
+   * one-shot lays its shoal during the boot and has taken it away again before
+   * anything gets to look at it, which is exactly what happened the first time
+   * the smoke case asserted on it.
+   *
+   * So while the query is set there is always a shoal, or one is two seconds
+   * away. Nothing about the roll, the grace or the placement changes; only how
+   * often the dev hand reaches in.
+   */
+  const HUNT_RELAY_SECONDS = 2;
 
   const clock = new THREE.Clock();
 
@@ -2233,6 +2417,16 @@ async function startGame(): Promise<void> {
         forcedCell = null;
       }
     }
+    // `?hunt=shoal`: a standing shoal rather than one shot. See
+    // HUNT_RELAY_SECONDS. False on every ordinary session.
+    if (forcedHunt && leviathan.state.phase === 'idle') {
+      huntCountdown -= dt;
+      if (huntCountdown <= 0) {
+        leviathan.force(ship.state);
+        huntCountdown = HUNT_RELAY_SECONDS;
+      }
+    }
+
     // `?hazard=`, once, three seconds in. Null on every ordinary session.
     if (forcedHazard !== null) {
       forceCountdown -= dt;
@@ -2276,6 +2470,43 @@ async function startGame(): Promise<void> {
         kind: h.kind,
         envelope: h.envelope,
       }));
+      // The hunt, on the same terms and for the same reason: a shoal cannot
+      // be photographed on a timer, and one that scattered leaves nothing on
+      // the water to say so. `markRange` and `markOffBow` are the two numbers
+      // the arc gate is made of, published so a shot can be taken at the
+      // moment the dial arms rather than a second either side of it.
+      {
+        const mark = leviathan.state.shadows.find((s) => s.marked) ?? null;
+        let markRange = -1;
+        let markOffBow = -1;
+        if (mark !== null) {
+          const pos = ship.state.position;
+          markRange = Math.acos(Math.max(-1, Math.min(1, pos.dot(mark.position)))) * GLOBE_RADIUS;
+          _markBearing.copy(mark.position).addScaledVector(pos, -mark.position.dot(pos));
+          if (_markBearing.lengthSq() > 1e-12) {
+            _markBearing.normalize();
+            // Signed, and signed off the STARBOARD vector rather than off a
+            // bearing subtraction: negative is to port, positive to
+            // starboard, and it means the same thing at a pole as at the
+            // equator. A shot that has to steer onto the mark needs to know
+            // which way, and an unsigned angle makes that a coin toss.
+            const cos = Math.max(-1, Math.min(1, ship.state.forward.dot(_markBearing)));
+            _markStarboard.crossVectors(ship.state.forward, pos);
+            const sense = _markStarboard.dot(_markBearing) >= 0 ? 1 : -1;
+            markOffBow = (sense * Math.acos(cos) * 180) / Math.PI;
+          }
+        }
+        window.__pirateWorld.hunt = {
+          phase: leviathan.state.phase,
+          shadows: leviathan.state.shadows.length,
+          armed: leviathan.state.armed,
+          dial: leviathan.state.dial,
+          target: leviathan.state.target,
+          banked: leviathan.state.banked,
+          markRange,
+          markOffBow,
+        };
+      }
       window.__pirateWorld.weather = {
         kind: weather.state.kind,
         storm: weather.state.storm,
@@ -2304,6 +2535,29 @@ async function startGame(): Promise<void> {
     // happens: `onContact` calls `ship.halt()` and flips the overlay, and the
     // `ship.update` below then runs on a hull that is already stopped.
     aiBoats.update(dt, ship.state, energy.state, hazards.state, suppressed(), stormOdds);
+
+    /*
+     * The hunt, and it is on THIS branch and no other.
+     *
+     * Immediately after the raiders and before the ship, for `aiBoats`'s own
+     * reason turned round: it reads last frame's `ship.state` for the range
+     * and arc gate, and it has to read the hull where the PLAYER saw it when
+     * they pressed. Moving this below `ship.update` would arm the dial against
+     * a bow that had already turned under the keystroke.
+     *
+     * The same `suppressed()` verdict the raiders get -- docked, mid-blackout,
+     * or in a maelstrom. It blocks the roll, it holds the dial dark, and it
+     * scatters a hunt already under way, paying what was banked: a hull in a
+     * spiral is not one the player is steering, and a maelstrom that silently
+     * swallowed a worked shoal would be the game taking back gold it had
+     * already shown.
+     *
+     * Nothing equivalent goes in the frozen branch or the battle branch, and
+     * that is the pause contract holding rather than an oversight: an overlay
+     * opening over a hunt, or a fight starting in the middle of one, ends it
+     * through this same path.
+     */
+    leviathan.update(dt, ship.state, suppressed());
     // The Navigation offers' one read this frame: the higher of Trim &
     // Sheathing's tier and an Overdrive Coil's burn speed -- never their sum,
     // see `types.ts`'s `PropulsionState` -- and whether a Sea Anchor is still
@@ -2326,6 +2580,14 @@ async function startGame(): Promise<void> {
     // meshes from the state the sim wrote above, and nothing reads them until
     // the render at the foot of the frame.
     aiHulls.update(dt, aiBoats.state);
+    // Beside the hulls, on the same terms and for the same reason: it places
+    // sprites from a state already written and nothing reads them until the
+    // render at the foot of the frame.
+    shadowField.update(dt, leviathan.state);
+    // The bar is a HUD element rather than a scene object, so it could sit
+    // anywhere below the sim; it is here so that everything the hunt touches
+    // in a frame reads as one block.
+    huntDial.update(leviathan.state);
     globe.update(
       dt,
       env,
@@ -2378,6 +2640,7 @@ async function startGame(): Promise<void> {
       weather.state,
       weatherCells.state,
       chart,
+      leviathan.state,
     );
     // After globe.update, which is what writes `env.sunDirection`. Reading it
     // before would put the dial a frame behind the sky it is describing.
