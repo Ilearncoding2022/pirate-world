@@ -2373,10 +2373,19 @@ two drift apart the first time either is retuned. `IDLE_DRAIN` is subtracted out
 of `FULL_BURN` and added back into `SOLAR_PEAK`, because both targets are claims
 about the *net* result rather than the gross.
 
+**`NAV_BURN_SCALE` (0.5) halves the propulsion draw and nothing else** (owner,
+2026-09-11). It is applied inside `FULL_BURN`, so the speed-squared curve, the
+Overdrive Coil's flat multiple of it and a tow's doubling of the sum all move
+together and cannot disagree. `IDLE_DRAIN` is left alone deliberately: the hotel
+load is drawn at anchor and at a berth too, so it is not a cost of navigating,
+and it is what `IDLE_ENDURANCE` is tuned against. The panel therefore reads 48%
+lower at full throttle rather than a round 50%. Nothing a maelstrom, a battle or
+a purchase takes is scaled — those are events, not navigation.
+
 | | |
 |---|---|
-| Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2` |
-| 15 / 7.5 / 5 kn to dry | 90 s / 5.4 min / 10.5 min |
+| Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2`, `FULL_BURN` already scaled |
+| 15 / 7.5 / 5 kn to dry | 174 s / 9.6 min / 16.8 min |
 | Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 0.5%/s net at noon (200 s to full), 7.2 min at 30°, negative after dark |
 | Berth | 2.0%/s net (50 s to full), overrides solar rather than stacking |
 | Mooring | 2 s continuously inside the ring — see below |

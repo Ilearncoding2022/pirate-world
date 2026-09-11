@@ -346,15 +346,21 @@ decision still open.)
   consumer of that curve is.
 
 **What that actually costs**, from `FULL_SPEED_ENDURANCE = 90`,
-`IDLE_ENDURANCE = 42 * 60` and `MAX_FORWARD = 10`. Speed here is world units
-per second, which is what makes the README's two-minute circumnavigation of a
-1257-unit great circle true:
+`NAV_BURN_SCALE = 0.5`, `IDLE_ENDURANCE = 42 * 60` and `MAX_FORWARD = 10`.
+Speed here is world units per second, which is what makes the README's
+two-minute circumnavigation of a 1257-unit great circle true:
 
 | | Top speed | Tank per 100 u | vs. flat out | Range, full tank |
 |---|---|---|---|---|
-| Not towing, flat out | 10.0 | 0.111 | 1.00x | 900 u |
-| **Towing (as built)** | 7.5 | 0.171 | **1.54x** | **584 u** |
-| Towing at half speed (rejected) | 5.0 | 0.123 | 1.11x | 813 u |
+| Not towing, flat out | 10.0 | 0.058 | 1.00x | 1738 u |
+| **Towing (as built)** | 7.5 | 0.091 | **1.58x** | **1100 u** |
+| Towing at half speed (rejected) | 5.0 | 0.069 | 1.21x | 1440 u |
+
+The ranges roughly doubled and the ratios rose a little when `NAV_BURN_SCALE`
+halved the propulsion draw on 2026-09-11 (they were 900/584/813 u at 1.54x and
+1.11x). The ratios moved because the scale cuts propulsion and leaves
+`IDLE_DRAIN` alone, so the hotel load a tow doubles along with everything else
+is now a larger share of a smaller burn. Decision 8's argument is unchanged.
 
 The middle row is the whole argument for decision 8, and it is worth keeping
 in front of anyone who later wonders why a tow is not simply slower. **Halving

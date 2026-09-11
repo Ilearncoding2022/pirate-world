@@ -126,11 +126,19 @@ export interface Energy {
  */
 
 /**
- * Seconds of full tank at top speed, ie. flat out at MAX_FORWARD (15.0 kn).
+ * Seconds of full tank at top speed BEFORE `NAV_BURN_SCALE`, flat out at
+ * MAX_FORWARD (15.0 kn).
  *
- * A full lap of the globe is 2*PI*200 / 15 = 84 s, so 90 s is a lap and a
- * breath: enough to cross any ocean on the map at a run, not enough to keep
- * running once you are there.
+ * Since the halving this is the figure `FULL_BURN` is derived against rather
+ * than a range the player ever sees: the tank actually runs **174 s** flat
+ * out. Read `FULL_BURN`'s table for what a speed really costs, and keep
+ * changes to the endurance here, where the scale is applied on top of it.
+ *
+ * A full lap of the globe is 2*PI*200 / 15 = 84 s. At 90 s this was a lap and
+ * a breath -- enough to cross any ocean at a run, not enough to keep running
+ * once you were there. At 174 s it is two laps, which is the deliberate
+ * loosening the halving was asked for and the thing to reconsider first if
+ * flat-out passages stop having a cost worth planning around.
  *
  * It bought a lap and a HALF while the ship still made 20 kn. The endurance
  * was deliberately left at 90 s when top speed came down rather than being
@@ -226,24 +234,57 @@ export const DOCK_NET_RATE = 1 / DOCK_FULL_SECONDS;
 const IDLE_DRAIN = 1 / IDLE_ENDURANCE;
 
 /**
- * Propulsion draw at top speed, level/s. 1/90 - IDLE_DRAIN = 0.010714.
+ * What the halving multiplies the propulsion draw by (owner, 2026-09-11).
+ *
+ * A half, and applied to `FULL_BURN` alone -- which is the one place every
+ * navigation cost in this game is spent from. The speed-squared curve, the
+ * Overdrive Coil's flat `OVERDRIVE_BURN_MULTIPLIER` times it, and a tow's
+ * doubling of the sum all reach this number through that single constant, so
+ * halving it there rather than at each of the three is what keeps them from
+ * ever disagreeing about it.
+ *
+ * `IDLE_DRAIN` is deliberately NOT scaled, and that is the whole of the line
+ * this constant draws. The hotel load is drawn at anchor and alongside a berth
+ * exactly as it is under way, so it is not a cost of NAVIGATING -- and cutting
+ * it would move the one thing it is tuned against, which is what a night hove
+ * to costs (see IDLE_ENDURANCE). The visible consequence: the rate on the
+ * panel falls by 48% at full throttle rather than by a round 50%, because the
+ * propulsion half is halved exactly and the hotel load it is added to is not.
+ *
+ * Nothing a maelstrom, a battle or a purchase takes is scaled either. Those are
+ * `wreck`, `defeat`, `stalemate` and `spend`, they are events rather than
+ * navigation, and they are left where they were on purpose.
+ */
+const NAV_BURN_SCALE = 0.5;
+
+/**
+ * Propulsion draw at top speed, level/s.
+ * (1/90 - IDLE_DRAIN) * NAV_BURN_SCALE = 0.005357.
  *
  * IDLE_DRAIN is subtracted rather than ignored because the burn at full
  * throttle is IDLE_DRAIN + FULL_BURN, and FULL_SPEED_ENDURANCE is a claim
- * about that sum. Typing 0.0107 beside the 90 leaves the pair free to disagree
+ * about that sum. Typing 0.0054 beside the 90 leaves the pair free to disagree
  * the moment either one is retuned.
+ *
+ * **FULL_SPEED_ENDURANCE is no longer what a full tank buys**, since the
+ * halving: the 90 s is the unscaled claim the subtraction above is made
+ * against, and the ship actually runs 174 s flat out. The table below is the
+ * post-scale truth, and it is the one to read.
  *
  * It scales with (speed / MAX_FORWARD)^2, so half throttle is a quarter of the
  * propulsion draw and cruising slowly is a strategy rather than a slower way
  * to arrive equally empty. Seconds from a full tank to dry, holding a speed:
  *
- *   15.0 kn -> 90 s           7.5 kn -> 325 s (5.4 min)
- *   10.0 kn -> 194 s (3.2 min)   5.0 kn -> 630 s (10.5 min)
+ *   15.0 kn -> 174 s (2.9 min)   7.5 kn ->  576 s (9.6 min)
+ *   10.0 kn -> 360 s (6.0 min)   5.0 kn -> 1008 s (16.8 min)
  *
- * Reverse burns on |speed| exactly like ahead: MAX_REVERSE is 7 kn, so full
- * astern costs 0.0027 level/s and would take about 6 minutes to empty.
+ * Reverse burns on |speed| exactly like ahead: MAX_REVERSE is 7 world units/s,
+ * which is 10.5 kn, so full astern costs 0.0030 level/s and would take about
+ * 5.5 minutes to empty. This line read "7 kn ... 0.0027 ... about 6 minutes"
+ * before the halving, which had read `MAX_REVERSE` as a figure in knots; it is
+ * world units/s in `ship.ts`, and the correction is unrelated to the scaling.
  */
-const FULL_BURN = 1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN;
+const FULL_BURN = (1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN) * NAV_BURN_SCALE;
 
 /**
  * The Overdrive Coil's flat propulsion draw, level/s, while it burns.
@@ -337,12 +378,13 @@ const RESTART_LEVEL = 0.03;
 /**
  * What is left in the main tank after a shipwreck: a quarter of it.
  *
- * 80% becomes 20%; a full tank becomes 22 s of running at top speed out of the
- * 90 s ENDURANCE_SECONDS buys. Written as the fraction KEPT rather than the
- * fraction lost because that is the reading the player takes off the bar the
- * moment the screen comes back: three quarters gone is a real setback and a
- * long sail to the nearest berth, and a total loss on top of a teleport to
- * somewhere unfamiliar would be a run ended rather than a run damaged.
+ * 80% becomes 20%; a full tank becomes 43 s of running at top speed out of the
+ * 174 s a tank buys since `NAV_BURN_SCALE`. Written as the fraction KEPT
+ * rather than the fraction lost because that is the reading the player takes
+ * off the bar the moment the screen comes back: three quarters gone is a real
+ * setback and a long sail to the nearest berth, and a total loss on top of a
+ * teleport to somewhere unfamiliar would be a run ended rather than a run
+ * damaged.
  */
 const WRECK_KEEP = 0.25;
 

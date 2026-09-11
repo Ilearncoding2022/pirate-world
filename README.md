@@ -391,8 +391,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   thrusters flare on the throttle.
 - **Power, not fuel tanks.** The ship runs on a reserve that burns with the
   *square* of your speed, so half throttle costs a quarter as much and cruising
-  slowly is a real strategy: 90 seconds flat out, or five and a half minutes
-  at 5 knots.
+  slowly is a real strategy: just under three minutes flat out, or nine and a
+  half minutes at half throttle.
   Stop in daylight and the panels charge you back at a rate that follows the
   sun's height in the sky: half a percent of the reserve per second with the
   sun overhead, which is three and a half minutes from empty, stretching past

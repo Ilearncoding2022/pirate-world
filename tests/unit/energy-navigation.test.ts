@@ -245,3 +245,65 @@ describe('energy.ts — Navigation offers', () => {
     expect(day.state.rate).toBeCloseTo(dayNoMoonlight.state.rate, 12);
   });
 });
+
+/**
+ * `NAV_BURN_SCALE` (owner, 2026-09-11): halve every power cost of NAVIGATING
+ * and leave every other cost alone.
+ *
+ * The figures here are worked from first principles rather than imported,
+ * because importing the constants the module derives them from would let this
+ * file agree with a typo. `IDLE_ENDURANCE` is 42 * 60 and the unscaled
+ * `FULL_SPEED_ENDURANCE` is 90, so the scaled burn at full throttle is
+ * 1/180 + 1/5040 = 29/5040 level/s -- the hotel load at its full size, plus
+ * half the propulsion draw.
+ */
+describe('energy.ts — NAV_BURN_SCALE halves navigation and nothing else', () => {
+  const IDLE = 1 / (42 * 60);
+  const FULL_THROTTLE = 1 / 180 + 1 / 5040;
+  /** `MAX_FORWARD`, ie. full ahead. Not imported: see the block comment. */
+  const TOP = 10;
+
+  /** Level/s actually committed at a held speed, measured off `rate`. */
+  function rateAt(speed: number): number {
+    const energy = createEnergy(NO_TOWNS, createBattery(0));
+    energy.update(0.1, { ...stoppedShip(), speed }, envWithSun(-1, 0), false);
+    return -energy.state.rate;
+  }
+
+  it('draws half the propulsion it used to at full throttle', () => {
+    expect(rateAt(TOP)).toBeCloseTo(FULL_THROTTLE, 9);
+    // The pre-halving figure, which this must NOT be: 1/90.
+    expect(rateAt(TOP)).toBeLessThan(1 / 90);
+    // Propulsion alone is exactly half of the old propulsion alone.
+    expect(rateAt(TOP) - IDLE).toBeCloseTo((1 / 90 - IDLE) / 2, 9);
+  });
+
+  it('keeps the quadratic law, so the halving reaches every throttle', () => {
+    // Half throttle is a quarter of the PROPULSION draw, hotel load aside.
+    expect(rateAt(TOP / 2) - IDLE).toBeCloseTo((rateAt(TOP) - IDLE) / 4, 9);
+    expect(rateAt(TOP / 4) - IDLE).toBeCloseTo((rateAt(TOP) - IDLE) / 16, 9);
+  });
+
+  it('leaves the hotel load, and so a drifting ship, exactly where it was', () => {
+    // Stopped and in the dark is the hotel load and nothing else. This is the
+    // constant NAV_BURN_SCALE deliberately does not touch, because it is paid
+    // at anchor and at a berth too and is therefore not a cost of navigating.
+    expect(rateAt(0)).toBeCloseTo(IDLE, 9);
+  });
+
+  it('leaves what a maelstrom and a battle take exactly where they were', () => {
+    // The exclusions, pinned. A wreck keeps a quarter and a stand-off costs a
+    // flat 25 points, both unchanged by a scale that applies to propulsion.
+    const wrecked = createEnergy(NO_TOWNS, createBattery(0));
+    wrecked.update(0.1, stoppedShip(), envWithSun(-1, 0), false);
+    const beforeWreck = wrecked.state.level;
+    wrecked.wreck();
+    expect(wrecked.state.level).toBeCloseTo(beforeWreck * 0.25, 9);
+
+    const stalled = createEnergy(NO_TOWNS, createBattery(0));
+    stalled.update(0.1, stoppedShip(), envWithSun(-1, 0), false);
+    const beforeStalemate = stalled.state.level;
+    stalled.stalemate();
+    expect(stalled.state.level).toBeCloseTo(beforeStalemate - 0.25, 9);
+  });
+});

@@ -202,19 +202,26 @@ export const DRIFT_SHARE = 0.2;
  * A quarter off, and NOT a half, and the arithmetic is the whole argument. The
  * burn goes as `(speed / MAX_FORWARD)^2`, so halving the speed quarters the
  * propulsion draw -- and doubling a quarter is a half. A tow at half speed
- * therefore costs 1.11x the fuel per unit distance and takes twice as long: the
+ * therefore costs 1.21x the fuel per unit distance and takes twice as long: the
  * doubled burn never reaches the panel, and the whole cost lands on the
- * player's patience. A quarter off costs **1.54x** the fuel per unit distance
+ * player's patience. A quarter off costs **1.58x** the fuel per unit distance
  * and arrives sooner. It is the better trade on both axes, and it is the one
  * that makes an empty tank -- which parts the line -- a risk rather than a rule
  * that never fires.
  *
- * Worked, from `FULL_SPEED_ENDURANCE = 90`, `IDLE_ENDURANCE = 42 * 60` and
- * `MAX_FORWARD = 10`, all in `energy.ts` and `ship.ts`:
+ * Worked, from `FULL_SPEED_ENDURANCE = 90`, `NAV_BURN_SCALE = 0.5`,
+ * `IDLE_ENDURANCE = 42 * 60` and `MAX_FORWARD = 10`, all in `energy.ts` and
+ * `ship.ts`:
  *
- *   not towing, flat out   10.0 kn   0.111 tank / 100 u   900 u on a full tank
- *   towing (as built)       7.5 kn   0.171 tank / 100 u   584 u
- *   towing at half speed    5.0 kn   0.123 tank / 100 u   813 u
+ *   not towing, flat out   10.0 kn   0.058 tank / 100 u   1738 u on a full tank
+ *   towing (as built)       7.5 kn   0.091 tank / 100 u   1100 u
+ *   towing at half speed    5.0 kn   0.069 tank / 100 u   1440 u
+ *
+ * Both ratios rose slightly with the halving (from 1.54x and 1.11x), and the
+ * reason is worth keeping: `NAV_BURN_SCALE` cuts the propulsion term and
+ * leaves `IDLE_DRAIN` alone, so the hotel load -- which a tow doubles along
+ * with everything else -- is now a larger share of a smaller burn. The
+ * argument the table is here to make is unchanged, and slightly stronger.
  *
  * `ship.ts` applies this AFTER its own `min(maxForward, hull.speedCap)`. See
  * `PropulsionState.towFactor` in `types.ts` for why it may not join that min.

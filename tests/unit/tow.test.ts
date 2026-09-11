@@ -180,18 +180,26 @@ describe('tow: what it does to the burn', () => {
     expect(TOW_BURN_MULTIPLIER).toBe(2);
   });
 
-  it('costs 1.54x the fuel per unit distance, which is the whole argument for a quarter', () => {
+  it('costs 1.58x the fuel per unit distance, which is the whole argument for a quarter', () => {
     // The two rules compose, and this is the number docs/SALVAGE_PLAN.md's
     // table is built on. Fuel per 100 units: flat out untowed against the tow's
     // own top speed, doubled.
+    //
+    // Both ratios rose when `NAV_BURN_SCALE` halved the propulsion draw on
+    // 2026-09-11 -- 1.54x and 1.11x before it -- because the scale cuts
+    // propulsion and leaves `IDLE_DRAIN` alone, so the hotel load a tow doubles
+    // along with everything else is a larger share of a smaller burn. Pinned to
+    // two decimals rather than one: at the old tolerance 1.58 still read as
+    // 1.54, which is exactly the drift these figures exist to catch.
     const free = perHundred(MAX_FORWARD, false);
     const towed = perHundred(MAX_FORWARD * TOW_SPEED_SHARE, true);
-    expect(towed / free).toBeCloseTo(1.54, 1);
+    expect(towed / free).toBeCloseTo(1.58, 2);
 
-    // And the rejected half-speed version would have cost 1.11x -- almost
-    // nothing -- which is why it was rejected. Pinned so the argument survives.
+    // And the rejected half-speed version would have cost 1.21x -- still
+    // little enough to be worth rejecting over. Pinned so the argument
+    // survives.
     const half = perHundred(MAX_FORWARD * 0.5, true);
-    expect(half / free).toBeCloseTo(1.11, 1);
+    expect(half / free).toBeCloseTo(1.21, 2);
     expect(towed).toBeGreaterThan(half);
   });
 

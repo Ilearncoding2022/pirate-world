@@ -85,7 +85,7 @@ same pattern — a cell bay holding three or four — would make every cell purc
 | | Item | Effect | Price | Built in |
 |---|---|---|---|---|
 | C | **SEA ANCHOR** · stows 5 | Kills the ship's way in ~1 s and holds ~3 s | 400 | `seaanchor.ts`, `ship.ts` |
-| C | **OVERDRIVE COIL** · stows 3 | 20 s at 16 kn, burning ~4× `FULL_BURN` (≈9% of a tank) | 800 | `overdrive.ts`, `ship.ts`, `energy.ts` |
+| C | **OVERDRIVE COIL** · stows 3 | 20 s at 16 kn, burning ~4× `FULL_BURN` (≈44% of a tank) | 800 | `overdrive.ts`, `ship.ts`, `energy.ts` |
 | D | **TRIM & SHEATHING** Mk I–III | `MAX_FORWARD` 10 → 11 → 12 → 13 | 2 000 / 4 000 / 8 000 | `trim.ts`, `ship.ts` |
 | D | **MOONGLASS ARRAY** Mk I–III | Night solar at 8/14/22% of `SOLAR_PEAK`, × `env.moonIllumination` | 3 000 / 6 000 / 12 000 | `moonglass.ts`, `energy.ts` |
 

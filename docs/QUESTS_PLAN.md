@@ -116,8 +116,11 @@ Open to correction, and each is flagged where it lands in the streams.
   The antipode is PI, 628 units, 180 degrees.
 - Time: world seconds of `env.elapsed`. One world day is `DAY_LENGTH`, 1200.
   The HUD prints remaining time as `M:SS` of world time.
-- Ship: ~10.5 units/s cruising (roadmap), 90 s of tank at 15 kn
-  (`energy.ts`, `FULL_SPEED_ENDURANCE`), so one tank is about one lap.
+- Ship: ~10.5 units/s cruising (roadmap), 174 s of tank at 15 kn
+  (`energy.ts`, `FULL_SPEED_ENDURANCE` scaled by `NAV_BURN_SCALE`), so one tank
+  is about two laps. It was one lap on a 90 s tank before the propulsion draw
+  was halved on 2026-09-11; contract distances were sized against the old
+  figure and are now a looser ask than they were written to be.
 - Chart coverage: fraction in [0, 1] of the globe's *area* that is
   discovered. The chart is an equirectangular texel grid, so each texel row is
   weighted by the cosine of its latitude. Unweighted, the poles would count
