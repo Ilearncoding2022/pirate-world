@@ -4,6 +4,7 @@ import type { HeightMap } from './heightmap';
 import type {
   AiBoatState,
   CellsState,
+  DerelictState,
   HazardState,
   SalvageState,
   ShipState,
@@ -224,6 +225,17 @@ const BOAT_EDGE = 'rgba(255, 255, 255, 0.5)';
  * steer TOWARD.
  */
 const SALVAGE_FILL = 'rgb(214, 178, 96)';
+
+/**
+ * A derelict: steel grey, and the same grey its hull and its ring wear in the
+ * world (`derelicthull.ts`).
+ *
+ * Not a raider's red or orange, because it is not a hull under way; not the
+ * salvage's brass, because it is not gold lying on the water; not the hazards'
+ * magenta, because it is not something to steer around. Grey is the colour this
+ * game has left for a thing that has simply stopped, which is what it is.
+ */
+const DERELICT_FILL = 'rgb(158, 170, 180)';
 
 /**
  * A raft, in scope radii, as a small diamond about its own centre.
@@ -453,6 +465,7 @@ export interface Radar {
     cells?: CellsState,
     chart?: Chart,
     salvage?: SalvageState,
+    derelict?: DerelictState,
   ): void;
 }
 
@@ -966,6 +979,7 @@ export function createRadar(
     cells?: CellsState,
     chart?: Chart,
     salvage?: SalvageState,
+    derelict?: DerelictState,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
@@ -1538,6 +1552,45 @@ export function createRadar(
       // Puts back the alpha, the line width, the styles and the clip together.
       ctx.restore();
     }
+
+    // ---- The derelict, from the LIVE frame --------------------------------
+    /*
+     * One hull at most, and only while it is ADRIFT: a derelict under tow is six
+     * units astern of own ship's own blip, where its mark would be a second
+     * arrowhead welded to the middle of the scope saying nothing the player does
+     * not already know. The job strip carries the tow instead.
+     *
+     * Drawn with `blipPath` rather than the raft's diamond, because this one IS
+     * a hull with a bow, and turned by the same two dot products a raider's mark
+     * is turned by.
+     */
+    if (liveFrame && derelict && derelict.live !== null && !derelict.live.towed) {
+      const hull = derelict.live;
+      if (projectLive(hull.position)) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.lineWidth = 0.9 / R;
+        ctx.strokeStyle = BOAT_EDGE;
+        ctx.fillStyle = DERELICT_FILL;
+        ctx.globalAlpha = hull.envelope < 0 ? 0 : hull.envelope > 1 ? 1 : hull.envelope;
+
+        const f = hFwd.x * hull.forward.x + hFwd.y * hull.forward.y + hFwd.z * hull.forward.z;
+        const st = hStb.x * hull.forward.x + hStb.y * hull.forward.y + hStb.z * hull.forward.z;
+        const a = Math.atan2(st, f);
+        const sinA = Math.sin(a);
+        const cosA = Math.cos(a);
+        ctx.save();
+        ctx.transform(cosA, sinA, -sinA, cosA, hazPoint.x, hazPoint.y);
+        blipPath(ctx);
+        ctx.restore();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     // ---- Wind arrow, on the true bearing, from the LIVE frame -------------
     /*
      * Deliberately not held back to the raster's frame the way the terrain and

@@ -20,6 +20,18 @@ export interface Energy {
    * `SOLAR_PEAK` it reaches at night, off `env.moonIllumination` (see
    * `moonglass.ts`).
    */
+  /**
+   * `towing` doubles the whole burn for as long as a derelict is on the line —
+   * the hotel load and the propulsion draw together, which is what "double the
+   * burn" means to the player reading the rate on the panel.
+   *
+   * It multiplies the DRAW and never the charge: a tow costs fuel, and a tow at
+   * a berth or under a noon sun is charging at exactly the rate it always did.
+   * Since `ship.ts` has already taken a quarter off the top speed by the time
+   * this sees the hull (`PropulsionState.towFactor`), the two rules compose
+   * into 1.54x the fuel per unit distance — see `TOW_SPEED_SHARE` in
+   * `derelict.ts` for that arithmetic and why a quarter rather than a half.
+   */
   update(
     dt: number,
     ship: ShipState,
@@ -27,6 +39,7 @@ export interface Energy {
     overdriveActive?: boolean,
     moonNightFraction?: number,
     weather?: WeatherState,
+    towing?: boolean,
   ): void;
   /**
    * Takes `level` off the plant in one go, if it is there to take.
@@ -243,6 +256,16 @@ const FULL_BURN = 1 / FULL_SPEED_ENDURANCE - IDLE_DRAIN;
  * happens to be moving at any one instant of it.
  */
 const OVERDRIVE_BURN = OVERDRIVE_BURN_MULTIPLIER * FULL_BURN;
+
+/**
+ * What a tow multiplies the whole burn by (owner, 2026-09-11).
+ *
+ * Two, flat, for as long as a derelict is on the line. Unlike
+ * `OVERDRIVE_BURN_MULTIPLIER` it scales the sum rather than replacing the
+ * curve, because a tow is not a mode the ship enters -- it is a load it is
+ * dragging, and the engine is still answering the throttle underneath it.
+ */
+export const TOW_BURN_MULTIPLIER = 2;
 
 /**
  * Solar with the sun in the zenith, level/s. 1/185 + IDLE_DRAIN = 0.005802.
@@ -470,6 +493,7 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     overdriveActive = false,
     moonNightFraction = 0,
     weather?: WeatherState,
+    towing = false,
   ): void {
     // A frame that advanced no time moves no charge. Returning leaves the last
     // true reading standing; falling through would rewrite `rate` to a 0 the
@@ -487,9 +511,26 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
     // past 1.0 -- see OVERDRIVE_BURN's own comment for why the bill is flat
     // for the whole window instead of tracking the instantaneous speed.
     const speedFrac = speed / MAX_FORWARD;
-    const burn = overdriveActive
+    const engine = overdriveActive
       ? IDLE_DRAIN + OVERDRIVE_BURN
       : IDLE_DRAIN + FULL_BURN * speedFrac * speedFrac;
+    /*
+     * And doubled for the whole of a tow.
+     *
+     * Applied to the SUM rather than to the propulsion term alone, which is the
+     * honest reading of "double the burn": a player watching the rate on the
+     * panel sees it double, including the hotel load a ship drifting under tow
+     * is still paying.
+     *
+     * Note what it does NOT do: `speedFrac` is still measured against
+     * `MAX_FORWARD` and not against the towing top speed. That is deliberate
+     * and it is the one knob left in this rule -- normalising against the tow's
+     * own 7.5 kn would make full throttle under tow read as full throttle to
+     * the plant and take the cost from 1.54x the fuel per unit distance to
+     * 2.67x. docs/SALVAGE_PLAN.md records both figures; the owner chose the
+     * first.
+     */
+    const burn = towing ? engine * TOW_BURN_MULTIPLIER : engine;
 
     // A berth overrides the panels rather than stacking with them. Shore power
     // is over four times the best the sun ever manages, so the sum would beat

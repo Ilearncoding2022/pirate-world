@@ -1648,6 +1648,24 @@ body {
   --act-glow: rgba(192, 138, 82, 0.32);
 }
 
+/* The fourth key, and the only one that is usually not there at all.
+
+   Steel rather than a fourth hue: a tow is not a thing the player bought and
+   stowed, it is a state the ship is in, and the grey says so beside three
+   coloured consumables. It is also the derelict's own colour in the world and
+   on the scope, so the key and the hull it drops read as one subject. */
+.dpad__act--tow {
+  --act-ink: #b6c2cc;
+  --act-glow: rgba(182, 194, 204, 0.34);
+}
+
+/* The UA's own `[hidden]` is `display: none`, which `.dbtn`'s own display
+   would beat -- the same trap `.fishing[hidden]` and `.fishbook[hidden]`
+   already carry a rule for. Without this the key is simply always on the pad. */
+.dpad__act--tow[hidden] {
+  display: none;
+}
+
 .dpad__act .dock__key {
   color: var(--act-ink);
   /* In `em` for the same reason the count's margin is: a px blur here would be
@@ -1752,6 +1770,16 @@ body {
   grid-row: 2;
   justify-self: stretch;
   align-self: start;
+}
+
+/* Beside ANCHOR, in the last corner the pad had left, and laid out exactly as
+   ANCHOR is: the two keys that sit under the helm rather than over it. */
+.dpad__act--tow {
+  grid-column: 3;
+  grid-row: 4;
+  justify-self: stretch;
+  align-self: start;
+  margin-top: 4px;
 }
 
 /* ---------------------------------------------------------------------

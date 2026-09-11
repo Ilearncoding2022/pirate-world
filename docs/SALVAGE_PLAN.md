@@ -1,11 +1,11 @@
-# Salvage fields and the derelict tow — the salvage built
+# Salvage fields and the derelict tow — both built
 
-Status: **salvage built, the tow next (2026-09-11).** This is the design for the
-two activities the owner chose out of the six put up on 2026-09-10 — items 5
-and 6 of that list. Part 1 has shipped; Part 2 is the next commit. Every number
-below is either the owner's own (quoted as such) or argued from a constant read
-out of the source; check a quoted constant before trusting it, because several
-are documented in their own files as retunable.
+Status: **built, 2026-09-11.** This is the design for the two activities the
+owner chose out of the six put up on 2026-09-10 — items 5 and 6 of that list —
+and it is now also the record of what shipped. Every number below is either the
+owner's own (quoted as such) or argued from a constant read out of the source;
+check a quoted constant before trusting it, because several are documented in
+their own files as retunable.
 
 **What it cost, and where it lives.** Six new modules and nine touched ones,
 about a thousand lines against a repository of thirty thousand:

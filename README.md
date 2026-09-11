@@ -26,6 +26,8 @@ the first frame you are handed does not stutter.
 | `D` / `→` / on-screen ▶ | Turn to starboard |
 | Mouse wheel | Zoom the follow camera |
 | `Space` (inside a berth's ring) | Make fast, or cast off again. While made fast the helm is locked |
+| `Space` (inside a derelict's ring) | Put the towline on a dead hull. A berth always wins the key: inside both rings, `Space` moors |
+| `T` / on-screen `[CAST OFF]` | Drop the tow where it floats. The key only exists while something is on the line |
 | on-screen `[FISH]` | Open the fishing screen — start a session, or read the record. On the helm pad, beside THRUST |
 | on-screen `[SHOP]` | Open the chandlery — only once you are moored. Under the telemetry panel, because it is a berth's key rather than the ship's |
 | on-screen `[WORK]` | Open the harbour's contract board — only once you are moored. Beside `[SHOP]`, on the same terms: it is the berth's key, not the ship's |
@@ -349,6 +351,34 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   At the ceiling that is about 310 gold a minute, which is under a fishing
   session's rate and well under a won battle: salvage is a side income for
   sailing through weather you were going to sail through anyway, not a career.
+- **Derelicts, and the tow.** On the same ten-second clock and the same weather
+  sum, at a tenth of the odds, the sea rolls for a **dead hull**: grey, unlit,
+  drifting where it was found, one in the world at a time and never expiring.
+  That is one every eighty minutes of fair-weather sailing and one every five
+  and a half minutes of the foulest. It carries the faintest of rim lights —
+  a tenth of a raider's — because an unlit hull on dark water is otherwise
+  unfindable, and the scope marks it in steel grey.
+  Come alongside and a ring offers itself the way a berth's does: **press
+  `Space`** and the towline goes on. A berth always wins that key, which is
+  also how a tow is settled. Under tow the ship makes **three quarters of its
+  top speed** — 7.5 knots on a bare hull, 9.75 with Trim III, and a quarter off
+  whatever a worn hull was already capped at — and **burns twice as fast**. The
+  wind is untouched, so a gale can still carry a towing ship faster than its own
+  engine could.
+  Those two rules together cost **1.54x the fuel per unit of distance**, which
+  is the reason the cut is a quarter rather than a half: the burn goes as the
+  square of the speed, so halving it would have quartered the propulsion draw
+  and handed the doubling straight back — 1.11x, a cost no player would ever see
+  on the panel, for twice as long at the helm.
+  Each hull names **one harbour**, 120 to 350 units off, never the nearest, and
+  the job strip carries it with a bearing and a range while you sail. There is
+  **no deadline**; the clock a tow runs against is the tank. Deliver it and the
+  berth pays **1200 to 2500 gold on the distance towed, and 8 reputation**.
+  Moor anywhere else and nothing happens — being in the wrong place is not a
+  mistake, it is the voyage not being over. `T` or `[CAST OFF]` drops it where
+  it floats, and the line parts for good if the tank reaches zero or a maelstrom
+  takes the ship, which is what makes the power bill a real risk rather than an
+  accounting entry.
 - **Ship wake** that follows the curve of the planet and fades behind you. It
   is drawn into the water rather than laid on top of it, so it tilts the
   surface and raises its own foam, and the foam sits still in the sea instead

@@ -298,6 +298,8 @@ shader.
 | `salvagebounty.ts` | `rollSalvage(rng, hasRoom?)`, `SalvageHaul`, `SalvageItem`, `GOLD_MIN`/`GOLD_MAX`/`GOLD_STEP`, `ITEM_CHANCE`, `CELL_SHARE`, `ITEM_PRICE`, `ITEM_LABEL`, `towGold(voyage)`, `TOW_GOLD_MIN`/`TOW_GOLD_MAX`, `TOW_REPUTATION` | what a raft is carrying and what a tow pays, as pure functions over an injected `rng` — `bounty.ts`'s shape, and the same rule: **exactly three draws per haul whatever it turns out to be**, so a seeded world replays. Gold is uniform over ten round hundreds (EV 550); one raft in twenty also carries a consumable, half of those a backup cell; an item with no room left in its locker is paid as its own `shop.ts` price in gold instead of being dropped |
 | `salvagerafts.ts` | `createSalvageRafts(scene, postFx?)`, `SalvageRafts` | the salvage as something you can see: a fixed pool of `LIVE_MAX` rafts from `raftmesh.ts`, placed on the globe from `SalvageState` each frame. The fade is spent on the SCALE rather than on a light, because a raft has none; no `rimglow.ts`, deliberately — the scope is what finds one |
 | `raftmesh.ts` | `buildRaft(name, yaw, radius?)`, `RAFT_PIECES`, `RAFT_NOMINAL_R`, `RAFT_COLOR` | one pile of lost timber, drawn the same way in both seas. Lifted unchanged out of `battlescene.ts` so the arena's flotsam and the ocean's salvage are one object rather than two tables that would drift apart on the first retune. Geometry and material are shared across every raft in the game |
+| `derelict.ts` | `createDerelicts(deps)`, `DerelictDeps`, `Derelicts`, `oddsFor(weather)`, `TOW_SPEED_SHARE`, `HOOK_RADIUS`, `TOW_DISTANCE`, the odds and band constants | the dead hull adrift and the tow: the same ten-second clock and weather sum as the salvage at a tenth of the odds (0.2% clear, 3% ceiling), **one at a time ever**, bound for a harbour drawn 120-350 units off, hooked by `Space` inside `HOOK_RADIUS` and then held rigidly `TOW_DISTANCE` astern. Owns `DerelictState`; publishes `hookReady` the way `energy.ts` publishes `berthReady`. It does not pay, does not slow the ship and does not decide when a tow is lost — `main.ts`, `ship.ts` and `energy.ts` do, off `towed` |
+| `derelicthull.ts` | `createDerelictHull(scene, cloneHull, postFx?)`, `DerelictHull` | the dead hull as something you can see, and the ring you hook it from: one clone from `ship.cloneHull()` with its neon zeroed, its planking darkened to a third and `rimglow.ts` installed at a tenth of a raider's strength — without which an unlit hull on dark water is unfindable. `aihulls.ts`'s opposite number in every visible respect |
 | `rimglow.ts` | `installRimGlow(root, color, strength?)`, `RimGlow`, `RIM_STRENGTH` | the Fresnel `onBeforeCompile` patch that lights a whole silhouette in one colour. Installed BEFORE `postFx.adopt` chains its own hook; see **Post-processing** |
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the gun's cadence, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
 | `battleconstants.ts` | `ARENA_R`, `ARENA_R_MIN`, `ARENA_SHRINK`, `ARENA_OMEGA`, `THROTTLE_GAIN`, `HITS_TO_LOSE`, `FIRE_COOLDOWN`, `BALL_SPEED`, `HIT_RADIUS`, `BATTLE_TIMEOUT` | the numbers the cannon fight is built out of, split out of `battle.ts` by the rework so that `battleai.ts` and `battlesea.ts` can read the ring's dimensions without importing the module that imports them. No logic, only tuning decisions with the reasoning attached; `battle.ts` re-exports the lot so every existing importer keeps working. The AI's own constants deliberately do NOT live here — they describe a gunner rather than an arena, and sit in `battleai.ts` |
@@ -1108,6 +1110,88 @@ arrives on the same frame its clock runs out against the player, by up to 16 ms
 of a several-minute deadline, and the player did get there. The clock is
 decremented and clamped at zero before anything else, so the HUD never shows a
 negative; the expiry sweep runs last.
+## Salvage and the tow
+
+Two activities off one idea: the sky decides what the sea leaves lying about.
+`docs/SALVAGE_PLAN.md` is the brief and the record of what shipped; this is how
+the pieces fit.
+
+**Six modules, and the split is the same one every other system here keeps.**
+`salvage.ts` and `derelict.ts` are sims — numbers, vectors, one callback between
+them, no DOM and no Three — and `salvagerafts.ts` and `derelicthull.ts` are the
+scene objects that read them. `salvagebounty.ts` is the pure payout table, on
+`bounty.ts`'s terms. `raftmesh.ts` is one pile of timber both seas draw.
+
+### A raft is an encounter, not weather
+
+The roll is `aiboats.ts`'s ten-second cadence rather than `hazards.ts`'s
+one-second one, and that is a decision rather than a convenience. A wave is
+weather — it is happening to you, five chances a second, and you steer around
+it. A raft is a thing you MEET: it sits still, it is found on the scope, and it
+has to be gone to. The raiders already model that shape, so salvage borrows
+their clock, their spawn band and their fade.
+
+The derelict shares the same clock at a tenth of the odds. Sharing it is
+load-bearing: two sims reading the same sky on two different periods is how a
+retune of one silently retunes the other.
+
+### The weather terms SUM
+
+    P = min(ceiling, clear + term * (rain > 0.1) + term * (storm > 0.1) + term * (fog > 0.1))
+
+0.5% / +3% / 9.5% for salvage and 0.2% / +1% / 3% for a derelict. The threshold
+is not a new number — `main.ts` already calls a cell MET at `> 0.1` for its
+encounter counter, and a second opinion about what counts as weather is how two
+opinions of the sky begin.
+
+One difference between the two tables is worth knowing before retuning either:
+**the salvage ceiling is exactly its own sum and the derelict's is not.**
+0.005 + 3 × 0.03 is 0.095, so that `min` never binds and is kept only as a guard
+against a fourth term; 0.002 + 3 × 0.01 is 0.032, and the derelict's cap really
+does take it back to a round 3%, because 3% is the figure the rate was argued
+in.
+
+### What the tow touches, and why it is three files
+
+A tow is one flag on one object, and three modules read it:
+
+- `ship.ts` multiplies `min(propulsion.maxForward, hull.speedCap)` by
+  `propulsion.towFactor` — **after** the min, never inside it. Inside, a hull
+  worn below 25% (capped at 5 kn) would tow at 5 and feel nothing, which is the
+  one state the load should hurt most. `docs/HARBOURS_PLAN.md`'s decision 14 is
+  about a worn hull overriding what the player BOUGHT; a dead ship on a rope is
+  not a purchase.
+- `energy.ts` doubles the whole burn, hotel load included, and never the charge.
+- `main.ts` pays for it, takes it away, and puts it on the job strip.
+
+The two rules compose into **1.54x the fuel per unit distance**, and that
+figure is the entire reason the speed cut is a quarter rather than a half: the
+propulsion draw goes as the square of the speed, so halving the speed quarters
+it and the doubling is handed straight back — 1.11x, twice as long at the helm
+for a cost the panel never shows. Both numbers are pinned in
+`tests/unit/tow.test.ts` against the real `energy.ts`, so the argument survives
+a retune that forgets it.
+
+### `Space` is a ladder, and a berth is the top rung
+
+`main.ts`'s keydown handler tests the existing guards, then a berth, then a
+derelict's ring. A player standing in both means to moor — and mooring is also
+what settles a tow, through `settleTow`, which is called every frame from the
+sailing branch rather than off the key press because `Space` is not the only way
+to end up made fast to a harbour.
+
+Casting off is deliberately NOT on `Space`: a press that drops the hull you
+towed across a hemisphere may not share a key with the most-pressed key on the
+helm. It is `T` and `[CAST OFF]`, and the button is hidden outright unless
+something is on the line.
+
+### Both sims publish, and neither decides
+
+`salvage.ts` raises `onTake` and knows nothing about gold. `derelict.ts` raises
+nothing at all: it exposes `hook`, `release`, `lose` and `settle`, and the
+events that drive them — a key press, an empty tank, a maelstrom, a mooring —
+all belong to modules that already own them. `lose` and `settle` differ only in
+who calls them and what happens next, which is why both are one `detach`.
 
 ## The cloud deck
 `clouds.ts` is not one sphere but `SHELL_COUNT` concentric ones spanning

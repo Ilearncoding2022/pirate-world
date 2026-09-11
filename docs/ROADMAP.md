@@ -461,12 +461,23 @@ Verified: no `requestPointerLock`, no `getGamepads`, and **no pinch gesture**,
 which means the nine-times zoom range the game is designed around is
 unreachable on a phone.
 
-### 7. Content breadth
+### 7. Content breadth — **partly closed**
 
 One hull. Two raiders that are the same mesh recoloured. Twenty fish. The
 36 harbours now have names and their own upgrade stock, which is the first
-identity any location in this game has had, but there is still nothing to
-*find*: no wrecks, no landmarks, no ruins, no NPCs.
+identity any location in this game has had.
+
+**There is now something to find.** `docs/SALVAGE_PLAN.md` shipped two
+activities on 2026-09-11: rafts of salvage that dirty weather leaves floating
+and pay gold and the chandlery's own consumables, and derelict hulls that are
+hooked with `Space` and towed to a named harbour at three quarters speed and
+double the burn. Both are found on the open sea rather than posted on a board,
+both scale with the sky, and neither needed a new world system — they read the
+weather, the wind and the berths that were already there.
+
+What is still missing is everything that is not *floating*: no landmarks, no
+ruins, no NPCs, nothing on the land at all. The sea has two more reasons to be
+sailed through; the coast still has none.
 
 ### 8. Shadows
 

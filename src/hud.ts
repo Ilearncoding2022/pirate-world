@@ -683,6 +683,47 @@ export function questLineText(line: QuestLineInput | null): string {
 }
 
 /**
+ * The tow's own line on the job strip.
+ *
+ * `bearing` is null when this world has no harbour by that name, exactly as
+ * `QuestLineInput.bearing` is and for the same reason — except that here it
+ * cannot actually happen, because a derelict is bound for a harbour drawn out
+ * of the world it was found in. It is carried anyway so the two lines are read
+ * the same way, and so a future save that carried a tow across a redraw does
+ * not have to invent a new state for it.
+ */
+export interface TowLineInput {
+  /** Harbour name the hull is bound for. */
+  readonly bound: string;
+  readonly bearing: number | null;
+  /** Great-circle distance to it, world units. Ignored when `bearing` is null. */
+  readonly distance: number;
+}
+
+/**
+ * The tow line, in `questLineText`'s own shape:
+ *
+ *     ASHPOINT REACH  042°  136 u  TOW
+ *
+ * No clock, because a tow has no deadline (owner, 2026-09-11). What it can
+ * actually be lost to is an empty tank, and the power block is already saying
+ * that louder than this strip could.
+ *
+ * The word TOW is at the END rather than the front, so the harbour, the bearing
+ * and the range sit in the same three places the eye already reads them in on a
+ * contract line: the strip is glanced at while steering, and a line that moved
+ * its own columns would have to be read rather than seen.
+ *
+ * Exported for `tests/unit/quests-views.test.ts`'s neighbours.
+ */
+export function towLineText(line: TowLineInput | null): string {
+  if (line === null) return '';
+  const where = line.bound.toUpperCase();
+  if (line.bearing === null) return `${where}  UNCHARTED  TOW`;
+  return `${where}  ${formatBearing(line.bearing)}  ${formatDistance(line.distance)}  TOW`;
+}
+
+/**
  * How alarming the contract line is, which is a different question from what it
  * says — the same split the power and hull blocks make.
  *
@@ -980,7 +1021,19 @@ export function createHud(
    * ship's position, and threading three more arguments through `update` would
    * make every caller that has no contracts pass three nulls.
    */
-  updateQuest(line: QuestLineInput | null): void;
+  /**
+   * The one line at the top of the HUD.
+   *
+   * `tow` WINS when there is one, and the precedence is the whole reason both
+   * go through one method: there is a single strip, and two methods writing it
+   * would be two write-through caches fighting over one element. A tow is also
+   * genuinely the thing being steered to — that is `questLineText`'s own
+   * argument for why the strip holds one line rather than a log — and unlike a
+   * contract it cannot be lost to a clock while it is off screen.
+   */
+  updateQuest(line: QuestLineInput | null, tow?: TowLineInput | null): void;
+  /** Shows or hides [CAST OFF]. True exactly while a derelict is on the line. */
+  updateTow(towing: boolean): void;
   /** Shows or hides the GPU/CPU/draw-call line. Off by default; main.ts calls this from its Backquote listener. */
   setDevTimingVisible(visible: boolean): void;
   /** Feeds this frame's rolling means to the dev line. A no-op while it is hidden costs nothing worth guarding. */
@@ -1114,11 +1167,22 @@ export function createHud(
 
   const writeOverdriveCount = textWriter(document.getElementById('hud-overdrive-count'));
   overdrive.onChange((count) => writeOverdriveCount(`×${count}`));
+  const writeTowShown = hiddenWriter(document.getElementById('btn-tow'));
   const writeOverdriveGate = reasonGateWriter(document.getElementById('btn-overdrive'));
   const writeOverdriveLive = modifierWriter(document.getElementById('btn-overdrive'), 'act');
 
   return {
-    updateQuest(line: QuestLineInput | null): void {
+    updateQuest(line: QuestLineInput | null, tow: TowLineInput | null = null): void {
+      // A tow first, and a contract only when there is none. See the interface.
+      if (tow !== null) {
+        // `goal` is the quiet severity, the one a contract with no clock gets,
+        // and it is the right one here for the same reason: nothing about a tow
+        // is running out.
+        writeQuestState('goal');
+        writeQuestText(towLineText(tow));
+        writeQuestShown(true);
+        return;
+      }
       // Hidden first when there is nothing, so the modifier and the text are
       // not written to an element nobody can see. Every writer is
       // write-through, so a HUD with no contracts costs nothing per frame.
@@ -1129,6 +1193,10 @@ export function createHud(
       writeQuestState(questSeverity(line));
       writeQuestText(questLineText(line));
       writeQuestShown(true);
+    },
+
+    updateTow(towing: boolean): void {
+      writeTowShown(towing);
     },
 
     update(ship: ShipState, energy: EnergyState, wind: WindState, weather?: WeatherState): void {

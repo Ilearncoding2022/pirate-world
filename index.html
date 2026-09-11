@@ -472,6 +472,22 @@
             <span class="dock__count" id="hud-anchor-count"></span>
           </span>
         </button>
+        <!-- Beside ANCHOR, and hidden unless a derelict is actually on the
+             line: this is the one control on the pad that does nothing at all
+             for almost every minute of a run, and a permanently dead key is
+             clutter in the corner a thumb lives in. `hud.ts` shows it off
+             `derelict.ts`'s own `towed`. -->
+        <button
+          id="btn-tow"
+          class="dbtn dock__btn dpad__act dpad__act--tow"
+          type="button"
+          aria-label="Cast off the tow"
+          hidden
+        >
+          <span class="dpad__act__inner">
+            <span class="dock__key">CAST OFF</span>
+          </span>
+        </button>
         <button id="btn-up" class="dbtn dbtn--up" type="button" aria-label="Thrust">
           <span class="dbtn__glyph">&#9650;</span>
           <span class="dbtn__label">Thrust</span>
@@ -883,6 +899,8 @@
             <li><kbd>Scroll</kbd><span>Zoom camera</span></li>
             <li><kbd>Space</kbd><span>Harpoon / Fire a broadside</span></li>
             <li><kbd>Space</kbd><span>Moor or cast off, alongside a berth</span></li>
+            <li><kbd>Space</kbd><span>Take a derelict in tow, alongside one</span></li>
+            <li><kbd>T</kbd><span>Cast off a tow, wherever it is</span></li>
             <li><kbd>Esc</kbd><span>This menu, and closes any panel</span></li>
           </ul>
           <div class="menu__actions">
