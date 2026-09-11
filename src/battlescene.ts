@@ -1,5 +1,4 @@
 import {
-  BoxGeometry,
   Color,
   DoubleSide,
   Group,
@@ -27,6 +26,7 @@ import {
   crestFragment,
 } from './battlewave';
 import { CREST_MAX, FLOTSAM_COUNT_MAX } from './battlesea';
+import { RAFT_NOMINAL_R, buildRaft } from './raftmesh';
 import { SUN_APPEARS_SIN } from './horizon';
 import { HULL_OFFSET } from './ship';
 
@@ -416,48 +416,12 @@ const CREST_FOOTPRINT_BACK = CREST_BACK_RATIO;
  */
 const FOULED_LIST = 0.1;
 
-/** Dark weathered-wood colour for the rafts' debris: lost timber, and nothing else in the arena is made of it. */
-const HAZARD_COLOR = '#181410';
-
-/**
- * The radius `RAFT_PIECES` below is authored against, arena units.
- *
- * The rafts used to be one size -- `battlesea.ts`'s old flat `FLOTSAM_RADIUS`
- * of 1.2 -- and the pile was drawn to fit it. Now every raft rolls its own
- * radius, so the group is scaled by `radius / RAFT_NOMINAL_R` and the pieces
- * keep the proportions they were drawn with. Written as its own named
- * constant rather than imported, because it describes THIS pile of boxes and
- * not the sim's range: change the boxes and this moves; change the range and
- * it does not.
+/*
+ * The rafts' own art -- the four boxes, the radius they are authored against
+ * and the weathered-timber colour -- lives in `raftmesh.ts` now, because the
+ * open ocean floats the same pile for salvage (`salvagerafts.ts`). It moved
+ * unchanged; an arena raft is the object it always was.
  */
-const RAFT_NOMINAL_R = 1.2;
-
-/**
- * The raft's own small cluster of debris, one box per entry: its offset
- * from the raft's centre and height above the water, its half-extents, and
- * a fixed tilt and heading baked in at construction so no two pieces read
- * as the same crate. Four pieces, kept within a unit or so of the centre --
- * inside `RAFT_NOMINAL_R`, the radius they are drawn against -- so the pile
- * never reads bigger than the hazard it actually is. Placement itself is two
- * lines: the group moves to its raft's `x`/`z` and takes that raft's own
- * radius as a uniform scale, and every box keeps the offset it was built
- * with.
- */
-const RAFT_PIECES: ReadonlyArray<{
-  readonly x: number;
-  readonly z: number;
-  readonly y: number;
-  readonly w: number;
-  readonly h: number;
-  readonly d: number;
-  readonly tilt: number;
-  readonly yaw: number;
-}> = [
-  { x: 0, z: 0.05, y: 0.08, w: 0.7, h: 0.22, d: 0.5, tilt: 0.08, yaw: 0.3 },
-  { x: 0.55, z: 0.3, y: 0.05, w: 0.4, h: 0.16, d: 0.9, tilt: -0.15, yaw: 1.1 },
-  { x: -0.5, z: 0.35, y: 0.1, w: 0.5, h: 0.18, d: 0.35, tilt: 0.22, yaw: -0.6 },
-  { x: -0.15, z: -0.55, y: 0.04, w: 0.35, h: 0.14, d: 0.6, tilt: -0.1, yaw: 2.0 },
-];
 
 export interface BattleScene {
   /**
@@ -798,9 +762,6 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
 
   /* ---- the rafts: one pool slot per raft the sim may float ---- */
 
-  const raftGeometry = new BoxGeometry(1, 1, 1);
-  const raftMaterial = new MeshStandardMaterial({ color: HAZARD_COLOR, roughness: 0.85, metalness: 0 });
-
   /*
    * `FLOTSAM_COUNT_MAX` slots, because that is the most the sim can ever roll
    * and nothing in this file may allocate on demand: a slot past
@@ -815,17 +776,7 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
    */
   const raftSlots: Group[] = [];
   for (let i = 0; i < FLOTSAM_COUNT_MAX; i++) {
-    const raft = new Group();
-    raft.name = `arena-raft-${i}`;
-    raft.visible = false;
-    raft.rotation.y = (i * Math.PI * 2) / FLOTSAM_COUNT_MAX;
-    for (const piece of RAFT_PIECES) {
-      const box = new Mesh(raftGeometry, raftMaterial);
-      box.scale.set(piece.w, piece.h, piece.d);
-      box.position.set(piece.x, piece.y, piece.z);
-      box.rotation.set(piece.tilt, piece.yaw, 0);
-      raft.add(box);
-    }
+    const raft = buildRaft(`arena-raft-${i}`, (i * Math.PI * 2) / FLOTSAM_COUNT_MAX);
     root.add(raft);
     raftSlots.push(raft);
   }
