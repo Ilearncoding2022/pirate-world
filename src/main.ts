@@ -711,15 +711,29 @@ async function startGame(): Promise<void> {
       return;
     }
     /*
-     * `sounded` covers every other ending: a red press, a maelstrom, a coast,
-     * and sailing out of range. They read the same to the player because they
-     * ARE the same -- the shoal is gone and this is what it was worth.
+     * `sounded` is every other ending, and the `reason` is the only thing that
+     * separates them. They cost exactly the same, so this is a WORD rather
+     * than a rule -- `quests.ts` carries `expired` against `abandoned` for the
+     * identical reason.
      *
-     * A hunt that banked NOTHING says nothing. A shoal drifting onto a coast
-     * or out of range without ever being fired at is one the player either
-     * never engaged or deliberately sailed past, and the strip is for what
-     * they would otherwise miss -- not for narrating the sea.
+     * A `pinprick` is the player's own doing and the animal's answer to it, so
+     * it gets the animal's name and says what happened. Everything else is
+     * passive -- a coast, a maelstrom, a fight, or simply sailing away -- and
+     * gets the plain line, because telling a player who deliberately steered
+     * off that the leviathan tired of them would be the game mislabelling
+     * their own choice.
+     *
+     * A hunt that banked NOTHING and was merely lost says nothing at all. A
+     * shoal drifting out of range without ever being fired at is one the
+     * player never engaged, and the strip is for what they would otherwise
+     * miss rather than for narrating the sea. A pinprick always speaks: they
+     * pressed, and they are owed the reason it ended.
      */
+    if (event.reason === 'pinprick') {
+      const purse = event.gold > 0 ? `  +${event.gold} GOLD` : '';
+      toast.push(`THE LEVIATHAN TIRED OF YOUR PINPRICKS AND SOUNDED${purse}`, 'bad');
+      return;
+    }
     if (event.gold > 0) toast.push(`SHOAL SCATTERED  +${event.gold} GOLD`, 'info');
   }
 

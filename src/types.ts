@@ -1234,6 +1234,19 @@ export interface HuntEvent {
   readonly damage: number;
   /** Gold earned. Zero on a `hit` and on a `dry`. */
   readonly gold: number;
+  /**
+   * Why a `sounded` hunt ended. Absent on every other kind.
+   *
+   * `pinprick` is a press too feeble to hold the animal's interest;
+   * `lost` is everything passive, which is a coast, a maelstrom, a fight, or
+   * the player simply sailing away.
+   *
+   * Both cost exactly the same, so this is not a rule but a WORD. It exists on
+   * `quests.ts`'s precedent, where a failed contract carries `expired` or
+   * `abandoned` for the same reason: telling a player who steered off that the
+   * leviathan tired of them would be the game mislabelling their own choice.
+   */
+  readonly reason?: 'pinprick' | 'lost';
 }
 
 /**

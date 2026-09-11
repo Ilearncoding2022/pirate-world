@@ -95,7 +95,23 @@ export const EMPTY_SAVE: SaveData = Object.freeze({
   gold: 0,
   fishBook: Object.freeze({}),
   reserve: 0,
-  harpoons: 0,
+  /*
+   * A new captain starts with one bundle in the locker, and this is the ONLY
+   * thing in `EMPTY_SAVE` that is not a zero.
+   *
+   * It is there for the leviathan hunt rather than for the fishing card. A
+   * session has ten harpoons of its own, so an empty locker costs a fisherman
+   * nothing; but an empty locker is one of the hunt's arming conditions, so a
+   * new player's first shoal was one they could watch and could not touch.
+   * Five is exactly `HARPOON_BUNDLE`, which makes the first hunt free and
+   * leaves the shared-locker economy untouched from the second one onward.
+   *
+   * It reaches only genuinely NEW players. `sanitize` reads every stored field
+   * on its own and defaults a missing one to zero, so a save written before
+   * the chandlery existed still opens with an empty locker: absent is not
+   * damage, and it is not a gift either.
+   */
+  harpoons: 5,
   seaAnchors: 0,
   overdriveCoils: 0,
   chumDrums: 0,

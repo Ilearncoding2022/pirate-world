@@ -3592,17 +3592,22 @@ strip naming the chandlery, once per shoal. A player can always fish, because a
 fishing session has ten harpoons of its own, so an empty locker is never a
 soft-lock; it is the shop teaching itself.
 
-**It does mean the hunt is invisible on a fresh save**, and that is worth
-stating rather than discovering. `save.ts`'s `EMPTY_SAVE` carries zero
-harpoons, so a new player's first shoal is one they can watch and cannot touch.
-They have to fish, earn about 500 gold, reach a berth, buy a bundle, and find
-another shoal. That follows from the shared-locker economy rather than
-contradicting it, and it is the one design figure here that most deserves a
-playtest: five harpoons in `EMPTY_SAVE` would make the first hunt free and cost
-nothing else. It is an owner's call, not a bug, and it is recorded as an open
-question in docs/LEVIATHAN_PLAN.md. It was found by `?hunt=armed` failing to
-arm in a browser while every unit case passed, because every unit case hands
-the sim a stocked locker.
+**A new captain therefore starts with one bundle already in the locker.**
+`save.ts`'s `EMPTY_SAVE` carries `harpoons: 5`, and it is the only field there
+that is not a zero. Without it a new player's first shoal was one they could
+watch and could not touch: they would have had to fish, earn about 500 gold,
+reach a berth and buy a bundle before a second shoal would arm. Five is exactly
+`HARPOON_BUNDLE`, so the first hunt is free and the shared-locker economy is
+untouched from the second one onward (owner's call, 2026-09-11).
+
+It reaches only genuinely new players. `sanitize` reads every stored field on
+its own and defaults a missing one to zero, so a save written before the
+chandlery existed still opens with an empty locker: absent is not damage, and
+it is not a gift either.
+
+The gap was found by `?hunt=armed` failing to arm in a browser while every unit
+case passed, because every unit case hands the sim a stocked locker and the
+game did not.
 
 ### One ramp, five bands
 `damageAt(p) = round(100 * (1 - |p|))`. The five colour stops `style.css` paints
@@ -3655,13 +3660,28 @@ on the transition INTO `settling`, so the fade that follows cannot pay twice.
 
 | Ending | Where |
 |---|---|
-| Five targets banked | `fire`, `settled` |
-| A press under `SOUND_BELOW` (25 damage) | `fire`, `sounded` |
-| Sailed more than `DESPAWN_RANGE` from the mark | `update` |
-| `suppressed()` went true: docked, a blackout, or a maelstrom | `update` |
+| Five targets banked, however feeble the fifth | `fire`, `settled` |
+| A press under `SOUND_BELOW` (10 damage), on any target but the last | `fire`, `sounded` with `reason: 'pinprick'` |
+| Sailed more than `DESPAWN_RANGE` from the mark | `update`, `reason: 'lost'` |
+| `suppressed()` went true: docked, a blackout, or a maelstrom | `update`, `reason: 'lost'` |
 | A fight started | `main.ts`'s `onContact` calls `leviathan.scatter()` |
 
-The last row is the one that needs saying. The battle branch runs the world but
+**The `reason` is a word, not a rule.** Both values cost exactly the same, and
+they exist so the strip can tell a player who was out-swum from a player who
+steered off. A `pinprick` gets the animal named at it (`THE LEVIATHAN TIRED OF
+YOUR PINPRICKS AND SOUNDED`) because it is the player's own press and the
+animal's answer to it; everything passive gets the plain line, because telling
+someone who deliberately sailed away that the leviathan tired of them would be
+the game mislabelling their own choice. `quests.ts` carries `expired` against
+`abandoned` for the identical reason.
+
+**The last target is exempt from the threshold**, and the order in `fire` is
+what makes it so: the count is checked before the damage. A player who has
+banked four and puts a feeble fifth into the water has finished the hunt
+whatever the rule says, and greeting a four-out-of-five run with "the leviathan
+tired of you" would read as a failure rather than as the end of a good one.
+
+The fight row is the one that needs saying. The battle branch runs the world but
 does not run `leviathan.update`, and must not: the hull is halted and
 `battle.ts` is steering it, so there is no helm to hold a target with, and a
 shoal frozen through ninety seconds of a moving sea would be the one object on

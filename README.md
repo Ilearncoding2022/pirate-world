@@ -489,24 +489,28 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   the elevation the sun was frozen at. There is no refund for quitting early.
 - **The leviathan hunt.** The one activity that does not stop the world. Sail
   open water and a shoal of shadows may resolve out of it, thirty to
-  forty-five units off — inside the scope's range, so you see the marks before
+  forty-five units off, inside the scope's range, so you see the marks before
   you see the water. They drift at four knots on one heading and turn, up to
   sixty degrees either way, every five to ten seconds. One shadow at a time
   wears a cyan ring, and a bar at the bottom of the screen lights **only** when
   that one is between two and four hull lengths ahead of you and within thirty
   degrees of the bow. Overshoot it and the bar goes out: a harpoon is thrown at
   water ahead of the ship, not at water under it. Nothing is paused: the wind still blows, the sun still crosses, raiders
-  still close, and you are steering the whole time. That is the point of it —
+  still close, and you are steering the whole time. That is the point of it:
   it is the only thing in this game played with the actual helm.
   When the bar lights, a needle sweeps it on a two-second sine, red through
   yellow to green and back, and `Space` looses a harpoon worth what the needle
   was on: 100 dead centre, nothing at either end. Five targets, banked, and
-  the shoal pays ten gold a point. But a press worth under 25 scatters it —
-  five is a ceiling, not a promise — and you keep only what you had banked.
+  the shoal pays ten gold a point. But a press worth under 10, the outer tenth
+  of the bar at either end, is too feeble to hold the animal: it sounds, the
+  hunt is over, and you keep only what you had banked. Five is a ceiling, not a
+  promise. The last target is the one exception, since a hunt with four in the
+  bank is finished whatever the fifth is worth.
   Harpoons come out of the **same locker the fishing card draws from**, one per
-  press, five per hunt, which is exactly one bundle. A full hunt is 500 damage
-  and 5,000 gold; an empty locker means the bar never lights, and the strip
-  says so. A maelstrom, a fight, or simply sailing seventy units away all end a
+  press, five per hunt, which is exactly one bundle. A new captain starts with
+  one bundle aboard, so the first hunt is free; after that an empty locker
+  means the bar never lights, and the strip says so. A full hunt is 500 damage
+  and 5,000 gold. A maelstrom, a fight, or simply sailing seventy units away all end a
   hunt the same way, paying what it had earned.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the

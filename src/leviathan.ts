@@ -223,15 +223,24 @@ export const DIAL_PERIOD = 2.0;
 export const HUNT_TARGETS = 5;
 
 /**
- * Damage under which the shoal scatters and the hunt is over.
+ * Damage under which the leviathan tires of being pricked and sounds.
  *
- * Twenty-five, which is `|dial| > 0.75`: the outer quarter of each red band.
+ * Ten, which is `|dial| > 0.9`: the outer tenth of each red band, and the
+ * owner's figure (2026-09-11). Twenty-five was built first and is a quarter of
+ * the bar at each end, which punishes an ordinary bad press rather than a
+ * contemptible one.
+ *
  * This is the failure state, and it is what turns five targets from a promise
  * into a ceiling. `docs/ROADMAP.md` calls the absence of a failure state a
- * CHOICE rather than a gap, so this is scoped to the hunt and changes nothing
+ * CHOICE rather than a gap, so it is scoped to the hunt and changes nothing
  * about the game as a whole: a scattered shoal still pays what was banked.
+ *
+ * It does NOT apply to the last target. A player who has banked four and puts
+ * a feeble fifth into the water has finished the hunt either way, and telling
+ * them the animal left in disgust would read as a failure on a run that just
+ * scored four out of five. See `fire`.
  */
-export const SOUND_BELOW = 25;
+export const SOUND_BELOW = 10;
 
 /**
  * Gold per point of damage.
@@ -741,14 +750,14 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
    * what makes the fade that follows unable to pay twice. `main.ts` moves the
    * gold; this only says how much.
    */
-  function finish(kind: 'sounded' | 'settled'): void {
+  function finish(kind: 'sounded' | 'settled', reason?: 'pinprick' | 'lost'): void {
     const banked = state.banked;
     state.phase = 'settling';
     state.armed = false;
     state.dial = 0;
     state.grace = SPAWN_GRACE;
     settleClock = FADE_OUT;
-    onEvent({ kind, damage: banked, gold: huntGold(banked) });
+    onEvent({ kind, damage: banked, gold: huntGold(banked), reason });
   }
 
   /* ---- The frame ----------------------------------------------------- */
@@ -815,7 +824,7 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
       !sailable(target.position) ||
       arcDistance(ship.position, target.position) > DESPAWN_RANGE
     ) {
-      finish('sounded');
+      finish('sounded', 'lost');
       return;
     }
 
@@ -878,12 +887,21 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     state.dial = 0;
     onEvent({ kind: 'hit', damage, gold: 0 });
 
-    if (damage < SOUND_BELOW) {
-      finish('sounded');
-      return damage;
-    }
+    /*
+     * The last target is exempt from the threshold, and the order here is what
+     * makes it so.
+     *
+     * A player who has banked four and puts a feeble fifth into the water has
+     * finished the hunt whatever the rule says, and greeting a four-out-of-five
+     * run with "the leviathan tired of you" would read as a failure rather than
+     * as the end of a good one. So the count is checked FIRST.
+     */
     if (state.target >= HUNT_TARGETS) {
       finish('settled');
+      return damage;
+    }
+    if (damage < SOUND_BELOW) {
+      finish('sounded', 'pinprick');
       return damage;
     }
 
@@ -908,7 +926,7 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
 
   function scatter(): void {
     if (state.phase !== 'drifting') return;
-    finish('sounded');
+    finish('sounded', 'lost');
   }
 
   /**

@@ -5585,9 +5585,13 @@ body.in-battle .dbtn--right {
  * nothing in `leviathan.ts` reads them: `damageAt` is one ramp and these are
  * its readout, so retuning the look here cannot retune the game.
  *
- * The two hard notches at 12.5% and 87.5% are SOUND_BELOW, the point at which
- * a press scatters the shoal. Drawn rather than explained, so the consequence
- * is visible before it is suffered.
+ * The two hard notches at 5% and 95% are SOUND_BELOW, the point at which a
+ * press is too feeble to hold the animal and it sounds. Drawn rather than
+ * explained, so the consequence is visible before it is suffered.
+ *
+ * They are `damageAt` read backwards: the threshold is 10 damage, which is
+ * `|dial| > 0.9`, which is the outer tenth of the bar at each end. Move
+ * SOUND_BELOW and these two numbers move with it or the bar starts lying.
  */
 .hunt__bar {
   position: relative;
@@ -5601,14 +5605,14 @@ body.in-battle .dbtn--right {
     linear-gradient(
       to right,
       transparent 0,
-      transparent calc(12.5% - 1px),
-      rgba(255, 255, 255, 0.85) calc(12.5% - 1px),
-      rgba(255, 255, 255, 0.85) calc(12.5% + 1px),
-      transparent calc(12.5% + 1px),
-      transparent calc(87.5% - 1px),
-      rgba(255, 255, 255, 0.85) calc(87.5% - 1px),
-      rgba(255, 255, 255, 0.85) calc(87.5% + 1px),
-      transparent calc(87.5% + 1px),
+      transparent calc(5% - 1px),
+      rgba(255, 255, 255, 0.85) calc(5% - 1px),
+      rgba(255, 255, 255, 0.85) calc(5% + 1px),
+      transparent calc(5% + 1px),
+      transparent calc(95% - 1px),
+      rgba(255, 255, 255, 0.85) calc(95% - 1px),
+      rgba(255, 255, 255, 0.85) calc(95% + 1px),
+      transparent calc(95% + 1px),
       transparent 100%
     ),
     linear-gradient(

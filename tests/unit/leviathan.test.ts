@@ -209,11 +209,12 @@ describe('the damage ramp', () => {
     expect(damageAt(0.25)).toBe(75);
   });
 
-  it('puts the sound threshold at three quarters out', () => {
-    // SOUND_BELOW is 25 damage, which is |p| > 0.75. Both sides of the edge,
-    // because this is the number that decides whether a hunt continues.
-    expect(damageAt(0.74)).toBeGreaterThanOrEqual(SOUND_BELOW);
-    expect(damageAt(0.76)).toBeLessThan(SOUND_BELOW);
+  it('puts the sound threshold at nine tenths out', () => {
+    // SOUND_BELOW is 10 damage, which is |p| > 0.9: the outer tenth of the bar
+    // at each end, and the two notches `style.css` draws. Both sides of the
+    // edge, because this is the number that decides whether a hunt continues.
+    expect(damageAt(0.89)).toBeGreaterThanOrEqual(SOUND_BELOW);
+    expect(damageAt(0.91)).toBeLessThan(SOUND_BELOW);
   });
 
   it('refuses a number that is not one', () => {
@@ -656,8 +657,41 @@ describe('the press', () => {
     expect(sounded).toHaveLength(1);
     expect(sounded[0].damage).toBe(100 + damage);
     expect(sounded[0].gold).toBe(huntGold(100 + damage));
+    // The WORD, not the rule: this ending is the player's own press and the
+    // strip names the animal for it, where a coast or a maelstrom does not.
+    expect(sounded[0].reason).toBe('pinprick');
     // Three targets were never offered, and their harpoons were never spent.
     expect(h.spares.taken).toBe(2);
+  });
+
+  it('exempts the last target from the threshold', () => {
+    /*
+     * A player who has banked four and puts a feeble fifth into the water has
+     * finished the hunt whatever the rule says. Greeting a four-out-of-five run
+     * with "the leviathan tired of you" would read as a failure rather than as
+     * the end of a good one, so the count is checked before the threshold.
+     */
+    const h = open(20);
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+
+    for (let i = 0; i < HUNT_TARGETS - 1; i++) {
+      const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
+      h.hunt.update(ARM_DT, ship, false);
+      expect(h.hunt.fire()).toBe(100);
+    }
+
+    // A deliberately contemptible fifth: a quarter period puts the needle at
+    // an end of the bar, well under SOUND_BELOW.
+    const last = parkOnMark(h, HARPOON_RANGE * 0.5);
+    sail(h, last, DIAL_PERIOD / 4, 1 / 240);
+    const damage = h.hunt.fire();
+    expect(damage).toBeLessThan(SOUND_BELOW);
+
+    // Settled, not sounded, and paid for everything banked.
+    const settled = h.events.filter((e) => e.kind === 'settled');
+    expect(settled).toHaveLength(1);
+    expect(settled[0].damage).toBe(400 + damage);
+    expect(h.events.filter((e) => e.kind === 'sounded')).toHaveLength(0);
   });
 
   it('pays once, whatever the fade does afterwards', () => {
@@ -690,6 +724,9 @@ describe('the three ways a hunt ends without a press', () => {
     const ended = h.events.filter((e) => e.kind === 'sounded');
     expect(ended).toHaveLength(1);
     expect(ended[0].gold).toBe(huntGold(100));
+    // Sailing away is the player's own choice, so it must NOT be reported as
+    // the animal losing interest in them.
+    expect(ended[0].reason).toBe('lost');
   });
 
   it('ends when the world is suppressed under it', () => {

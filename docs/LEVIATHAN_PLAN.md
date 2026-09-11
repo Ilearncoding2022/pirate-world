@@ -63,12 +63,21 @@ to be unworkable, say so and stop rather than substituting another.
    one harpoon and there are `HUNT_TARGETS` presses, so a hunt's ceiling is 5,
    which is exactly one `HARPOON_BUNDLE`: one bundle buys one hunt. There is
    deliberately no second "max draw" constant to disagree with the first.
-6. **A bad press ends the hunt.** A press worth less than `SOUND_BELOW` damage
-   scatters the shoal. Damage banked so far is paid; the remaining targets are
-   not offered. Note that `docs/ROADMAP.md` calls the absence of a failure state
-   a *choice* rather than a gap, so this is not closing a listed item: it is one
-   activity that can be lost, scoped to itself, and it leaves the global "no
-   failure state" position exactly where the owner set it.
+   **A new save starts with one bundle already in it** (`EMPTY_SAVE`'s only
+   non-zero field), so the first hunt is free and the economy is untouched from
+   the second onward. Owner's call, 2026-09-11; see the open question it
+   settled.
+6. **A contemptible press ends the hunt.** A press worth less than
+   `SOUND_BELOW` (10 damage, the outer tenth of the bar at each end) makes the
+   leviathan sound. Damage banked so far is paid; the remaining targets are not
+   offered. **The last target is exempt**, because a player who has banked four
+   has finished the hunt whatever the rule says. Revised by the owner on
+   2026-09-11 from the 25 first built, which punished an ordinary bad press
+   rather than a contemptible one. Note that `docs/ROADMAP.md` calls the absence
+   of a failure state a *choice* rather than a gap, so this is not closing a
+   listed item: it is one activity that can be lost, scoped to itself, and it
+   leaves the global "no failure state" position exactly where the owner set
+   it.
 7. **Gold at `HUNT_GOLD_PER_DAMAGE` = 10, not 50.** See **The purse** for the
    arithmetic against `bounty.ts` and `questconstants.ts`.
 8. **No reputation in the MVP.** See **The purse**.
@@ -185,9 +194,9 @@ sailing branch, suppressed() false
             │         └─ yes → dial armed, p = sin(2*PI*t/DIAL_PERIOD)
             │              └─ Space → damage = round(100 * (1 - |p|))
             │                   harpoons.spend(1); arrow flies to the shadow
+            │                   ├─ was that the 5th? → SETTLE, whatever it was worth
             │                   ├─ damage >= SOUND_BELOW → bank it, mark the next
-            │                   │    └─ was that the 5th? → SETTLE
-            │                   └─ damage <  SOUND_BELOW → SCATTER
+            │                   └─ damage <  SOUND_BELOW → SOUNDED (pinprick)
             ├─ player leaves (> DESPAWN_RANGE) or suppressed() goes true → SCATTER
             └─ SCATTER | SETTLE:
                  gold = round50(banked * HUNT_GOLD_PER_DAMAGE)
@@ -293,10 +302,12 @@ The five bands are where the colour changes. Nothing reads them but the painter.
 | 0.20 to 0.55 | yellow | 45 to 80 |
 | 0.55 to 1.00 | red | 0 to 45 |
 
-`SOUND_BELOW` is **25 damage**, which is `abs(p) > 0.75`: the outer quarter of
-each red band. A press there scatters the shoal (decision 6). The bar draws that
-threshold as a hard notch inside the red, so the consequence is visible before
-it is suffered rather than explained afterwards.
+`SOUND_BELOW` is **10 damage**, which is `abs(p) > 0.9`: the outer tenth of the
+bar at each end. A press there makes the leviathan sound (decision 6), except on
+the last target, which is over either way. The bar draws the threshold as a hard
+notch at 5% and 95%, so the consequence is visible before it is suffered rather
+than explained afterwards; move `SOUND_BELOW` and those two stops move with it
+or the bar starts lying.
 
 ### Where it sits
 
@@ -465,7 +476,7 @@ else.
 | `BOW_ARC` | 30 | Degrees either side of the bow |
 | `DIAL_PERIOD` | 2.0 | Seconds for a full sweep. `fishsim.ts`'s swing is 2.4; this is tighter |
 | `HUNT_TARGETS` | 5 | Targetable shadows per hunt, and so the harpoons one hunt may take: exactly one `HARPOON_BUNDLE` |
-| `SOUND_BELOW` | 25 | Damage under which the shoal scatters |
+| `SOUND_BELOW` | 10 | Damage under which the leviathan sounds. Exempt on the last target |
 | `HUNT_GOLD_PER_DAMAGE` | 10 | Gold per point. See **The purse** |
 | `FADE_IN` | 0.5 | Seconds. `aiboats.ts`'s figure |
 | `FADE_OUT` | 1 | Seconds. `aiboats.ts`'s figure |
@@ -581,7 +592,8 @@ Tier 1, `tests/unit/leviathan.test.ts`, DOM-free and driven by explicit `dt`:
 | What arms the dial | Range plus bow arc | Proximity alone: the helm does nothing and it is fishing again. A free-aim reticle: no projection system exists, and it would fight the on-screen touch controls |
 | Rendering the shadows | Sprite planes above the water | A real mesh: the expensive half of the original pitch, and the MVP exists to avoid it. A water-shader darkening term: reads correctly as *under* the surface and is the right answer eventually, but it touches the plugin contract and is Phase 2 |
 | Where the dial sits | Fixed HUD position | Anchored under the shadow: better spatially, but needs a world-to-screen projection module that does not exist and should not arrive inside a hunt |
-| A bad press | Scatters the shoal, hunt over | Only that target lost: no failure state, and the pitch's own best line was "it sounds and you've burned the fuel for nothing". Nothing at all: the red band becomes decoration |
+| A bad press | Sounds the leviathan, hunt over, at 10 damage and not on the last target | Only that target lost: no failure state, and the pitch's own best line was "it sounds and you've burned the fuel for nothing". Nothing at all: the red band becomes decoration. A threshold of 25, built first: punishes an ordinary bad press rather than a contemptible one |
+| A fresh save's locker | Five harpoons, one bundle | Zero, built first: the first shoal is one a new player can watch and cannot touch, which is a hard way to meet the only activity with no button. Ten: delays the first trip to the chandlery. Free shots of its own: breaks "one bundle buys one hunt" |
 | Damage curve | One ramp, five bands as readout | Five banded values: a step function the player cannot feel their way along, and five numbers to retune instead of one |
 | Gold multiplier | x10 | x50: pays more than a won fight with no stake, and makes the other four activities irrelevant. See **The purse** |
 | Reputation | None in the MVP | `damage / 10`: one hunt beats the best contract in the game and sets the scale wrong for a system that has not been designed |
@@ -735,27 +747,36 @@ Twelve, each with the reason. Nothing else in the document was contradicted.
     pixels at the range it is seen from. The accepted artefact in the plan is
     still accepted; it was simply not what was wrong.
 
-## Open questions for the owner
+## Questions the owner has settled
 
-Two, and neither is a bug.
+Three were put to the owner on 2026-09-11 and all three are answered. They are
+kept here rather than folded away, because each one changed a figure that the
+rest of this document argues for at length.
 
-1. **The hunt is invisible on a fresh save.** `save.ts`'s `EMPTY_SAVE` carries
-   zero harpoons and an empty locker is one of the gate's conditions, so a new
-   player's first shoal is one they can watch and cannot touch: they get the
-   `dry` notice, and have to fish, earn about 500 gold, reach a berth and buy a
-   bundle before a second shoal will arm. That follows from decision 5 rather
-   than contradicting it, and it is not a soft-lock, since a fishing session
-   has ten harpoons of its own. But it is a real onboarding cost for the one
-   activity in the game with no button to press, and `docs/ROADMAP.md` already
-   lists onboarding as an open gap. **Five harpoons in `EMPTY_SAVE`** would
-   make the first hunt free, cost nothing else, and leave every existing save
-   untouched. Not done, because it is an economy decision and the economy is
-   the owner's.
+1. **The hunt was invisible on a fresh save.** `EMPTY_SAVE` carried zero
+   harpoons and an empty locker is one of the gate's conditions, so a new
+   player's first shoal was one they could watch and could not touch.
+   **Settled: five harpoons in `EMPTY_SAVE`**, exactly one `HARPOON_BUNDLE`, so
+   the first hunt is free and the shared-locker economy is untouched afterwards.
+   It reaches only genuinely new players; a save written before the chandlery
+   existed still opens with an empty locker, because `sanitize` defaults a
+   missing field to zero rather than to `EMPTY_SAVE`'s value.
 
-2. **A press under `SOUND_BELOW` ends the whole hunt** rather than costing only
-   that target (decision 6). Built as specified. It is the failure state and
-   the sharpest thing in the feature; it is also the single figure most likely
-   to want softening after a playtest.
+2. **A press under `SOUND_BELOW` ended the whole hunt**, at a threshold of 25.
+   **Settled: the threshold is 10**, the outer tenth of the bar at each end, so
+   it answers a contemptible press rather than an ordinary bad one; and the
+   **last target is exempt**, since a player who has banked four has finished
+   the hunt anyway. The notice names the animal for it rather than reporting a
+   generic scatter, which is why `HuntEvent` grew a `reason`.
+
+3. **The browser case costs 2.9 minutes**, roughly doubling that tier and
+   breaking `docs/TESTING.md`'s own two-minute rule. **Settled: keep it**, and
+   amend the budget rather than the suite. The note in that file says what the
+   case buys and which single assertion to keep if it ever has to go.
+
+Nothing here is still open. The figures most likely to move next are the ones
+that have had no playtest at all: `P_SHOAL`, `SHADOW_SPEED`, the reroll window,
+and `HUNT_GOLD_PER_DAMAGE`.
 
 ## Out of scope
 

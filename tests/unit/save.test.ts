@@ -234,7 +234,10 @@ describe('save', () => {
     const persisted = JSON.parse(fake.getItem(SAVE_KEY)!) as SaveData;
     // Whole percent of a MAIN tank, which is the file's own unit for the cell.
     expect(persisted.reserve).toBe(50);
-    expect(persisted.harpoons).toBe(5);
+    // Ten, not five: a new captain starts with one bundle already in the
+    // locker so the leviathan hunt's first shoal can be fired at, and this
+    // buys a second. See EMPTY_SAVE.
+    expect(persisted.harpoons).toBe(10);
     expect(persisted.seaAnchors).toBe(1);
     expect(persisted.trimTier).toBe(1);
   });

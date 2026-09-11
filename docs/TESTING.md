@@ -39,8 +39,14 @@ that moved one pixel, a dial that cannot arm on a fresh save, and a warning
 colour the cascade was eating. Every one of those needed pixels, a real
 keystroke, or the game's actual starting state.
 
-Whether that is worth doubling the tier is the owner's call and not the
-implementer's. If it goes, the thing to keep is the assertion on
+**The owner's call, 2026-09-11: keep it, and amend the rule rather than the
+suite.** The two-minute line above is a guard against a suite nobody waits for,
+not a law, and a case returning six bugs in one feature is the wrong place to
+spend it. Read the budget as: under five minutes for a routine build, and any
+single case over about a minute has to name what it buys, in this file, the way
+this one does.
+
+If it ever does have to go, the thing to keep is the assertion on
 `hunt.sprites`: absent and illegible look identical in a screenshot and only
 one of them is a design trade.
 
