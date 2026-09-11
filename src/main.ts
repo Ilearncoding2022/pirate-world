@@ -37,7 +37,7 @@ import { createWaterHazardPlugin } from './waterhazard';
 import { createBlackout } from './blackout';
 import { createAiBoats } from './aiboats';
 import { createAiHulls } from './aihulls';
-import { createLeviathan } from './leviathan';
+import { createLeviathan, HUNT_TARGETS } from './leviathan';
 import { createShadowField } from './leviathanshadows';
 import { createHuntDial } from './leviathandial';
 import { createBattleScene } from './battlescene';
@@ -2054,6 +2054,25 @@ async function startGame(): Promise<void> {
    * to use to LOOK at a shoal rather than to fire at one.
    */
   const forcedHuntArmed = huntQuery === 'armed';
+  /**
+   * `?hunt=armed` stocks the locker, because otherwise it cannot possibly arm.
+   *
+   * A fresh save carries ZERO harpoons (`save.ts`, `EMPTY_SAVE`), and an empty
+   * locker is one of the gate's conditions, so a new player meets a shoal and
+   * the bar never lights: they get the `dry` notice pointing at the chandlery
+   * instead. That is the shared-locker economy working as designed and it is
+   * also, on a fresh save, invisible.
+   *
+   * The dev query's job is to set up the state under test, so it buys what the
+   * hunt needs through the ordinary `HarpoonStore` rather than reaching past
+   * it. Found by this exact query failing to arm in a browser while every unit
+   * case passed, because every unit case hands the sim a stocked locker.
+   */
+  if (forcedHuntArmed) {
+    while (records.harpoons.count < HUNT_TARGETS && records.harpoons.buy()) {
+      /* buys one bundle a turn until the hunt's whole draw is covered */
+    }
+  }
   let huntCountdown = 3;
   /**
    * Seconds between re-lays while `?hunt=` is set, world units of frame time.

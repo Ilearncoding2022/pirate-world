@@ -3592,6 +3592,18 @@ strip naming the chandlery, once per shoal. A player can always fish, because a
 fishing session has ten harpoons of its own, so an empty locker is never a
 soft-lock; it is the shop teaching itself.
 
+**It does mean the hunt is invisible on a fresh save**, and that is worth
+stating rather than discovering. `save.ts`'s `EMPTY_SAVE` carries zero
+harpoons, so a new player's first shoal is one they can watch and cannot touch.
+They have to fish, earn about 500 gold, reach a berth, buy a bundle, and find
+another shoal. That follows from the shared-locker economy rather than
+contradicting it, and it is the one design figure here that most deserves a
+playtest: five harpoons in `EMPTY_SAVE` would make the first hunt free and cost
+nothing else. It is an owner's call, not a bug, and it is recorded as an open
+question in docs/LEVIATHAN_PLAN.md. It was found by `?hunt=armed` failing to
+arm in a browser while every unit case passed, because every unit case hands
+the sim a stocked locker.
+
 ### One ramp, five bands
 `damageAt(p) = round(100 * (1 - |p|))`. The five colour stops `style.css` paints
 are a READOUT of that and nothing reads them back, so the palette retunes

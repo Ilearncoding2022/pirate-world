@@ -735,11 +735,27 @@ Twelve, each with the reason. Nothing else in the document was contradicted.
     pixels at the range it is seen from. The accepted artefact in the plan is
     still accepted; it was simply not what was wrong.
 
-One thing the plan flagged as needing the owner's word was built as flagged and
-is still open to it: **a press under `SOUND_BELOW` ends the whole hunt** rather
-than costing only that target (decision 6). It is the failure state and it is
-the sharpest thing in the feature; it is also the single figure most likely to
-want softening after a playtest.
+## Open questions for the owner
+
+Two, and neither is a bug.
+
+1. **The hunt is invisible on a fresh save.** `save.ts`'s `EMPTY_SAVE` carries
+   zero harpoons and an empty locker is one of the gate's conditions, so a new
+   player's first shoal is one they can watch and cannot touch: they get the
+   `dry` notice, and have to fish, earn about 500 gold, reach a berth and buy a
+   bundle before a second shoal will arm. That follows from decision 5 rather
+   than contradicting it, and it is not a soft-lock, since a fishing session
+   has ten harpoons of its own. But it is a real onboarding cost for the one
+   activity in the game with no button to press, and `docs/ROADMAP.md` already
+   lists onboarding as an open gap. **Five harpoons in `EMPTY_SAVE`** would
+   make the first hunt free, cost nothing else, and leave every existing save
+   untouched. Not done, because it is an economy decision and the economy is
+   the owner's.
+
+2. **A press under `SOUND_BELOW` ends the whole hunt** rather than costing only
+   that target (decision 6). Built as specified. It is the failure state and
+   the sharpest thing in the feature; it is also the single figure most likely
+   to want softening after a playtest.
 
 ## Out of scope
 
