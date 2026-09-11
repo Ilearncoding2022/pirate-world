@@ -3100,6 +3100,29 @@ kbd {
 }
 
 /*
+ * The one line that is not always there: where the fight went, when it had to
+ * go somewhere.
+ *
+ * Deliberately NOT given a `display`. The element carries the `hidden`
+ * attribute and the UA sheet's `[hidden] { display: none }` is the weakest
+ * rule in the cascade, so a `display: block` here -- even on the base class --
+ * would win and pin the line on screen for every fight. Everything below is
+ * paint only.
+ *
+ * Set apart from the blurb above it in the foe's own hue rather than the
+ * muted ink: it is the raider doing something, not another rule of the fight,
+ * and it has to read as a new sentence in a paragraph the player has already
+ * seen twenty times.
+ */
+.battlecover__drive {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  color: color-mix(in srgb, var(--foe) 78%, var(--ink));
+}
+
+/*
  * The clock, bottom-right, out of the text column.
  *
  * Placed over the open water in the plate rather than centred over the whole

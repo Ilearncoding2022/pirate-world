@@ -811,6 +811,13 @@
           <p class="battlecover__foe" id="battlecover-foe"></p>
           <h2 class="battlecover__title" id="battlecover-title">ACTION STATIONS</h2>
           <p class="battlecover__blurb" id="battlecover-blurb"></p>
+          <!-- Ships EMPTY and hidden, and stays that way for most fights.
+               battlecover.ts raises it only when battlering.ts had to slide
+               the duelling circle clear of a coast -- see RING_DRIVEN_OFF.
+               The text is not typed here for the reason none of the rest is:
+               the screen's sentences are written from the constants that
+               enforce them. -->
+          <p class="battlecover__drive" id="battlecover-drive" hidden></p>
         </div>
 
         <!-- Bottom-right, out of the text column and over the open water in

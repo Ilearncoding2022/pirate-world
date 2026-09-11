@@ -86,8 +86,14 @@ export interface BattleCover {
    * read, so the number the card teaches and the number the sim enforces
    * cannot be two different figures. Defaulted to `HITS_TO_LOSE`, which is
    * the fight exactly as it was before hulls existed.
+   *
+   * `drivenOff` is `main.ts`'s verdict on the ring search: true when the
+   * fight had to be slid more than `RING_DRIVEN_OFF` off the contact to find
+   * water a duelling circle fits in. It adds one line and nothing else.
+   * Defaulted to false so every existing caller -- the unit cases, `?battle=1`
+   * before the search is wired -- gets the card it always got.
    */
-  open(kind: AiBoatKind, playerHitsToLose?: number): void;
+  open(kind: AiBoatKind, playerHitsToLose?: number, drivenOff?: boolean): void;
   close(): void;
   /**
    * Advances the count. Called once a frame while open.
@@ -151,6 +157,24 @@ const KIND_LABEL: Record<AiBoatKind, string> = {
  * whole job is to teach the rules cannot be the sentence that reads as
  * broken.
  */
+/**
+ * The line the card adds when the fight is not where the ram was.
+ *
+ * `battlering.ts` will slide a ring to the far side of the planet rather than
+ * stage one across a headland, and about three coastal contacts in four move
+ * far enough to be somewhere else. A screen that went up on strange water
+ * without a word would read as a bug -- the player last saw a coastline and
+ * is now looking at open sea -- so the card says it, in the raider's voice,
+ * as something the raider DID rather than as a placement note.
+ *
+ * No distance in it, deliberately. "Driven 96 units" is a number off a system
+ * the player cannot see and has no feel for, and the sentence's whole job is
+ * to make a teleport read as a chase. The fight is the same fight wherever it
+ * is staged.
+ */
+const DRIVEN_TEXT =
+  'No sea room inshore: the raider runs you out to open water before the guns speak.';
+
 function blurbText(playerHitsToLose: number): string {
   const perSecond = Math.round(1 / FIRE_COOLDOWN);
   const n = playerHitsToLose;
@@ -168,6 +192,7 @@ export function createBattleCover(deps: BattleCoverDeps): BattleCover {
   const foeEl = document.getElementById('battlecover-foe');
   const blurbEl = document.getElementById('battlecover-blurb');
   const countEl = document.getElementById('battlecover-count');
+  const driveEl = document.getElementById('battlecover-drive');
 
   if (root === null) {
     /*
@@ -265,7 +290,11 @@ export function createBattleCover(deps: BattleCoverDeps): BattleCover {
       return open;
     },
 
-    open(kind: AiBoatKind, playerHitsToLose: number = HITS_TO_LOSE): void {
+    open(
+      kind: AiBoatKind,
+      playerHitsToLose: number = HITS_TO_LOSE,
+      drivenOff = false,
+    ): void {
       if (open) return;
       remaining = COUNTDOWN;
       lastTick = performance.now();
@@ -276,6 +305,19 @@ export function createBattleCover(deps: BattleCoverDeps): BattleCover {
         blurbEl.textContent = blurbText(playerHitsToLose);
       }
       if (foeEl !== null) foeEl.textContent = KIND_LABEL[kind];
+      /*
+       * Written every time rather than cached against a previous value, the
+       * way the blurb is. The blurb is a long sentence rebuilt from three
+       * constants; this is one string assigned to one node, and a
+       * write-through cache for it would be more state than the work it
+       * saves. `hidden` is the only thing that has to be right, and it is set
+       * on both branches so a fight that is not driven off can never inherit
+       * the last one's line.
+       */
+      if (driveEl !== null) {
+        driveEl.textContent = drivenOff ? DRIVEN_TEXT : '';
+        driveEl.hidden = !drivenOff;
+      }
       if (kindClass !== null) overlay.classList.remove(kindClass);
       kindClass = KIND_CLASS[kind];
       overlay.classList.add(kindClass);
