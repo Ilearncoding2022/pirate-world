@@ -1,6 +1,6 @@
 # Roadmap and handoff
 
-Status of the project as of **v0.24.0** (2026-09-11), and what is worth doing
+Status of the project as of **v0.25.0** (2026-09-11), and what is worth doing
 next. This is a handoff document: it assumes you have read `README.md` for what
 the game is and `docs/ARCHITECTURE.md` for how it is built, and it exists so
 the next person does not have to re-derive which of the obvious improvements
@@ -16,10 +16,10 @@ of a market rather than of a codebase and say so where they start.
 
 | | |
 |---|---|
-| Version | 0.24.0 |
-| Source | 116 TypeScript modules, ~50 200 lines, plus 5 700 lines of CSS |
-| Tests | 57 unit files / 644 cases (~4 s), 9 browser cases (~3.3 min) |
-| Bundle | 977 KB JS (288 KB gzipped), 52 KB CSS, one chunk |
+| Version | 0.25.0 |
+| Source | 117 TypeScript modules, ~51 300 lines, plus 5 700 lines of CSS |
+| Tests | 58 unit files / 657 cases (~5 s), 9 browser cases (~3.4 min) |
+| Bundle | 978 KB JS (289 KB gzipped), 52 KB CSS, one chunk |
 | Assets | One 5.1 MB glTF hull, four WebP illustrations. Everything else procedural |
 | Dependencies | 2 runtime (`three`, `simplex-noise`), 7 dev |
 
@@ -221,7 +221,9 @@ expeditions rather than trivia.
 `2*PI*GLOBE_RADIUS / DAY_LENGTH`, which at 1200 s is **1.05 world units per
 second**.
 A circumnavigation is about 1257 units and takes about two minutes at 10 knots,
-so the ship makes roughly 10.5 units per second.
+so the ship makes roughly 10.5 units per second. Since v0.25.0 there is always
+somewhere to do it: `terrain.ts` guarantees forty units of open ocean along the
+equator in every world, and the ship spawns in the middle of it.
 
 **The ship is about ten times faster than the sunset.** It can outrun night.
 Almost no game can say that, and this one can only say it because the planet is
