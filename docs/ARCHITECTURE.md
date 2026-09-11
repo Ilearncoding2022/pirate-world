@@ -159,6 +159,26 @@ which makes the top speed depend on the frame rate: at the 15 kn this was
 measured under, 14.8 kn at 60fps and 14.0 at 10. The closed form is exactly `thrust / DRAG` at any rate, and still decays
 cleanly to zero with no throttle, so the ship coasts as before.
 
+**A dry tank is a crawl, not a stop.** `LIMP_SPEED` (1, exported from
+`ship.ts`) is the steerage way left to a ship with no power, and it is spent
+through the same ratio as everything else on this page: with `canThrust` false
+the throttle pushes `LIMP_SPEED * DRAG` instead of `ACCEL`, which terminates at
+one knot ahead or astern. Because it is a thrust and not a floor under `speed`,
+a ship that loses power at full ahead decays *down* to the crawl on exactly the
+curve it used to decay to zero on, and one starting from rest works *up* to it
+over the same 2.9 s time constant — nothing snaps, and the closed form above is
+untouched. It goes under the same `Math.min` as the hull cap and the tow share,
+so it is a ceiling and never buys back a cap already below it: a critical hull
+under tow still crawls at 0.75 kn, not 1.
+
+Two things it deliberately does not do. It only exists while a throttle key is
+held, so releasing the key still coasts the hull to the exact dead stop the
+panels need (see **Energy** below) — a dead ship left alone charges exactly as
+it always did, and the cost of crawling is that you are not charging while you
+do it. And it is engine speed, so the wind and a hazard's pull are added on top
+of it afterwards like any other: one knot is what the plant gives, not what the
+ship makes good over the ground.
+
 The hull is drawn at `MODEL_SCALE` (0.65), exported from `ship.ts` because the
 wake is authored against the hull's own dimensions and has to shrink with it —
 `STERN_BACK`, `BOW_FORWARD` and `HALF_WIDTH_0` in `wakeconstants.ts` all carry
@@ -1409,7 +1429,7 @@ wind.update(dt, shipState, energyState, cells.stormAtShip)  // needs this frame'
 weather.update(dt, wind.state, cells.state)             // after the wind (this frame's phase), before the hazards (this frame's odds)
 hazards.update(dt, shipState, energyState, wind.state, stormOdds) // rolls, transport, contact, push, spiral; writes HazardState
 aiBoats.update(dt, shipState, energyState, hazards.state, suppressed(), stormOdds)  // after hazards: needs this frame's phase. Before the ship: a contact halts the hull this frame
-ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust gated on energy.canThrust; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
+ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust cut to LIMP_SPEED (1 kn) when energy.canThrust is false; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
 globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, the fog bank (needs `ship` for the cap it follows and `cells` for whether it is drawn at all), sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
@@ -2390,7 +2410,7 @@ a purchase takes is scaled — those are events, not navigation.
 | Berth | 5.0%/s net (20 s to full), overrides solar rather than stacking |
 | Mooring | inside the ring and a `Space` press — the dwell is gone, see below |
 | Backup cell | drawn on only once `level` is 0; never charged by anything |
-| No thrust | refused at zero until `RESTART_LEVEL` (3%) of **both tanks together** |
+| No thrust | full thrust refused at zero until `RESTART_LEVEL` (3%) of **both tanks together**; `ship.ts`'s `LIMP_SPEED` crawl (1 kn) is all the helm has in between |
 
 `MAX_FORWARD` is exported from `ship.ts` and imported here rather than copied,
 so a change to top speed moves the fuel economy with it instead of silently
@@ -2438,7 +2458,7 @@ ship under way.
 
 | | |
 |---|---|
-| `dead` / `restart` | no thrust, and whether the rate says it is coming back |
+| `dead` / `restart` | no thrust past the 1 kn crawl, and whether the rate says the rest is coming back |
 | `docked` / `mooring` | made fast, or inside the ring and not yet made fast |
 | `reserve` | the main tank is on the floor and the cell is paying |
 | `overdrive` / `burn` | the coil's flat bill, or the ordinary speed-squared draw |
@@ -2508,12 +2528,15 @@ a player pressing keys at a ship that will not answer.
 
 Three subtleties worth keeping:
 
-- **The dead-stop snap tests `thrust === 0`, not the absence of input.** They are
-  the same key press until the tank runs dry. After that, a player holding W on
-  a dead ship gets thrust 0, and the closed-form drag decay approaches zero
-  without ever arriving — so `speed` sits at 1e-9, `speed === 0` stays false, and
-  the solar test above never fires. The ship would refuse to charge for as long
-  as the key was held, with nothing on screen saying why.
+- **The dead-stop snap tests `thrust === 0`, not the absence of input.** They
+  are the same key press until the tank runs dry. After that, a player holding W
+  on a dead ship is holding the `LIMP_SPEED` crawl open and is genuinely under
+  way at one knot, so `speed === 0` is false and the solar test above correctly
+  does not fire — that is the trade the crawl is sold under. Releasing the key
+  is what has to reach an exact zero, and the closed-form drag decay approaches
+  it without ever arriving, so a test on the keys instead of on `thrust` would
+  leave `speed` at 1e-9 forever and the ship would refuse to charge with nothing
+  on screen saying why.
 - **`canThrust` is hysteretic**: dry at 0, thrust only at `RESTART_LEVEL`.
   Relighting at the first positive level would spend it on thrust inside the
   same frame and drop straight back to empty, stuttering the thrusters and

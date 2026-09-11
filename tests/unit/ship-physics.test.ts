@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Vector3 } from 'three';
 import type { Material } from 'three';
-import { createShip, MAX_FORWARD, MODEL_SCALE } from '../../src/ship';
+import { createShip, LIMP_SPEED, MAX_FORWARD, MODEL_SCALE } from '../../src/ship';
 import { createHull } from '../../src/hull';
 import type {
   HazardState,
@@ -107,18 +107,81 @@ describe('ship-physics', () => {
     expect(ship.state.speed).toBeCloseTo(-MAX_REVERSE, 2);
   });
 
-  it('a dry tank refuses thrust but still coasts and steers', () => {
+  it('a dry tank falls back to the one-knot crawl, from above and from rest', () => {
     const ship = createShip(createStubTerrain());
     const dt = 1 / 60;
-    // Get some way on, then run the tank dry.
-    for (let i = 0; i < 3 / dt; i++) ship.update(dt, input({ forward: true }), energy(true), NO_WIND);
+    // Get real way on, then run the tank dry with the throttle still held.
+    for (let i = 0; i < 30 / dt; i++) ship.update(dt, input({ forward: true }), energy(true), NO_WIND);
     const speedBefore = ship.state.speed;
-    expect(speedBefore).toBeGreaterThan(0);
+    expect(speedBefore).toBeCloseTo(MAX_FORWARD, 2);
 
-    for (let i = 0; i < 10 / dt; i++) ship.update(dt, input({ forward: true }), energy(false), NO_WIND);
-    // Thrust refused: speed decays toward 0 (no thrust term), never climbs.
+    // Decays DOWN to the crawl on the same curve it would have decayed to zero
+    // on -- 30s is about ten time constants of 1/DRAG, the same budget the
+    // first test in this file uses.
+    for (let i = 0; i < 30 / dt; i++) ship.update(dt, input({ forward: true }), energy(false), NO_WIND);
     expect(ship.state.speed).toBeLessThan(speedBefore);
-    expect(ship.state.speed).toBeGreaterThanOrEqual(0);
+    expect(ship.state.speed).toBeCloseTo(LIMP_SPEED, 2);
+
+    // And climbs UP to the same figure from a dead stop: the crawl is a thrust
+    // whose terminal speed is one knot, not a floor held under the old one.
+    const cold = createShip(createStubTerrain());
+    for (let i = 0; i < 30 / dt; i++) cold.update(dt, input({ forward: true }), energy(false), NO_WIND);
+    expect(cold.state.speed).toBeCloseTo(LIMP_SPEED, 2);
+  });
+
+  it('the crawl is astern as well as ahead, and still answers the helm', () => {
+    const ship = createShip(createStubTerrain());
+    const dt = 1 / 60;
+    const headingBefore = ship.state.heading;
+
+    for (let i = 0; i < 30 / dt; i++) {
+      ship.update(dt, input({ backward: true, right: true }), energy(false), NO_WIND);
+    }
+    expect(ship.state.speed).toBeCloseTo(-LIMP_SPEED, 2);
+    // Steering was never gated on power and still is not.
+    expect(ship.state.heading).not.toBeCloseTo(headingBefore, 3);
+  });
+
+  it('a dry tank with the throttle released still coasts to an exact dead stop', () => {
+    /*
+     * Load-bearing for `energy.ts`, not for this file: the panels deploy on
+     * `ship.speed === 0` exactly (see that file's comment on why the test is
+     * an exact zero), so a crawl that leaked any residual speed with no key
+     * held would be a ship that could never charge again.
+     */
+    const ship = createShip(createStubTerrain());
+    const dt = 1 / 60;
+    for (let i = 0; i < 30 / dt; i++) ship.update(dt, input({ forward: true }), energy(false), NO_WIND);
+    expect(ship.state.speed).toBeCloseTo(LIMP_SPEED, 2);
+
+    for (let i = 0; i < 30 / dt; i++) ship.update(dt, input(), energy(false), NO_WIND);
+    expect(ship.state.speed).toBe(0);
+  });
+
+  it('the crawl is a ceiling and never buys back a cap below it', () => {
+    const dt = 1 / 60;
+    const thrust = input({ forward: true });
+    // Trim & Sheathing Mk III, which a dry tank has nothing to do with either.
+    const trimmed: PropulsionState = { maxForward: 13, anchored: false };
+
+    // A critical hull is capped at 1 kn, which is exactly LIMP_SPEED: losing
+    // power costs it nothing, and that is the uninteresting half.
+    const critical = createShip(createStubTerrain(), undefined, 1, undefined, createHull(1));
+    expect(critical.state.speed).toBe(0);
+    for (let i = 0; i < 30 / dt; i++) {
+      critical.update(dt, thrust, energy(false), NO_WIND, undefined, undefined, trimmed);
+    }
+    expect(critical.state.speed).toBeCloseTo(LIMP_SPEED, 2);
+
+    // The interesting half: a tow takes its share off that same cap, and the
+    // crawl goes under the `min` with everything else rather than over it.
+    const towed: PropulsionState = { maxForward: 13, anchored: false, towFactor: 0.75 };
+    const hauling = createShip(createStubTerrain(), undefined, 1, undefined, createHull(1));
+    for (let i = 0; i < 30 / dt; i++) {
+      hauling.update(dt, thrust, energy(false), NO_WIND, undefined, undefined, towed);
+    }
+    expect(hauling.state.speed).toBeCloseTo(0.75, 2);
+    expect(hauling.state.speed).toBeLessThan(LIMP_SPEED);
   });
   it('obeys a hazard drive, and place() sets the hull down stopped on a heading', () => {
     const ship = createShip(createStubTerrain());
@@ -345,6 +408,15 @@ describe('ship-physics', () => {
     // Under 5% of the speed it had a second ago -- see seaanchor.ts's own
     // comment on the three time constants this is pinning.
     expect(Math.abs(ship.state.speed)).toBeLessThan(speedBefore * 0.05);
+
+    // And it beats a dry tank too: the crawl `LIMP_SPEED` leaves a powerless
+    // hull is a predicament being softened, an anchor is an item doing its
+    // job, and the item wins. Five seconds is well past the one the anchor
+    // needs and past the crawl's own time constant either way.
+    for (let i = 0; i < 5 / dt; i++) {
+      ship.update(dt, input({ forward: true }), energy(false), NO_WIND, undefined, undefined, anchored);
+    }
+    expect(Math.abs(ship.state.speed)).toBeLessThan(LIMP_SPEED * 0.05);
 
     // Released: the ship answers the helm again from wherever it was left.
     const wasAnchored = ship.state.speed;

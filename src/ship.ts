@@ -161,6 +161,41 @@ const DRAG = 0.35;
 const ACCEL = MAX_FORWARD * DRAG;
 
 const MAX_REVERSE = 7; // world units / s (magnitude); clamp-limited, not drag-limited
+
+/**
+ * Steerage way left to a ship with no power, world units / s -- 1.0, which
+ * `hud.ts` reads out as 1.0 kn ahead or astern.
+ *
+ * A dry tank used to mean no thrust at all: the hull coasted to a stop and
+ * then sat there answering the helm with nothing to answer it with, waiting on
+ * the panels. It still answers the helm, and the panels are still the way back
+ * to a real cruise -- what this adds is a way to *arrive* somewhere while
+ * waiting. One knot is a tenth of `MAX_FORWARD` and slower than most of the
+ * weather: it is a crawl toward a berth that is already in sight, never a
+ * substitute for charge.
+ *
+ * Applied as a THRUST and not as a floor under `speed`, which is what keeps it
+ * the same physics as every other speed in this file. Thrust balances drag at
+ * `thrust / DRAG`, so `LIMP_SPEED * DRAG` is exactly the push whose terminal
+ * speed is one knot: a ship that loses power at full ahead decays down to the
+ * crawl on the same curve it would have decayed to zero on, and one starting
+ * from rest works up to it over the same 2.9 s time constant. Nothing snaps.
+ *
+ * Two things it deliberately does not do. It is thrust, so it only exists
+ * while a throttle key is held -- releasing the key still coasts the hull to
+ * the dead stop `energy.ts` needs before it will deploy the panels, and a dead
+ * ship left alone still charges exactly as it did. And it is engine speed, so
+ * the wind and a hazard's pull are added on top of it afterwards like any
+ * other: "1 kn" is what the plant gives, not what the ship makes good over the
+ * ground.
+ *
+ * The cost of using it is the panels: they need `speed === 0`, so a player who
+ * holds the throttle down the whole way is a player who never charges. That is
+ * the trade the crawl is for, and the HUD says which side of it the ship is on
+ * -- DEAD under way, RESTART once stopped and taking charge.
+ */
+export const LIMP_SPEED = 1;
+
 const STOP_EPSILON = 0.02; // speeds below this snap to a dead stop
 
 const TURN_RATE = 1.2; // rad / s at full speed
@@ -921,23 +956,36 @@ export function createShip(
       bankRoll += (bankTarget - bankRoll) * (1 - Math.exp(-4 * dt));
 
       // ---- Throttle --------------------------------------------------------
-      // A dry tank cuts thrust in both directions and nothing else. Steering,
+      // A dry tank cuts the thrust down to a crawl and nothing else. Steering,
       // drag, the bob and sway, the land probe and the sea all keep running
-      // below, so the ship coasts to a stop and still answers the helm -- being
-      // out of charge is a predicament, never a frozen frame. The player can
-      // always turn the hull, and the panels bring it back.
+      // below, so the ship still answers the helm -- being out of charge is a
+      // predicament, never a frozen frame. The player can always turn the
+      // hull, the crawl is enough to get somewhere with, and the panels bring
+      // the rest back.
       //
-      // A Sea Anchor over the side cuts thrust the same way and for the same
-      // shape of reason -- see `seaanchor.ts` -- but it is not a predicament:
-      // it is the whole point of the item, so it is tested first and an empty
-      // tank underneath it changes nothing either way.
+      // A Sea Anchor over the side cuts thrust to nothing at all, and for a
+      // different shape of reason -- see `seaanchor.ts`: it is not a
+      // predicament, it is the whole point of the item, so it is tested first
+      // and an empty tank underneath it changes nothing either way. This is
+      // the one place the two part company; a dead ship may crawl, an anchored
+      // one may not.
       let thrust = 0;
-      if (!propulsion.anchored && energy.canThrust) {
-        // ACCEL exactly when the hull is unmodified -- the ordinary case,
-        // and the one that constant's own comment is written against --
-        // and `effMaxForward * DRAG` otherwise, which is the same ratio for
-        // whatever tier or burn `propulsion` is reporting this frame.
-        const accel = effMaxForward === MAX_FORWARD ? ACCEL : effMaxForward * DRAG;
+      if (!propulsion.anchored) {
+        // ACCEL exactly when the hull is unmodified and under power -- the
+        // ordinary case, and the one that constant's own comment is written
+        // against -- and `effMaxForward * DRAG` otherwise, which is the same
+        // ratio for whatever tier or burn `propulsion` is reporting this frame.
+        //
+        // With the tank dry it is `LIMP_SPEED * DRAG` instead, the push that
+        // terminates at one knot. Under the same `min` as everything else on
+        // this line: a critical hull is capped at 1 kn and a tow takes a share
+        // off that, and neither of them is something losing power should buy
+        // back -- the crawl is a ceiling, never a floor.
+        const accel = energy.canThrust
+          ? effMaxForward === MAX_FORWARD
+            ? ACCEL
+            : effMaxForward * DRAG
+          : Math.min(LIMP_SPEED, effMaxForward) * DRAG;
         if (input.forward) thrust += accel;
         if (input.backward) thrust -= accel;
       }

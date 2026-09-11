@@ -194,7 +194,7 @@ describe('powerTagText — the berth name in the power tag', () => {
 
   it('leaves every tag that is not about a place alone', () => {
     expect(powerTagText('solar', 'Rustwharf')).toBe('IDLE - SOLAR CHARGING');
-    expect(powerTagText('dead', 'Rustwharf')).toBe('NO POWER - ADRIFT');
+    expect(powerTagText('dead', 'Rustwharf')).toBe('NO POWER - PADDLING (1 KN)');
     expect(powerTagText('full', 'Rustwharf')).toBe('TANK FULL');
   });
 

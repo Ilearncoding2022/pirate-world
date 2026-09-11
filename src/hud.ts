@@ -491,13 +491,22 @@ function powerTag(energy: EnergyState): PwrTag {
  * Each one answers the question the panel is actually being asked, which is
  * never "what state am I in" but "is this thing filling up, and may I move".
  * That is why the charging states say CHARGING in as many words, why the two
- * no-thrust states differ by whether the helm is coming back, and why the
+ * powerless states differ by whether the helm is coming back, and why the
  * three at-rest states name what is on the panels rather than all reading
  * IDLE.
+ *
+ * Neither of the powerless two says ADRIFT any more, because neither is: a dry
+ * tank leaves the hull `ship.ts`'s `LIMP_SPEED` of one knot in both directions
+ * (see that constant), so the tag names the way the player still has rather
+ * than a helplessness they do not. PADDLING is the owner's word for it and the
+ * only name the player is ever given -- the code calls the same thing a crawl,
+ * and this table is the seam between the two. The figure is spelled out on the
+ * DEAD rung and carried by the word alone on the RESTARTING one, which the
+ * player only ever reaches by way of the other.
  */
 const PWR_TAG: Record<PwrTag, string> = {
-  dead: 'NO POWER - ADRIFT',
-  restart: 'NO THRUST - RESTARTING',
+  dead: 'NO POWER - PADDLING (1 KN)',
+  restart: 'PADDLING - RESTARTING',
   docked: 'BERTH - CHARGING',
   mooring: 'BERTH - MAKE FAST',
   reserve: 'ON BACKUP CELL',

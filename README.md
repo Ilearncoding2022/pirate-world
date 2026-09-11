@@ -397,17 +397,21 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   sun's height in the sky: half a percent of the reserve per second with the
   sun overhead, which is three and a half minutes from empty, stretching past
   seven at a low sun and going negative after dark. Run dry and you keep the
-  helm but lose the engines, drifting until the sun comes up.
+  helm and **one knot of paddling** — enough to reach a harbour you can already
+  see, and no more — until the sun comes up. Paddling is not free: the panels
+  only deploy at a dead stop, so every knot you make on an empty tank is charge
+  you are not putting back.
   **The panel says which of those is happening.** It names the cause in as many
   words — `UNDER WAY - BURN`, `IDLE - SOLAR CHARGING`, `IDLE - MOONGLASS`,
   `IDLE - NO SUN`, `BERTH - MAKE FAST`, `BERTH - CHARGING`, `ON BACKUP CELL`,
   `OVERDRIVE - 4x BURN`, `TANK FULL` — and colours itself by how much trouble
   you are in, which is a different question. The one that matters most is the
-  pair at the bottom: a dead ship reads `NO POWER - ADRIFT` in flashing red,
-  and the moment the panels start putting charge back it turns amber and reads
-  `NO THRUST - RESTARTING`. The helm comes back at three percent, a few seconds
-  later. It used to say EMPTY for both, which read as a plant that had failed
-  rather than one already coming back.
+  pair at the bottom: a dead ship reads `NO POWER - PADDLING (1 KN)` in flashing
+  red, and the moment the panels start putting charge back it turns amber and
+  reads `PADDLING - RESTARTING`. The engines come back at three percent, a few
+  seconds later. It used to say EMPTY for both, which read as a plant that had
+  failed rather than one already coming back — and it used to say ADRIFT, which
+  stopped being true the day the paddling went in.
 - **Harbours.** There are **thirty-six**, exactly, and each one is a single
   place: a town, its lights, its beacon and its berth, under **a name**.
   Nothing is anonymous any more. The name is over the harbour in the world, on

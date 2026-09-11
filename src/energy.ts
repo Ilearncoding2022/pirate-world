@@ -347,7 +347,10 @@ const DOCK_RATE = 1 / DOCK_FULL_SECONDS + IDLE_DRAIN;
  *   - The solar test is on ENGINE speed, so a dead ship drifting downwind
  *     still deploys its panels. That is the entire point of running out of
  *     charge in a wind: you are not stranded, you are being carried somewhere
- *     while you recover.
+ *     while you recover. Note what the same rule costs a ship using `ship.ts`'s
+ *     `LIMP_SPEED` crawl: one knot is ENGINE speed, so the panels furl the
+ *     moment the player touches the throttle on an empty tank. Crawling and
+ *     charging are alternatives on purpose -- see that constant.
  *   - The berth test is on NEITHER, and on no clock either. It is the ring
  *     and a key press: see `berthReady` in `update`. There was a two-second
  *     dwell here for a while, and before that a 3 kn speed limit, and both
@@ -499,7 +502,7 @@ interface MutableEnergyState {
 
 /**
  * The ship's power plant: burn against speed, solar at anchor, fast charge at a
- * berth, and dead in the water when it runs out.
+ * berth, and down to `ship.ts`'s one-knot crawl when it runs out.
  *
  * One object, mutated in place for the life of the run. The HUD, `docks.ts`,
  * `ship.ts`'s thrust gate and the model's neon all hold this same reference, so
@@ -682,7 +685,9 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
 
     // Hysteresis: dry at 0, no thrust again until RESTART_LEVEL. See that
     // constant for the per-frame stutter this avoids. Both tanks count, so a
-    // cell aboard is the difference between coasting and carrying on.
+    // cell aboard is the difference between crawling and carrying on -- what
+    // this flag gates is the ENGINES, not the helm and not `ship.ts`'s
+    // `LIMP_SPEED`, which is exactly what a ship reading false still has.
     const available = level + battery.level;
     if (available <= 0) state.canThrust = false;
     else if (available >= RESTART_LEVEL) state.canThrust = true;
@@ -694,9 +699,9 @@ export function createEnergy(towns: Towns, battery: Battery): Energy {
      * for what each name means and why there are ten of them.
      *
      * No thrust outranks everything, a berth included: while the first percent
-     * trickles back the plant is still refusing to move the ship, and a tag
-     * that flipped to SOLAR the instant the level left zero would be lying
-     * about the one thing the player needs to know. The two halves of it are
+     * trickles back the plant is still refusing the ship anything but the
+     * crawl, and a tag that flipped to SOLAR the instant the level left zero
+     * would be lying about the one thing the player needs to know. The two halves of it are
      * split on the rate, because "adrift in the dark" and "panels up, helm
      * back in a few seconds" are the same predicament only on paper.
      *
