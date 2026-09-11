@@ -18,6 +18,7 @@ import {
   HULL_LENGTH,
   HULL_WIDTH,
   STACK_OPACITY,
+  FOG_THICKNESS,
 } from '../../src/fogbank';
 import { FOG_GLSL } from '../../src/fogglsl';
 import { GLOBE_RADIUS } from '../../src/geo';
@@ -273,6 +274,35 @@ describe('the bow wave the bubble pushes ahead of it', () => {
     const frag = (slice.material as ShaderMaterial).fragmentShader;
     expect(frag).toContain('uPile * bank *');
   });
+
+  it('draws a bank at FOG_THICKNESS times its own strength, clamped', () => {
+    // Fog three times as thick, answered here on the STRENGTH rather than on
+    // any of the densities: the threshold, the bow wave, the alpha ramp and
+    // the discard all read `bank`, so one gain on the sample is one gain on
+    // all four. The clamp is what keeps a bank that was already full drawing
+    // the whiteout every constant in the file was tuned against.
+    const slice = createFogBank(9).object.children[0] as Mesh;
+    const frag = (slice.material as ShaderMaterial).fragmentShader;
+    expect(FOG_THICKNESS).toBe(3);
+    expect(frag).toContain(
+      `float bank = min(1.0, max(uFogHere, weatherAt(uWeatherMap, nWorld).g) * ${FOG_THICKNESS.toFixed(1)});`,
+    );
+    // Substituted in, like the fade distances beside it: a placeholder left
+    // standing is a shader that fails to compile, and nothing in the Node
+    // tier compiles GLSL, so the whole substitution list is checked here.
+    for (const token of [
+      'FOG_THICKNESS_C',
+      'FOG_ALT_GONE_C',
+      'FOG_ALT_FULL_C',
+      'FOG_NEAR_MIN_C',
+      'FOG_NEAR_FULL_C',
+      'FOG_CLEAR_CORE_C',
+      'FOG_CLEAR_EDGE_C',
+      'FOG_PILE_SPAN_C',
+    ]) {
+      expect(frag).not.toContain(token);
+    }
+  });
 });
 
 describe('fog bank presence', () => {
@@ -332,5 +362,18 @@ describe('the seam between the bank and the aerial haze', () => {
     // bank, so at wx.y = 0 it is still exactly 0 whatever the distance.
     expect(FOG_GLSL).toContain('FOG_DENSITY_GAIN * bank');
     expect(FOG_GLSL).toContain('mix(uFogMax, FOG_MAX_BANK, bank)');
+  });
+
+  it('triples the haze RATE for thicker fog and leaves every ceiling alone', () => {
+    // The other half of "three times as thick". The rate is the only term
+    // with room in it -- a ceiling of 0.92 has no 2.76 to go to -- so what
+    // triples is how fast the haze arrives, not how far it goes. A future
+    // edit that reaches for the ceilings instead fails here.
+    expect(FOG_GLSL).toContain('const float FOG_DENSITY_GAIN = 10.5;');
+    expect(FOG_GLSL).toContain('const float FOG_MAX_AMOUNT = 0.15;');
+    expect(FOG_GLSL).toContain('const float FOG_MAX_BANK = 0.92;');
+    expect(FOG_GLSL).toContain('const float STORM_MAX_GAIN = 0.08;');
+    // And rain was not asked to get thicker with it.
+    expect(FOG_GLSL).toContain('const float STORM_DENSITY_GAIN = 1.0;');
   });
 });

@@ -17,10 +17,11 @@ import fixture from '../fixtures/hazard-shader.json';
  * shader moved, and the commit that moved it owes an itemised note saying
  * which lines and why. A failure with no such note is the regression.
  *
- * Moved once by the weather (docs/WEATHER_PLAN.md), and only inherited: this
- * fixture is the water shader with the hazard plugin in it, so it carries
- * every one of the three changes itemised in `water-shader.test.ts` and not a
- * line of its own. No hazard art was touched.
+ * Moved twice, and both times only inherited: this fixture is the water shader
+ * with the hazard plugin in it, so it carries every change itemised in
+ * `water-shader.test.ts` -- the weather's three (docs/WEATHER_PLAN.md), and
+ * the tripled `FOG_DENSITY_GAIN` after them -- and not a line of its own. No
+ * hazard art was touched by either.
  */
 function normalize(glsl: string): string {
   return glsl.replace(/\s+/g, ' ').trim();

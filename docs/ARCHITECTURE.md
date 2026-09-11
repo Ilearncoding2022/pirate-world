@@ -1127,6 +1127,41 @@ the near field is no longer the aerial term's to protect, `FOG_MAX_BANK` is
 **0.92**, not the 0.75 it held while that term was the whole of fog: at
 distance a bank is supposed to take the horizon away completely.
 
+### Three times as thick, in each half's own unit
+
+Fog was asked (2026-09-10, owner) to be three times as thick at every
+intensity, and the two halves answer that in the only unit each of them has
+room in. They are not the same edit and the difference is the whole of it.
+
+The FAR half triples its RATE: `FOG_DENSITY_GAIN` is **10.5**, not 3.5. Not a
+ceiling — `FOG_MAX_AMOUNT` (0.15), `FOG_MAX_BANK` (0.92) and `STORM_MAX_GAIN`
+(0.08) are untouched, and 0.92 has no 2.76 to go to in any case. What triples
+is how fast the haze reaches them, so the sea crosses any given blend at about
+a third of the distance it used to and a thin bank that read as a smudge on
+the horizon now closes to inside the chase frame. `FOG_BANK_ONSET` is what
+makes this survivable: it keeps the bank's share of that term near zero inside
+about 20 units, so the near water still belongs to the geometry and its clear
+bowl. **Clear-weather haze is not part of this.** `uFogDensity` is the same
+`2.0 / GLOBE_RADIUS` it was, and every warning in `fog.ts` and `fogglsl.ts`
+about the `uShallow`..`uAbyss` depth ramp is about THAT constant.
+
+The NEAR half has no rate to triple — its density is a coverage threshold and
+a stack of alphas already solved against `STACK_OPACITY`, which is the three
+per cent of hull a player steers by and the last number that may move. So
+`FOG_THICKNESS` = 3 multiplies the STRENGTH the field is evaluated at,
+`min(1.0, bank * 3)`, before the threshold, the bow wave, the alpha ramp or
+the `PRESENCE_FLOOR` discard reads it. A quarter-strength bank draws what a
+three-quarter one used to. The clamp means a bank already at full draws the
+whiteout every constant in `fogbank.ts` was tuned against — full fog takes its
+extra thickness from the far half instead, which owns the distance and has the
+room. Most fog a player meets is under the clamp: a squall's own bank is 0.5
+to 1.0 (`FOG_FLOOR`) and a cell ramps from nothing at its skirt.
+
+The cost, and it is the only one: `PRESENCE_FLOOR` now rejects at a third of
+the strength it did, so the faintest skirt of a distant cell costs a fractal
+where it used to cost one texture fetch. That is what being visible at all
+costs.
+
 Four things about it are easy to undo by accident:
 
 - **The group follows the ship; the field does not.** Noise is sampled from

@@ -15,10 +15,17 @@ rest:
   the entire ocean the "flat pale sheet" `fogglsl.ts` warns about twice. It
   was caught in a `?weather=storm` shot, which is exactly the failure mode
   those warnings describe.
-- **The fog bank came down too.** `FOG_DENSITY_GAIN` is **3.5**, not 6, and
-  `FOG_MAX_BANK` is **0.75**, not 0.85. At the planned numbers the water
-  under the hull was 60% fog and the ship appeared to be sailing on paper —
-  which `FOG_MAX_BANK`'s own comment forbids in those words.
+- **The fog bank came down too, and then went back up past the plan.**
+  `FOG_DENSITY_GAIN` was cut to **3.5** from the planned 6 and `FOG_MAX_BANK`
+  to **0.75** from 0.85: at the planned numbers the water under the hull was
+  60% fog and the ship appeared to be sailing on paper, which
+  `FOG_MAX_BANK`'s own comment forbids in those words. Both have since moved
+  again for reasons the plan never had. `FOG_MAX_BANK` is **0.92** once
+  `fogbank.ts` took the near field off the aerial term (see **The fog bank**
+  in ARCHITECTURE), and `FOG_DENSITY_GAIN` is **10.5** since the owner asked
+  for fog three times as thick at every intensity (2026-09-10). The ceilings
+  did NOT move for that: the far half triples its rate and the near half
+  multiplies the bank STRENGTH by `FOG_THICKNESS` = 3, clamped.
 - **`STORM_ODDS_GAIN` does not triple the encounters.** It triples the
   probability, which is worth about **2.7x** the raiders and only about
   **1.5x** the hazards, whose 1 Hz roll already saturates their

@@ -314,6 +314,40 @@ const FOG_WAKE_RANGE = FOG_CAP_ARC + 140;
 /** Below this the bank is not worth a draw call. Matches `weather.ts`'s own floor. */
 const FOG_EPSILON = 0.004;
 
+/**
+ * How much thicker a bank of a given strength is drawn than its strength says,
+ * a dimensionless gain on the STRENGTH and not on any of the densities below.
+ *
+ * The owner asked for fog three times as thick at every intensity, and this
+ * module and `fogglsl.ts` answer that in the unit each of them actually has.
+ * The haze there is an exponential with a separate ceiling, so it triples its
+ * RATE (`FOG_DENSITY_GAIN`, 3.5 -> 10.5) and leaves the ceiling alone. This
+ * module has no rate: its density is a coverage threshold and a stack of
+ * alphas, both of which are already solved against `STACK_OPACITY` -- the
+ * ceiling -- and that number is exactly the three per cent of hull the file
+ * keeps to steer by, so it is the last thing that may move. What is left to
+ * triple is the strength the field is evaluated AT, which is the same thing:
+ * a quarter-strength bank now draws the coverage, the depth and the alpha of a
+ * three-quarter one, and thin fog stops reading as a haze the aerial term
+ * could have done on its own.
+ *
+ * Clamped to 1 where it is used, so a bank that was already full still draws
+ * the whiteout every constant in this file was tuned against -- FULL fog gets
+ * its extra thickness from the haze's tripled rate instead, which has room and
+ * owns the distance. Everything under a third of full is where the gain is
+ * visible, and that is nearly all the fog a player actually sails through:
+ * `FOG_FLOOR` in `weather.ts` puts a squall's own bank at 0.5 to 1.0, and a
+ * cell's strength ramps from nothing at its skirt.
+ *
+ * It multiplies `bank` and nothing else, so every fade, bound and early-out
+ * below still sees one strength in [0, 1] and none of them had to learn about
+ * this. The one consequence worth naming: `PRESENCE_FLOOR`'s discard now
+ * rejects at a third of the strength it used to, so the faintest skirts of a
+ * cell cost noise where they used to cost one fetch. That is the cost of them
+ * being visible at all, which is the point.
+ */
+const FOG_THICKNESS = 3;
+
 /* ------------------------------------------------------------------ */
 /* Shaders                                                             */
 /* ------------------------------------------------------------------ */
@@ -399,7 +433,11 @@ const FRAGMENT_SHADER = [
   '  // The bank here. One texture fetch, whatever the cell population is, and',
   '  // it comes FIRST: everything below this line is noise, and there is no',
   '  // point sampling a fractal to shade air that has no fog in it.',
-  '  float bank = max(uFogHere, weatherAt(uWeatherMap, nWorld).g);',
+  '  // Times FOG_THICKNESS, clamped: see the constant. The gain is on the',
+  '  // STRENGTH, before anything reads it, so the threshold, the bow wave, the',
+  '  // alpha ramp and the discard below all agree about how thick this bank is',
+  '  // without any of them carrying the factor themselves.',
+  '  float bank = min(1.0, max(uFogHere, weatherAt(uWeatherMap, nWorld).g) * FOG_THICKNESS_C);',
   '  if (bank < PRESENCE_FLOOR) discard;',
   '  vec3 toCam = cameraPosition - vWorldPos;',
   '  float camDist = length(toCam);',
@@ -566,7 +604,8 @@ const FRAGMENT_SHADER = [
   .replace(/FOG_NEAR_FULL_C/g, FOG_NEAR_FULL.toFixed(1))
   .replace(/FOG_CLEAR_CORE_C/g, FOG_CLEAR_CORE.toFixed(3))
   .replace(/FOG_CLEAR_EDGE_C/g, FOG_CLEAR_EDGE.toFixed(3))
-  .replace(/FOG_PILE_SPAN_C/g, FOG_PILE_SPAN.toFixed(3));
+  .replace(/FOG_PILE_SPAN_C/g, FOG_PILE_SPAN.toFixed(3))
+  .replace(/FOG_THICKNESS_C/g, FOG_THICKNESS.toFixed(1));
 
 /* ------------------------------------------------------------------ */
 /* Build                                                               */
@@ -808,4 +847,5 @@ export {
   FOG_WAKE_RANGE,
   HULL_WIDTH,
   HULL_LENGTH,
+  FOG_THICKNESS,
 };

@@ -70,6 +70,22 @@ import fixture from '../fixtures/water-shader.json';
  * multiplied by a component of `wx`. That is the zero contract, and the
  * screenshots taken at `?weather=clear` against `main` are what actually
  * check it; this fixture only pins the text.
+ *
+ * Moved once more by thicker fog, and this time by one token and a block of
+ * comment. That list, in full:
+ *
+ *  1. `FOG_DENSITY_GAIN` is 10.5 rather than 3.5 -- fog three times as thick,
+ *     asked for at every intensity and answered here in the only unit this
+ *     chunk has room in, the RATE. No ceiling moved: `FOG_MAX_AMOUNT`,
+ *     `FOG_MAX_BANK` and `STORM_MAX_GAIN` are the numbers they were.
+ *  2. The comment above it, and the one on `STORM_DENSITY_GAIN` whose stale
+ *     "1.0 against the 6.0 above" ratio no longer described either constant.
+ *
+ * The zero contract is untouched by both: the gain is multiplied by `bank`,
+ * which is `wx.y` ramped over distance, so at clear weather this shader still
+ * computes what it computed before to the bit. What it does change is every
+ * frame with fog in it, which is the point -- `?weather=fog` and a bank seen
+ * from outside are where it is meant to be checked, not here.
  */
 function normalize(glsl: string): string {
   return glsl.replace(/\s+/g, ' ').trim();
