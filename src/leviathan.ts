@@ -292,6 +292,7 @@ const _offset = new Vector3();
 const _toShadow = new Vector3();
 const _prevPosition = new Vector3();
 const _candidateEdge = new Vector3();
+const _starboardMark = new Vector3();
 
 function clamp01(x: number): number {
   return x < 0 ? 0 : x > 1 ? 1 : x;
@@ -413,8 +414,21 @@ export interface Leviathan {
   fire(): number;
   /** Ends any live hunt, paying what was banked. `main.ts` calls it on a wreck. */
   scatter(): void;
-  /** Puts a shoal on the water ahead of the bow. The `?hunt=` dev query's hand. */
-  force(ship: ShipState): boolean;
+  /**
+   * Puts a shoal on the water ahead of the bow. The `?hunt=` dev query's hand.
+   *
+   * `arm` lays it inside the gate instead of out at `SHOAL_SPAWN_MIN`, and
+   * moves the marked shadow onto the bow at the middle of the band, so the
+   * dial is live within a frame. That is a dev affordance and says so: it is
+   * the only thing in this module that moves a shadow rather than letting it
+   * drift there.
+   *
+   * It exists because the armed state cannot be reached by waiting, only by
+   * steering, and a test that has to sail to it is a test that fails when it
+   * sails into a headland. `?battle=1` forces a fight for the same reason
+   * rather than waiting for a 3.2% roll to ram the player.
+   */
+  force(ship: ShipState, arm?: boolean): boolean;
 }
 
 /** Internal, mutable mirror of the read-only `Shadow` surface, plus bookkeeping. */
@@ -897,7 +911,37 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     finish('sounded');
   }
 
-  function force(ship: ShipState): boolean {
+  /**
+   * Move the marked shadow onto the bow at the middle of the gate's band.
+   *
+   * Dev only, and the one place a shadow is teleported. `leviathan.ts`
+   * otherwise never writes a position that did not come from a spawn or from
+   * `transport`, and nothing but `force(ship, true)` may call this.
+   */
+  function armMarkAt(ship: ShipState): void {
+    const target = marked();
+    if (target === null) return;
+    const range = (HARPOON_MIN_RANGE + HARPOON_RANGE) / 2;
+    if (!stepAlong(_candidate, ship.position, ship.forward, range * ARC)) return;
+    target.position.copy(_candidate);
+    // Its own heading has to be re-expressed as a tangent HERE, or the first
+    // transport walks it off the sphere. Across the bow, so it drifts out of
+    // the arc rather than straight down it: an armed dial that stays armed
+    // forever would not be testing the gate.
+    _starboardMark.crossVectors(ship.forward, ship.position);
+    if (_starboardMark.lengthSq() < 1e-12) return;
+    _starboardMark.normalize();
+    target.forward.copy(_starboardMark);
+    target.forward.addScaledVector(target.position, -target.forward.dot(target.position));
+    if (target.forward.lengthSq() > 1e-12) target.forward.normalize();
+    else tangentFrame(target.position, target.forward, _east);
+    // Skips the fade, so the dial is readable on the frame after the query
+    // fires rather than half a second later.
+    target.age = FADE_IN;
+    target.envelope = 1;
+  }
+
+  function force(ship: ShipState, arm = false): boolean {
     state.grace = 0;
 
     /*
@@ -921,6 +965,7 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
       tangentFrame(_candidate, _north, _east);
       if (!pointAt(_offset, _candidate, ship.position)) _offset.copy(_north);
       build(_candidate, _offset);
+      if (arm) armMarkAt(ship);
       return true;
     }
 
@@ -928,7 +973,9 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     // whole compass and honours the berth clearance: the shoal is then
     // somewhere real rather than dead ahead, which is a worse photograph and
     // a far better failure.
-    return trySpawn(ship);
+    if (!trySpawn(ship)) return false;
+    if (arm) armMarkAt(ship);
+    return true;
   }
 
   return { state: state as HuntState, update, fire, scatter, force };

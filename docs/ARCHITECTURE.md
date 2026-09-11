@@ -3746,6 +3746,18 @@ not just at its centre: a shadow sits up to nine units off the middle and
 put shoals on coasts that scattered on the next frame and reached the player as
 a notice about a shoal they never saw.
 
+**`?hunt=armed`** is the same query with the shoal laid INSIDE the gate and the
+marked shadow moved onto the bow at the middle of the band, so the dial is live
+within a frame. The armed state cannot be reached by waiting, only by steering,
+so the browser tier cannot otherwise test the keystroke without sailing to it,
+and a scripted hull sails into headlands: the first attempt stalled at 20.7
+units having driven into a coast. It is the same affordance `?battle=1` is for a
+fight, and it leaves the expensive tier only one thing to prove, which is that a
+Space press reaches the sim. It is also the ONLY thing in `leviathan.ts` that
+moves a shadow rather than letting it drift, and it lays the mark ACROSS the
+bow so the dial goes dark again on its own: an armed dial that stayed armed
+would be testing nothing.
+
 `window.__pirateWorld.hunt` publishes the phase, the shadow count, the dial and
 the two numbers the gate is made of (`markRange`, and `markOffBow` SIGNED, with
 negative to port), so a shot can wait on a condition rather than on a clock, per

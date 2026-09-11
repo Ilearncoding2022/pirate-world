@@ -354,6 +354,74 @@ describe('the roll', () => {
   });
 });
 
+describe('the armed dev hand', () => {
+  it('lays a shoal whose dial is live on the next frame', () => {
+    /*
+     * `force(ship, true)` exists because the armed state cannot be reached by
+     * waiting, only by steering, and the browser tier cannot steer reliably
+     * enough to depend on: a probe that sails at a shoal drives into a
+     * headland instead. This is the same affordance `?battle=1` is for a
+     * fight. It is checked HERE, cheaply, so the expensive tier only has to
+     * prove the keystroke reaches the sim.
+     */
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    expect(h.hunt.force(ship, true)).toBe(true);
+
+    h.hunt.update(1 / 240, ship, false);
+    expect(h.hunt.state.armed).toBe(true);
+    expect(h.hunt.state.shadows).toHaveLength(SHOAL_COUNT);
+  });
+
+  it('leaves the marked shadow a proper inhabitant of the sphere', () => {
+    // It is the one place a shadow is teleported, so the invariant everything
+    // downstream leans on has to be re-established by hand rather than
+    // inherited from `transport`.
+    const h = open();
+    const ship = shipAt(latLonToDir(70, 20));
+    h.hunt.force(ship, true);
+    const mark = h.hunt.state.shadows.find((s) => s.marked)!;
+    expect(mark.position.length()).toBeCloseTo(1, 9);
+    expect(mark.forward.length()).toBeCloseTo(1, 9);
+    expect(mark.position.dot(mark.forward)).toBeCloseTo(0, 9);
+
+    // And it still walks the sphere correctly once it starts drifting.
+    for (let i = 0; i < 120; i++) {
+      h.hunt.update(1 / 60, ship, false);
+      if (h.hunt.state.phase !== 'drifting') break;
+      for (const shadow of h.hunt.state.shadows) {
+        expect(shadow.position.dot(shadow.forward)).toBeCloseTo(0, 9);
+      }
+    }
+  });
+
+  it('drifts back out of the arc, so the gate is still a gate', () => {
+    // Laid ACROSS the bow rather than down it: an armed dial that stayed
+    // armed for ever would be testing nothing.
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    h.hunt.force(ship, true);
+    h.hunt.update(1 / 240, ship, false);
+    expect(h.hunt.state.armed).toBe(true);
+
+    let wentDark = false;
+    for (let i = 0; i < 60 * 30; i++) {
+      h.hunt.update(1 / 60, ship, false);
+      if (h.hunt.state.phase !== 'drifting') break;
+      if (!h.hunt.state.armed) { wentDark = true; break; }
+    }
+    expect(wentDark).toBe(true);
+  });
+
+  it('lays an ordinary shoal when not asked to arm', () => {
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    h.hunt.force(ship);
+    h.hunt.update(1 / 240, ship, false);
+    expect(h.hunt.state.armed).toBe(false);
+  });
+});
+
 describe('the shoal on the sphere', () => {
   it('keeps every shadow a unit direction with a tangent bow', () => {
     /*

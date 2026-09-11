@@ -2040,7 +2040,20 @@ async function startGame(): Promise<void> {
    * all to photograph.
    */
   const huntQuery = new URLSearchParams(window.location.search).get('hunt');
-  const forcedHunt = huntQuery === 'shoal' || huntQuery === '1';
+  const forcedHunt = huntQuery === 'shoal' || huntQuery === 'armed' || huntQuery === '1';
+  /**
+   * `?hunt=armed` lays the shoal INSIDE the gate with the mark on the bow.
+   *
+   * The armed state cannot be reached by waiting, only by steering, so the
+   * browser tier cannot test the keystroke without sailing to it -- and a
+   * scripted hull sails into headlands. This is the same affordance `?battle=1`
+   * is for a fight, and it exists so the expensive tier has to prove only one
+   * thing: that a Space press reaches the sim.
+   *
+   * `?hunt=shoal` still lays one out at `SHOAL_SPAWN_MIN`, which is the query
+   * to use to LOOK at a shoal rather than to fire at one.
+   */
+  const forcedHuntArmed = huntQuery === 'armed';
   let huntCountdown = 3;
   /**
    * Seconds between re-lays while `?hunt=` is set, world units of frame time.
@@ -2422,7 +2435,7 @@ async function startGame(): Promise<void> {
     if (forcedHunt && leviathan.state.phase === 'idle') {
       huntCountdown -= dt;
       if (huntCountdown <= 0) {
-        leviathan.force(ship.state);
+        leviathan.force(ship.state, forcedHuntArmed);
         huntCountdown = HUNT_RELAY_SECONDS;
       }
     }

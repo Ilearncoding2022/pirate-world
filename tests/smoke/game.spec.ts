@@ -234,150 +234,99 @@ test.describe('game smoke', () => {
     expect(problems, problems.join('\n')).toEqual([]);
   });
 
-  test('hunt=shoal lays a shoal and lights its bar clean', async ({ page }) => {
+  test('hunt=armed draws a shoal and a Space press banks a target', async ({ page }) => {
     /*
-     * The one case in this file that needs longer than the 60 s default, and
-     * it is not slack: `?hunt=` releases the shoal three SIMULATED seconds in
-     * and this tier software-renders at a fraction of real time, so the wait
-     * for it is tens of seconds before the helm has turned at all. Both waits
-     * below are conditions with their own ceilings; this only stops the
-     * harness cutting them off first.
+     * Longer than the 60 s default, and it is not slack: the shoal is released
+     * three SIMULATED seconds in against a `dt` capped at 0.1, so thirty frames
+     * have to run, and this tier software-renders at a fraction of real time.
      */
-    test.setTimeout(300_000);
+    test.setTimeout(240_000);
     const problems = collectConsoleProblems(page);
 
     /*
-     * The shoal's own shader path is two `MeshBasicMaterial`s carrying
-     * procedurally drawn `CanvasTexture`s, adopted by the composer after its
-     * one-time scene walk. That is a genuinely different compile from anything
-     * the cases above reach, and an unadopted material renders a stop dark
-     * rather than throwing -- so the console list below is most of what this
-     * case is for.
-     */
-    /*
-     * `quality=low` is not only for speed here: `window.__pirateWorld` is
-     * published ONLY under `?quality=` or `?debug` (`quality.ts`), and every
-     * wait below reads the hunt off that hook. Without it this case waits 90
-     * seconds for a condition that can never be true and then passes on the
-     * console check alone -- which is precisely what it did the first time it
-     * was run, and why the shoal assertion below is no longer optional.
-     */
-    await boot(page, `/?hunt=shoal&quality=low&clock=13&${SEED}`);
-
-    /*
-     * No `waitForLiveFrame` before the wait below, and its absence is load
-     * bearing rather than an omission.
+     * `?hunt=armed` rather than `?hunt=shoal`, and the difference is the whole
+     * design of this case.
      *
-     * That helper samples a full page screenshot every 250 ms, which on this
-     * tier's software rasteriser at 1600x900 costs more than a frame does --
-     * so it does not merely take time, it STARVES the loop it is waiting on.
-     * The shoal is released three SIMULATED seconds in and `dt` is capped at
-     * 0.1 s, so thirty frames have to run; screenshotting through them pushed
-     * that past a 90 s ceiling and failed the case. `boot` has already waited
-     * for the splash to come down, which is downstream of the first rendered
-     * frame, so nothing here needs the check anyway. The shot below is taken
-     * once the shoal is up, which is the picture worth having.
+     * The armed state cannot be reached by waiting, only by steering, so an
+     * earlier version of this test drove the hull at the shoal with the arrow
+     * keys. It never armed: on this seed the ship reaches a coastline first and
+     * a beached hull closes no range, which the case then reported as a pass
+     * because everything after the steering sat behind an `if (armed)`. A test
+     * that can silently skip its own point is worse than no test.
+     *
+     * So the query lays the shoal inside the gate with the mark on the bow, the
+     * way `?battle=1` forces a fight rather than waiting for a 3.2% roll to ram
+     * the player. The gate's own geometry is checked in `tests/unit`, cheaply
+     * and exhaustively; the only thing that needs a browser is whether a real
+     * keystroke reaches the sim through `leviathandial.ts`'s window listener,
+     * and that is what is asserted below.
+     *
+     * `quality=low` is not only for speed: `window.__pirateWorld` is published
+     * ONLY under `?quality=` or `?debug` (`quality.ts`), and every wait here
+     * reads the hunt off that hook.
+     *
+     * No `waitForLiveFrame` first, either. It samples a full page screenshot
+     * every 250 ms, which at 1600x900 on a software rasteriser costs more than
+     * a frame does, so it does not merely take time, it STARVES the loop it is
+     * waiting on. `boot` has already waited for the splash, which is downstream
+     * of the first rendered frame.
      */
+    await boot(page, `/?hunt=armed&quality=low&clock=13&${SEED}`);
 
-    /*
-     * A CONDITION, never a sleep, and this one has to be: `?hunt=` releases
-     * the shoal three SIMULATED seconds in, `dt` is capped at 0.1 s a frame,
-     * and this tier software-renders at a fraction of real time. A fixed wait
-     * either photographs empty water or spends half a minute not needing to.
-     * `window.__pirateWorld.hunt` exists for exactly this, per rule 2 in
-     * docs/TESTING.md.
-     */
-    const laid = await page
+    const armed = await page
       .waitForFunction(
         () => {
-          const w = window as unknown as { __pirateWorld?: { hunt?: { phase: string } } };
-          return w.__pirateWorld?.hunt?.phase === 'drifting' ? w.__pirateWorld.hunt : null;
+          const w = window as unknown as {
+            __pirateWorld?: { hunt?: { phase: string; armed: boolean; sprites: number } };
+          };
+          const h = w.__pirateWorld?.hunt;
+          return h && h.phase === 'drifting' && h.armed ? h : null;
         },
         null,
         { timeout: 150_000 },
       )
-      .then((handle) => handle.jsonValue() as Promise<{ phase: string; shadows: number }>)
+      .then((handle) => handle.jsonValue() as Promise<{ sprites: number }>)
       .catch(() => null);
 
+    // NOT optional. A null here means the query, the hook or the gate is
+    // broken, and every one of those is worth a red run rather than a skip.
+    expect(armed, '?hunt=armed armed the dial').not.toBeNull();
+
     /*
-     * NOT optional, unlike the arena case's `#battle` wait.
+     * The planes the renderer actually submitted.
      *
-     * `?hunt=` walks the bow out to `SHOAL_SPAWN_MIN` and, if that point is
-     * aground, falls back to the ordinary compass search -- so on a pinned
-     * seed in reachable water a shoal always lands. A null here means the hook
-     * is missing or the force is broken, and both of those are worth a red run
-     * rather than a silent skip of everything below.
+     * This is the assertion that would have caught the bug this feature
+     * shipped with: the shadows were placed, counted, and drawn under a
+     * displaced sea, so the water was empty. Zero here is a wiring failure.
+     * It cannot prove they are LEGIBLE -- no test may assert on how anything
+     * looks -- but absent and illegible are different bugs and this separates
+     * them.
      */
-    expect(laid, '?hunt=shoal laid a shoal').not.toBeNull();
-    {
-      expect(laid!.shadows, 'shadows laid by ?hunt=shoal').toBeGreaterThan(0);
+    expect(armed!.sprites, 'shadow planes submitted').toBeGreaterThan(0);
 
-      // The bar is up whenever a shoal is, armed or not: the dark bar with its
-      // hint line is the only place the range-and-arc rule is ever stated.
-      await expect(page.locator('#hud-hunt')).toBeVisible();
-      await screenshot(page, 'hunt-shoal');
+    await expect(page.locator('#hud-hunt')).toBeVisible();
+    await expect(page.locator('#hud-hunt')).toHaveClass(/hunt--armed/);
+    await screenshot(page, 'hunt-armed');
 
-      /*
-       * Steer onto the mark and press.
-       *
-       * This is the one case in this file that plays the game rather than
-       * booting it, and it is here because the hunt's whole design is the
-       * gate: `armed` cannot be reached by waiting, only by steering, so a
-       * test that never turns the helm never compiles the armed path at all.
-       * `markOffBow` is signed -- negative to port -- which is why the hook
-       * publishes it signed.
-       */
-      await page.keyboard.down('KeyW');
-      let helm: 'KeyA' | 'KeyD' | null = null;
-      const deadline = Date.now() + 45_000;
-      let armed = false;
-      while (Date.now() < deadline) {
-        const state = await page.evaluate(() => {
-          const w = window as unknown as {
-            __pirateWorld?: { hunt?: { phase: string; armed: boolean; markOffBow: number } };
-          };
-          return w.__pirateWorld?.hunt ?? null;
-        });
-        if (state === null || state.phase !== 'drifting') break;
-        if (state.armed) {
-          armed = true;
-          break;
-        }
-        const want = state.markOffBow > 3 ? 'KeyD' : state.markOffBow < -3 ? 'KeyA' : null;
-        if (want !== helm) {
-          if (helm !== null) await page.keyboard.up(helm);
-          if (want !== null) await page.keyboard.down(want);
-          helm = want;
-        }
-        await page.waitForTimeout(150);
-      }
-      if (helm !== null) await page.keyboard.up(helm);
-      await page.keyboard.up('KeyW');
-
-      // Also allowed to fail without failing the run: the shoal can drift onto
-      // a coast or out of range while the helm is coming round, which is the
-      // sim behaving rather than a regression.
-      if (armed) {
-        await expect(page.locator('#hud-hunt')).toHaveClass(/hunt--armed/);
-        await screenshot(page, 'hunt-armed');
-
-        const before = await page.evaluate(() => {
-          const w = window as unknown as { __pirateWorld?: { hunt?: { target: number } } };
-          return w.__pirateWorld?.hunt?.target ?? 0;
-        });
-        await page.keyboard.press('Space');
-        await page.waitForTimeout(600);
-        const after = await page.evaluate(() => {
-          const w = window as unknown as { __pirateWorld?: { hunt?: { target: number } } };
-          return w.__pirateWorld?.hunt?.target ?? 0;
-        });
-        // One press is one target, and the press has to reach the sim through
-        // the dial's own window listener -- the only wiring in this feature
-        // that no unit case can cover.
-        expect(after, 'targets banked after one Space').toBeGreaterThan(before);
-        await screenshot(page, 'hunt-fired');
-      }
-    }
+    /*
+     * The one hop no unit case can reach: a real keydown, through
+     * `leviathandial.ts`'s own window listener, through `main.ts`'s
+     * `fireHarpoon` guard, into `leviathan.fire()`.
+     */
+    const before = await page.evaluate(() => {
+      const w = window as unknown as { __pirateWorld?: { hunt?: { target: number } } };
+      return w.__pirateWorld?.hunt?.target ?? 0;
+    });
+    await page.keyboard.press('Space');
+    await page.waitForFunction(
+      (was: number) => {
+        const w = window as unknown as { __pirateWorld?: { hunt?: { target: number } } };
+        return (w.__pirateWorld?.hunt?.target ?? 0) > was;
+      },
+      before,
+      { timeout: 30_000 },
+    );
+    await screenshot(page, 'hunt-fired');
 
     expect(problems, problems.join('\n')).toEqual([]);
   });
