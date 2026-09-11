@@ -16,8 +16,8 @@ Measured on the owner's machine, at the sizes and settings checked in:
 
 | Command | What it is | Cost |
 |---|---|---|
-| `npm test` | Unit tier. Node, no WebGL. | ~5 s, 528 tests |
-| `npm run test:all` | Build, unit tier, browser tier. | ~2.3 min, plus ~2.9 min since the hunt (see below) |
+| `npm test` | Unit tier. Node, no WebGL. | ~4 s, 644 tests |
+| `npm run test:all` | Build, unit tier, browser tier. | ~3.4 min: ~2 s build, ~4 s unit, ~3.3 min browser |
 | `npm run shots` | Screenshots only, no assertions. | ~29 s |
 | `npm run build` | Alone. | ~2 s |
 
@@ -25,13 +25,15 @@ If a change pushes `test:all` past about two minutes, delete tests until it
 comes back. A suite nobody will wait for is a suite that gets skipped, and a
 skipped suite catches nothing.
 
-**The leviathan hunt's browser case breaks that rule and is flagged rather than
-hidden.** `hunt=armed` measures 2.9 minutes on its own, which roughly doubles
-the browser tier. Almost all of it is the boot plus thirty simulated frames on
-a software rasteriser, and the case has already been cut once: an earlier
-version steered the hull at the shoal and cost 3.3 minutes to test nothing,
-because the ship reached a coastline and everything after the steering sat
-behind an `if`.
+**The leviathan hunt's browser case is flagged rather than hidden**, though it
+is no longer the outlier this section was written about. `hunt=armed` was
+recorded at 2.9 minutes on its own; re-measured twice on 2026-09-11 it runs in
+**34-40 s**, against a whole browser tier of 3.3 minutes, and the slowest case
+in the suite is now `battle=1` at about a minute. Almost all of the hunt's time
+is the boot plus thirty simulated frames on a software rasteriser, and the case
+has already been cut once: an earlier version steered the hull at the shoal and
+cost 3.3 minutes to test nothing, because the ship reached a coastline and
+everything after the steering sat behind an `if`.
 
 What it buys is five bugs the unit tier structurally could not see: a gate that
 could not be met at point blank, shadows drawn under a displaced sea, a needle

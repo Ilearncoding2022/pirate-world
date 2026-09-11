@@ -2387,8 +2387,8 @@ a purchase takes is scaled — those are events, not navigation.
 | Burn | `IDLE_DRAIN + FULL_BURN * (speed / MAX_FORWARD)^2`, `FULL_BURN` already scaled |
 | 15 / 7.5 / 5 kn to dry | 174 s / 9.6 min / 16.8 min |
 | Solar (stopped only) | `SOLAR_PEAK * max(0, up · sunDirection)` — 0.5%/s net at noon (200 s to full), 7.2 min at 30°, negative after dark |
-| Berth | 2.0%/s net (50 s to full), overrides solar rather than stacking |
-| Mooring | 2 s continuously inside the ring — see below |
+| Berth | 5.0%/s net (20 s to full), overrides solar rather than stacking |
+| Mooring | inside the ring and a `Space` press — the dwell is gone, see below |
 | Backup cell | drawn on only once `level` is 0; never charged by anything |
 | No thrust | refused at zero until `RESTART_LEVEL` (3%) of **both tanks together** |
 
