@@ -26,6 +26,12 @@ rest:
   for fog three times as thick at every intensity (2026-09-10). The ceilings
   did NOT move for that: the far half triples its rate and the near half
   multiplies the bank STRENGTH by `FOG_THICKNESS` = 3, clamped.
+- **Rain comes in episodes.** The plan's `rain` is one eased number for the
+  length of a storm. It is now cut into waves of 1 s to half the wind phase,
+  each at one of nine strengths from 20% to 100%, eased over 1.2 s and applied
+  to the envelope so the drops, the haze and the scope move together. Off
+  under a `?weather=` pin, like the squall roll. See **Rain comes in
+  episodes** in ARCHITECTURE.
 - **`STORM_ODDS_GAIN` does not triple the encounters.** It triples the
   probability, which is worth about **2.7x** the raiders and only about
   **1.5x** the hazards, whose 1 Hz roll already saturates their

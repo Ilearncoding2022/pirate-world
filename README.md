@@ -166,8 +166,14 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   a harder fight.
 - **Rain, and a bolt to go with the flash.** A storm you can see from the
   deck. Rain begins at a tenth of a storm's depth rather than a quarter, so
-  ordinary weather is wet instead of only greying the sky, and the curtain is
-  drawn heavier — streaks nearly twice as long at nearly twice the alpha, over
+  ordinary weather is wet instead of only greying the sky, and it comes in
+  **waves** rather than at one strength: a storm eases to a fifth of its rain
+  for a stretch, hardens back to full, and eases again, each spell lasting
+  anywhere from a second to half the weather that carries it. It is not only
+  the drops. A lull in the rain hands you back part of your scope and the
+  `SKY` row may drop from `STORM` to `RAIN` while the sky above is as black as
+  it was — so a downpour is something you can wait out a little as well as
+  sail out of. The curtain itself is drawn heavier — streaks nearly twice as long at nearly twice the alpha, over
   **eight times the drops**. It is sized to the CAMERA rather than to the ship:
   its width comes off the frustum, so it reaches the edges of the frame at
   every zoom and on any shape of window rather than standing on the boat as a

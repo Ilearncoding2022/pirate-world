@@ -555,6 +555,46 @@ the one with no rain at all: under two hundred vertices for a third of a
 second buys nothing back by being cut, and a low-tier storm that flashes with
 nothing to see in it is the weakest storm the game has.
 
+### Rain comes in episodes
+
+Rain used to be one number: the storm's envelope with `RAIN_ONSET` cut off the
+front and the rest eased, so a squall rained at exactly one strength for its
+whole length. Since 2026-09-10 (owner) a live rain is cut into EPISODES —
+waves of harder and lighter rain inside the one storm.
+
+- **How long.** Between `RAIN_EPISODE_MIN` (1 s) and half the rain that
+  carries it (`RAIN_EPISODE_SHARE`), so a phase always holds two or more. One
+  allowed to fill the whole event would be the old single-strength rain
+  wearing a new name.
+- **Of what.** `wind.phaseDuration`, which is known in full the moment the
+  phase begins, so the episodes inside it can be sized against the whole
+  before any of them has run. Rain from a CELL has no such number — how long a
+  cell sits on the ship is a fact about a course nobody has steered yet — so
+  those are cut against a nominal `RAIN_EPISODE_SPAN` (30 s) instead.
+- **How hard.** One of nine levels, 20% to 100% of the rain the storm would
+  otherwise have produced, a tenth at a time. Never zero: rain that stops dead
+  and restarts is two rains, and the gap between them belongs to the storm
+  envelope. Each roll excludes the level it replaces, so every boundary is a
+  real change of strength.
+- **How it arrives.** Eased over `RAIN_EPISODE_TAU` (1.2 s), never stepped.
+
+The multiplier is applied to `state.rain` — the ENVELOPE — and not to the
+drops, so one wave eases everything rain drives at once: the curtain in
+`rain.ts`, the wet darkening of the distance through `uRainHere`, the scope's
+own range through `STORM_VIS_CUT`, and the HUD's label. A drizzle you can see
+further through is the point; a drizzle that is only thinner drops would have
+belonged in `rain.ts`.
+
+Two disciplines carry over from the rest of the weather. The episodes own a
+THIRD `mulberry32` stream, so the sequence of squalls cannot depend on how
+many waves of rain fell inside the last one — and it is warmed with eight
+discards, because `mulberry32` advances by a fixed addend and two seeds a few
+bits apart produce correlated first outputs (seeds 7, 11 and 23 all opened
+their first storm at the 20% floor). And a `?weather=` pin switches the
+episode clock off with the squall roll: a pinned shot has to be the same shot
+every time, and 20%-of-a-downpour and 100%-of-one are two different pictures
+with nothing in the URL to tell them apart.
+
 ### The rain box is not a size, it is a framing
 
 Rain is drawn as a box of drops around the hull, and for a long time that box

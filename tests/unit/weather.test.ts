@@ -7,6 +7,12 @@ import {
   LIGHTNING_SHARE,
   STORM_SHARE,
   VIS_MIN,
+  RAIN_ONSET,
+  RAIN_EPISODE_FLOOR,
+  RAIN_EPISODE_STEP,
+  RAIN_EPISODE_LEVELS,
+  RAIN_EPISODE_MIN,
+  RAIN_EPISODE_SHARE,
 } from '../../src/weather';
 import { RADAR_RANGE } from '../../src/radar';
 import type { CellsState, WindState } from '../../src/types';
@@ -92,6 +98,50 @@ function runPhase(
     peak.flash = Math.max(peak.flash, weather.state.flash);
   }
   return peak;
+}
+
+/**
+ * The rain an un-episoded storm would have produced: `weather.ts`'s own
+ * formula, so a test can divide it out and look at the episode multiplier by
+ * itself. Kept here rather than exported from the module, because a helper
+ * that imported the answer could not catch the answer changing.
+ */
+function baseRain(storm: number): number {
+  const t = Math.max(0, Math.min(1, (storm - RAIN_ONSET) / (1 - RAIN_ONSET)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * Every episode multiplier a scripted storm passed through, sampled per frame
+ * and only while it is actually raining hard enough to divide by.
+ */
+function episodeTrace(seed: number, duration = 90, dt = 0.05): number[] {
+  const weather = createWeather(seed);
+  const wind = scriptedWind();
+  const out: number[] = [];
+  // Walk phases until a storm-class one turns up, then record inside it.
+  for (let k = 0; k < 60; k++) {
+    wind.phaseIndex++;
+    wind.phase = 'event';
+    wind.phaseDuration = duration;
+    wind.phaseTime = 0;
+    const fade = Math.min(2, duration * 0.25);
+    const frames: number[] = [];
+    let peakStorm = 0;
+    for (let t = 0; t < duration; t += dt) {
+      wind.phaseTime = t;
+      wind.envelope = Math.max(0, Math.min(1, Math.min(t / fade, (duration - t) / fade)));
+      weather.update(dt, wind, NO_CELLS);
+      peakStorm = Math.max(peakStorm, weather.state.storm);
+      const base = baseRain(weather.state.storm);
+      if (base > 0.5) frames.push(weather.state.rain / base);
+    }
+    if (peakStorm > 0.9) {
+      out.push(...frames);
+      break;
+    }
+  }
+  return out;
 }
 
 describe('weather', () => {
@@ -215,6 +265,95 @@ describe('weather', () => {
     const faintWind = scriptedWind();
     const faintPeak = runPhase(faint, faintWind, 'lull', 40, cells(0.08, 0, false));
     expect(faintPeak.rain).toBe(0);
+  });
+
+  it('rains in episodes: waves of 20% to 100%, a tenth at a time', () => {
+    // The shape of the feature. A storm's rain is cut into episodes and each
+    // one is rolled to one of nine levels, so the multiplier over a long
+    // storm visits several plainly different strengths and never leaves the
+    // band -- it is a wave of rain, not a rain that stops.
+    const trace = episodeTrace(4242);
+    expect(trace.length).toBeGreaterThan(100);
+    const lo = Math.min(...trace);
+    const hi = Math.max(...trace);
+    expect(lo).toBeGreaterThanOrEqual(RAIN_EPISODE_FLOOR - 1e-6);
+    expect(hi).toBeLessThanOrEqual(1 + 1e-6);
+    // Two episodes at least, and the rule that neighbours differ means two
+    // episodes differ by a tenth at the very least. In practice far more.
+    expect(hi - lo).toBeGreaterThan(RAIN_EPISODE_STEP - 1e-6);
+    // Every level it SETTLES on is one of the nine. Sampled where the trace
+    // is flat, since the ramp between two levels passes through every value
+    // in between by design.
+    for (let i = 1; i < trace.length; i++) {
+      if (Math.abs(trace[i] - trace[i - 1]) > 1e-6) continue;
+      const tenths = (trace[i] - RAIN_EPISODE_FLOOR) / RAIN_EPISODE_STEP;
+      expect(Math.abs(tenths - Math.round(tenths))).toBeLessThan(0.02);
+      expect(Math.round(tenths)).toBeGreaterThanOrEqual(0);
+      expect(Math.round(tenths)).toBeLessThan(RAIN_EPISODE_LEVELS);
+    }
+  });
+
+  it('eases between episodes rather than stepping', () => {
+    // `RAIN_EPISODE_TAU`, and the reason it exists: this multiplier scales the
+    // drops, the haze and the scope's own range together, so a step would take
+    // the visible world from a downpour to a drizzle between two frames.
+    const dt = 0.05;
+    const trace = episodeTrace(4242, 90, dt);
+    let worst = 0;
+    for (let i = 1; i < trace.length; i++) {
+      worst = Math.max(worst, Math.abs(trace[i] - trace[i - 1]));
+    }
+    // One frame may move the scale by at most `dt / tau` of the full range,
+    // and the full range is 0.8. Well under a tenth either way.
+    expect(worst).toBeLessThan(0.05);
+  });
+
+  it('fits at least two episodes into the rain that carries them', () => {
+    // An episode is at most half its wind phase, so a phase always holds two
+    // or more -- an episode allowed to fill the whole event would be the old
+    // single-strength rain wearing a new name. Counted as settled plateaus,
+    // which is what an episode looks like from outside.
+    const dt = 0.05;
+    const trace = episodeTrace(4242, 40, dt);
+    const plateaus: number[] = [];
+    for (let i = 1; i < trace.length; i++) {
+      if (Math.abs(trace[i] - trace[i - 1]) > 1e-6) continue;
+      if (plateaus.length === 0 || Math.abs(plateaus[plateaus.length - 1] - trace[i]) > 1e-6) {
+        plateaus.push(trace[i]);
+      }
+    }
+    expect(plateaus.length).toBeGreaterThanOrEqual(2);
+    // And no episode is shorter than the floor: the shortest plateau-to-
+    // plateau stretch, plus the ramp it took to get there, is at least
+    // `RAIN_EPISODE_MIN`. Checked on the bound rather than by timing each
+    // one, since the ramp belongs to the episode it is arriving at.
+    expect(RAIN_EPISODE_MIN).toBe(1);
+    expect(RAIN_EPISODE_SHARE).toBe(0.5);
+  });
+
+  it('never lets an episode stop the rain, and never raises it past the storm', () => {
+    // The floor is 20% and not 0: rain that stops dead and restarts is two
+    // rains, and the gap between them belongs to the storm envelope. The
+    // ceiling is the storm's own rain, so an episode can only ever take away.
+    const trace = episodeTrace(4242);
+    for (const scale of trace) {
+      expect(scale).toBeGreaterThan(0);
+      expect(scale).toBeLessThanOrEqual(1 + 1e-6);
+    }
+  });
+
+  it('leaves a pinned rain alone, so a shot is the same shot every time', () => {
+    // `?weather=rain` has to photograph one rain. The episode clock is off
+    // under a pin for the same reason the squall roll is.
+    const pinned = createWeather(7, 'rain');
+    const wind = scriptedWind();
+    const seen = new Set<number>();
+    for (let t = 0; t < 60; t += 0.05) {
+      pinned.update(0.05, wind, NO_CELLS);
+      seen.add(Math.round(pinned.state.rain * 1e6));
+    }
+    expect(seen.size).toBe(1);
+    expect(pinned.state.rain).toBeCloseTo(0.7, 6);
   });
 
   it('shrinks visibility with fog and rain, and never past the floor', () => {
