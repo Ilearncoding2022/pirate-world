@@ -3541,13 +3541,13 @@ is what finally caught it, asserting `10 000` on a real click.
 ## The leviathan hunt
 `docs/LEVIATHAN_PLAN.md` is the brief; this section is the contract the rest of
 the codebase has to keep. Three modules, no HUD button, and **no branch in the
-frame loop** — which is the whole of what makes it different from everything
+frame loop**, which is the whole of what makes it different from everything
 above it.
 
 ### It is not an overlay, and that is the feature
 Fishing, the chandlery, the contract board, the fish book and the menu are all
 the same shape: a card over a frozen world, listed in **The pause contract**. A
-fight is the one thing that is not, and it is only half not — since the
+fight is the one thing that is not, and it is only half not: since the
 `battlescene.ts` rework the clock runs through a duel, but the player has no
 helm in one (`battle.ts` computes in flat metres in a tangent frame pinned at
 the ring's centre, and W/S only move a combatant along the circle).
@@ -3590,7 +3590,7 @@ Without the **locker check**, an empty locker would be a press that silently
 did nothing. Instead the bar stays dark and a `dry` event puts one line on the
 strip naming the chandlery, once per shoal. A player can always fish, because a
 fishing session has ten harpoons of its own, so an empty locker is never a
-soft-lock — it is the shop teaching itself.
+soft-lock; it is the shop teaching itself.
 
 ### One ramp, five bands
 `damageAt(p) = round(100 * (1 - |p|))`. The five colour stops `style.css` paints
@@ -3605,7 +3605,7 @@ would average 50. The skill gradient is steeper for free.
 
 `t` resets to zero every time the dial arms. A player who loses the target and
 comes round again gets the sweep from a known start rather than from wherever a
-free-running clock happened to be — the same argument `fishsim.ts` makes for
+free-running clock happened to be. It is the same argument `fishsim.ts` makes for
 stopping `swingClock` while the rope is out, and for the same reason: a skill
 whose phase depends on how long the approach took is not learnable.
 
@@ -3638,7 +3638,7 @@ precisely so Phase 2 has a history to gate on, and flooding it before it means
 anything would set that baseline wrong. Gold only.
 
 ### The five ways a hunt ends
-All five pay what was banked, and all five pay exactly once — the purse settles
+All five pay what was banked, and all five pay exactly once: the purse settles
 on the transition INTO `settling`, so the fade that follows cannot pay twice.
 
 | Ending | Where |
@@ -3700,14 +3700,32 @@ No glTF, no rig, no asset file. That is the MVP's entire economy: the ironwhale
 the feature is named for is Phase 2 work and the shadows exist to answer the one
 question that has to be answered before paying for it.
 
-**The accepted artefact.** A translucent dark plane sitting `SHADOW_LIFT` (0.05
-units) ABOVE the water is an approximation of a shape below it, and near the
-ship the sea is genuinely displaced by the wave patch, so a crest can swallow a
-shadow. This is listed as a known limitation of the phase rather than tuned away
-by raising the lift until it always clears — a shadow floating a metre over the
-swell reads worse than one a wave occasionally hides. The real fix is a
-darkening term inside the water shader through the plugin contract
-`waterhazard.ts` already uses, which reads as genuinely under the surface.
+**`SHADOW_LIFT` is not a z-fighting epsilon**, though it was written as one and
+that was a bug worth recording. The water is a sphere at `GLOBE_RADIUS`, but
+`waterpatch.ts` genuinely DISPLACES it near the ship by up to
+`DISPLACE_AMPLITUDE` (0.3) and writes depth. At 0.05 the shadows were under the
+sea almost everywhere and the depth test discarded every fragment: the shoal was
+placed, counted visible, and drawn nowhere. It is now `DISPLACE_AMPLITUDE + 0.1`
+and imports that constant rather than restating it, so the clearance cannot
+drift away from the displacement it exists to clear. `depthTest` stays ON, which
+is what keeps land occluding a shoal behind a headland.
+
+**The footprint is set from a screenshot, not from a guess.** The first figures
+were 4.2 by 1.7 units, a little over a hull length, which sounds right and is
+not: the chase camera sits 52 units back, so a shadow 22 units ahead is 74 from
+the lens and foreshortens at 20 degrees to about ten pixels. It is 7 by 2.6 now,
+over twice the hull's length, which sounds far too big written down and is about
+right on screen.
+
+**The accepted artefact**, which is a different thing from the bug above. A dark
+plane above the water is still an approximation of a shape below it and can read
+as a texture artefact rather than as an animal. That is a limitation of this
+phase rather than something to tune away by dropping the opacity until a
+screenshot passes. "Illegible" and "absent" look identical in a screenshot and
+only one of them is a design trade, which is why `ShadowField.visible` publishes
+the count of planes actually submitted. The real fix is a darkening term inside
+the water shader through the plugin contract `waterhazard.ts` already uses: a
+term inside the surface cannot be above or below it, and has no height to tune.
 
 ### What `?hunt=shoal` does
 Lays a shoal at `SHOAL_SPAWN_MIN` off the bow three simulated seconds in, and

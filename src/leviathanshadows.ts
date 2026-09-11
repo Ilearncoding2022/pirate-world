@@ -4,6 +4,7 @@ import type { HuntState, Shadow } from './types';
 import type { PostFx } from './postfx';
 import { GLOBE_RADIUS } from './geo';
 import { SHOAL_COUNT } from './leviathan';
+import { DISPLACE_AMPLITUDE } from './waveconstants';
 
 /**
  * leviathanshadows.ts: the shoal as things you can see.
@@ -25,11 +26,17 @@ import { SHOAL_COUNT } from './leviathan';
  *
  * ## The honest artefact
  *
- * A translucent dark plane sitting slightly ABOVE the water is an
- * approximation of a shape below it, and at the chase camera's grazing angle
- * it can read as a texture artefact rather than as an animal. That is a known,
- * accepted limitation of this phase and not a bug to be tuned away by dropping
- * the opacity until a screenshot passes. The real fix is a darkening term
+ * A translucent dark plane sitting ABOVE the water is an approximation of a
+ * shape below it, and at the chase camera's grazing angle it can read as a
+ * texture artefact rather than as an animal. That is a known, accepted
+ * limitation of this phase and not a bug to be tuned away by dropping the
+ * opacity until a screenshot passes.
+ *
+ * It also has a failure mode that is NOT the accepted one and was mistaken for
+ * it once: sitting above the water by less than the water's own displacement
+ * means sitting UNDER it, and the shoal disappears completely. See
+ * `SHADOW_LIFT`. "Illegible" and "absent" look identical in a screenshot and
+ * only one of them is a design trade. The real fix is a darkening term
  * inside the water shader through the plugin contract `waterhazard.ts` already
  * uses (docs/ARCHITECTURE.md, "The water plugin contract"), which reads as
  * genuinely under the surface; it is staged as Phase 2 in the plan.
@@ -49,13 +56,19 @@ import { SHOAL_COUNT } from './leviathan';
  * A shadow's footprint on the water, world units, along its own heading and
  * across it.
  *
- * A little over a hull length long and about half as wide. Big enough to read
- * as an animal at the range the dial arms at (`HARPOON_RANGE`, 12 units) and
- * small enough that fourteen of them inside `SHOAL_RADIUS` are a shoal rather
- * than a slick.
+ * Set from a screenshot rather than from a guess. The first figures were 4.2
+ * by 1.7, a little over a hull length, which sounds right and is not: the
+ * chase camera sits 52 units BACK from the ship, so a shadow 22 units ahead is
+ * 74 from the lens, and at a grazing 20 degrees a flat quad that size
+ * foreshortens to about ten pixels. Ten pixels is not an animal, it is a
+ * speck, and no amount of opacity tuning makes it one.
+ *
+ * Seven by two and a half is over twice the hull's length. That sounds far too
+ * big written down and is about right on screen, which is the only place the
+ * question has an answer.
  */
-const SHADOW_LENGTH = 4.2;
-const SHADOW_WIDTH = 1.7;
+const SHADOW_LENGTH = 7;
+const SHADOW_WIDTH = 2.6;
 
 /** How much larger the marked one is drawn. The ring does most of the work; this seconds it. */
 const MARKED_SCALE = 1.25;
@@ -63,12 +76,27 @@ const MARKED_SCALE = 1.25;
 /**
  * How far above the sea a shadow floats, world units.
  *
- * Z-fighting clearance and nothing else. The globe's water is a smooth sphere
- * at `GLOBE_RADIUS` and a plane written at exactly that radius flickers
- * against it; five hundredths of a unit is far below anything visible at this
- * scale and far above the depth buffer's resolution out here.
+ * NOT a z-fighting epsilon, though it was written as one (0.05) and that was
+ * the bug: the shoal was submitted, counted visible, and drawn nowhere.
+ *
+ * The water is a sphere at `GLOBE_RADIUS`, but `waterpatch.ts` genuinely
+ * DISPLACES it near the ship by up to `DISPLACE_AMPLITUDE` (0.3) at a full
+ * gale, and it writes depth. A plane five hundredths of a unit up is therefore
+ * under the sea almost everywhere there is any sea running at all, and the
+ * depth test discards it. Proved by turning `depthTest` off for one build, at
+ * which point the shadows appeared.
+ *
+ * So this clears the displacement with room over: `DISPLACE_AMPLITUDE` plus a
+ * tenth. In a calm the shadow then floats four tenths of a unit proud of the
+ * water, which at these ranges is about four pixels and is the price of the
+ * approach. `depthTest` stays ON, which is what keeps land occluding a shoal
+ * behind a headland.
+ *
+ * The real answer is still the water-shader darkening term staged as Phase 2 in
+ * docs/LEVIATHAN_PLAN.md: a term inside the surface cannot be above or below
+ * it, and has no height to tune.
  */
-const SHADOW_LIFT = 0.05;
+const SHADOW_LIFT = DISPLACE_AMPLITUDE + 0.1;
 
 /**
  * The authored drift, world units and radians per second.

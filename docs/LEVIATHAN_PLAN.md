@@ -637,7 +637,7 @@ Named here so the MVP's shape carries them, and so nobody re-derives them.
 
 ## Departures from this plan, as built
 
-Eleven, each with the reason. Nothing else in the document was contradicted.
+Twelve, each with the reason. Nothing else in the document was contradicted.
 
 1. **An overlay freezes a hunt; it does not end one.** The plan said both an
    overlay and a fight end a hunt "through the `suppressed()` path", and that is
@@ -721,6 +721,19 @@ Eleven, each with the reason. Nothing else in the document was contradicted.
     the ship, not at water under it, so overshooting costs a pass. Found only by
     playing it in a browser, which is the argument for the smoke case that found
     it.
+
+12. **The shadows were invisible, and not for the reason the plan predicted.**
+    The plan named the risk as "may read as a texture artefact rather than as an
+    animal" and accepted it. What actually happened was worse and simpler: the
+    lift was written as a z-fighting epsilon (0.05) when the water near the ship
+    is genuinely displaced by up to `DISPLACE_AMPLITUDE` (0.3) and writes depth,
+    so every fragment was discarded. The shoal was placed, counted visible, and
+    drawn nowhere. Proved by building once with `depthTest` off, at which point
+    it appeared. The lift is now `DISPLACE_AMPLITUDE + 0.1`, imported rather
+    than restated. The footprint went 4.2x1.7 to 7x2.6 in the same pass, for the
+    related reason that a quad a hull-length across foreshortens to about ten
+    pixels at the range it is seen from. The accepted artefact in the plan is
+    still accepted; it was simply not what was wrong.
 
 One thing the plan flagged as needing the owner's word was built as flagged and
 is still open to it: **a press under `SOUND_BELOW` ends the whole hunt** rather
