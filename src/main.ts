@@ -63,7 +63,7 @@ import type {
 } from './types';
 import type { QuestLineInput } from './hud';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
-import { findRingCentre, RING_CLEARANCE } from './battlering';
+import { findRingCentre, RING_CLEARANCE, RING_DRIVEN_OFF } from './battlering';
 import { HARBOUR_NAMES } from './harbournames';
 import { OVERDRIVE_MAX_FORWARD } from './overdrive';
 
@@ -1041,6 +1041,24 @@ async function startGame(): Promise<void> {
     ship.halt();
     contactBoat = boat;
     /*
+     * Where the fight will be staged, decided HERE rather than three seconds
+     * later when the fade puts it there.
+     *
+     * Two reasons, and the second is the one that moved it. The first is that
+     * it costs nothing: the world is frozen from this frame, so the ship's
+     * position cannot change between the ram and the fade and the search would
+     * return the same answer either way. The second is that the CARD needs the
+     * answer. A ring that has been driven a long way off owes the player a
+     * sentence, and a sentence cannot be written by a screen that goes up
+     * before the search that would justify it has run.
+     */
+    ringMoved = findRingCentre(
+      globe.heightMap,
+      terrain.seaLevel,
+      ship.state.position,
+      ringCentre,
+    ).moved;
+    /*
      * The player's threshold is read HERE, at the ram, and carried unchanged
      * through the card and into the sim.
      *
@@ -1051,7 +1069,7 @@ async function startGame(): Promise<void> {
      * case (the arena branch never ticks it), which is what makes freezing it
      * at the ram honest rather than merely convenient.
      */
-    battleCover.open(boat.kind, records.hull.state.hitsToLose);
+    battleCover.open(boat.kind, records.hull.state.hitsToLose, ringMoved > RING_DRIVEN_OFF);
   }
 
   /**
@@ -1092,7 +1110,7 @@ async function startGame(): Promise<void> {
       playerHullHome = ship.object.parent;
       contactHullHome = contactHull ? contactHull.parent : null;
       battleScene.enter(ship.object, contactHull, solarElevation());
-      placeRing(ship.state.position);
+      placeRing();
       // No funnel may open inside the ring for as long as the fight is up.
       // The clearance is the ring the fight OPENS on rather than the one it
       // is currently squeezed to, so a maelstrom cannot be raised into the
@@ -1132,6 +1150,16 @@ async function startGame(): Promise<void> {
   const _ringOrigin = new THREE.Vector3();
   /** The ring's centre as a unit direction, live for as long as a fight is up. */
   const ringCentre = new THREE.Vector3(0, 0, 1);
+  /**
+   * World units the ring was slid off the contact to find open water, from
+   * the same search that wrote `ringCentre`.
+   *
+   * Written at the ram and read once, on the next line, to decide whether the
+   * cover card says anything about it. It is kept as state rather than passed
+   * along because the search and the card are two different beats of the same
+   * frame and the alternative is a second search.
+   */
+  let ringMoved = 0;
 
   /*
    * The open sea's shove, and the one place a real crest reaches into a fight.
@@ -1212,12 +1240,10 @@ async function startGame(): Promise<void> {
     }
   }
 
-  function placeRing(contact: THREE.Vector3): void {
-    // The result is read for its side effect on `ringCentre`; `fitted` is
-    // deliberately not acted on. A fallback ring in a tight inlet is still a
-    // fight, and refusing to stage one there would strand the player in a
-    // contact that can never resolve.
-    findRingCentre(globe.heightMap, terrain.seaLevel, contact, ringCentre);
+  function placeRing(): void {
+    // `ringCentre` was chosen at the ram, by `onContact`, and this only lays
+    // the arena on it. The search moved up there because the cover card has to
+    // know how far the fight travelled; see the note on `ringMoved`.
     _ringUp.copy(ringCentre);
     tangentFrame(_ringUp, _ringNorth, _ringEast);
     const props = battleScene.props;

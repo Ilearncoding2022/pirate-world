@@ -33,15 +33,62 @@ export const RING_CLEARANCE = ARENA_R0 + 8;
 /**
  * How far the search may slide the ring, and how finely it looks.
  *
- * SEARCH_MAX is deliberately modest. The fight has to happen roughly where
- * the contact did, or a player rammed off a harbour mouth is teleported out
- * to sea to answer for it; four ring-radii clears almost any coastline the
- * contact could have happened against and is short enough that the water it
- * lands on is plainly the water the player was sailing.
+ * **SEARCH_MAX is the whole planet**, and that is the fix rather than a
+ * loosening of one. It used to be four ring-radii, 80 units, on the reasoning
+ * that a player rammed off a harbour mouth should not be dragged out to sea to
+ * answer for it. The reasoning was sound and the number was wrong: measured
+ * over 600 water points within twelve units of a coast on the shipped seed,
+ * **29% of them had no clear disc anywhere within 80 units**, and every one of
+ * those fell through to the fallback and staged a duelling ring across a
+ * headland. The median coastal contact has to move 56 units and the worst
+ * needs 168, so any cap short of the planet is a cap that fires.
+ *
+ * Half the circumference reaches the antipode, so a search that runs to the
+ * end has looked everywhere there is to look and `fitted: false` now means the
+ * world has no fightable water at all -- a world-generation bug, not a
+ * runtime case.
+ *
+ * **Nothing is dragged anywhere.** The ship is put back exactly where the
+ * contact happened when the fight ends (`main.ts`'s `onContinue`), and both
+ * cuts are behind a blackout, so the distance costs the player nothing but the
+ * backdrop -- and open water is a better backdrop than a hillside. What the
+ * distance does cost is a lie by omission, which is what `RING_DRIVEN_OFF` and
+ * the line it puts on the cover card are for.
+ *
+ * SEARCH_STEP is half the clearance, so the candidate grid is fine enough
+ * that a pocket of water big enough to hold a ring cannot sit between two
+ * probes. The whole search is bounded by about 6 300 candidates and costs
+ * 0.4 ms on the shipped world, once, behind a three-second card: `ringFits`
+ * is 36 us when it passes and 10 us when it fails, and it fails fast.
  */
-const SEARCH_MAX = ARENA_R0 * 4;
-const SEARCH_RINGS = 6;
-const BEARINGS = 12;
+const SEARCH_MAX = Math.PI * GLOBE_RADIUS;
+const SEARCH_STEP = RING_CLEARANCE / 2;
+
+/**
+ * The fewest bearings any circle is probed on, for both of the circles in
+ * this file: the disc sampler's inner shells and the search's first shells.
+ *
+ * One constant for the two because it is one statement -- a circle probed on
+ * fewer bearings than this is not being probed, it is being spot-checked --
+ * and because they were one constant before the search was rewritten. Both
+ * callers ask for more as soon as their own arc spacing does; this is only
+ * the floor that stops a two-unit shell being sampled twice.
+ */
+const MIN_BEARINGS = 12;
+
+/**
+ * How far a ring has to slide before the player is told it slid, world units.
+ *
+ * Twice the opening radius, which is the distance at which the ring the fight
+ * is staged on and a ring drawn at the contact point share no water at all.
+ * Under it the fight is plainly on the sea the player was sailing and saying
+ * so would be noise; over it they are somewhere else and a screen that did not
+ * mention it would be the game palming a teleport.
+ *
+ * Read by `main.ts` at the ram and passed to `battlecover.ts`. It is not read
+ * here: this module places rings and does not know there is a card.
+ */
+export const RING_DRIVEN_OFF = 2 * ARENA_R0;
 
 /**
  * The widest gap the disc's sampling is allowed to leave anywhere inside
@@ -105,7 +152,7 @@ export function ringFits(heightMap: HeightMap, seaLevel: number, dir: Vector3): 
   const shells = Math.max(1, Math.ceil(RING_CLEARANCE / SAMPLE_STEP));
   for (let s = 1; s <= shells; s++) {
     const radius = (RING_CLEARANCE * s) / shells;
-    const bearings = Math.max(BEARINGS, Math.ceil((Math.PI * 2 * radius) / SAMPLE_STEP));
+    const bearings = Math.max(MIN_BEARINGS, Math.ceil((Math.PI * 2 * radius) / SAMPLE_STEP));
     for (let b = 0; b < bearings; b++) {
       const theta = (b / bearings) * Math.PI * 2;
       step(_probe, dir, bearing(_dir, dir, theta), radius);
@@ -120,17 +167,23 @@ export function ringFits(heightMap: HeightMap, seaLevel: number, dir: Vector3): 
  * does — searched outward in rings, so the answer is the CLOSEST open water
  * rather than merely some open water.
  *
- * Falls back to the contact point itself when nothing within SEARCH_MAX
- * works, which is the same shape of promise `hazards.ts`'s `pickRespawn`
- * makes: a fight in an awkward place beats no fight at all, and a player
- * boxed that tightly into an inlet has a stranger problem than a duel.
+ * The search now runs to the antipode, so on any world with one fightable
+ * patch of water in it this cannot come back unplaced. The fallback below --
+ * the contact point itself, `fitted: false` -- is kept for the world that has
+ * none, and is the same shape of promise `hazards.ts`'s `pickRespawn` makes:
+ * a fight in an awkward place beats a contact that can never resolve.
  *
  * `fitted` is how a caller tells the two identical-looking answers apart.
- * Without it "the contact was already clear" and "nothing was clear and this
- * is the fallback" both come back as the contact point, and no reader -- or
- * test -- can tell which happened. Nothing in the game changes its behaviour
- * on it today; it exists because an API that cannot report its own failure is
- * one that gets believed when it should not be.
+ * Without it "the contact was already clear" and "there is nowhere on this
+ * planet to fight and this is the fallback" both come back as the contact
+ * point, and no reader -- or test -- can tell which happened. Nothing in the
+ * game changes its behaviour on it today; it exists because an API that
+ * cannot report its own failure is one that gets believed when it should not
+ * be.
+ *
+ * `moved` is read: `main.ts` compares it against `RING_DRIVEN_OFF` to decide
+ * whether the cover card owes the player a sentence about where the fight
+ * went.
  */
 export interface RingPlacement {
   /** The ring's centre, a unit direction. */
@@ -151,10 +204,22 @@ export function findRingCentre(
     out.copy(contact).normalize();
     return { centre: out, fitted: true, moved: 0 };
   }
-  for (let r = 1; r <= SEARCH_RINGS; r++) {
-    const distance = (SEARCH_MAX * r) / SEARCH_RINGS;
-    for (let b = 0; b < BEARINGS; b++) {
-      const theta = (b / BEARINGS) * Math.PI * 2;
+  const shells = Math.ceil(SEARCH_MAX / SEARCH_STEP);
+  for (let r = 1; r <= shells; r++) {
+    const distance = (SEARCH_MAX * r) / shells;
+    /*
+     * The TRUE circumference of a circle of arc radius `distance` on this
+     * sphere, which is `2 * PI * R * sin(distance / R)` and not `2 * PI *
+     * distance`. The two agree near the contact and part company badly past a
+     * quarter of the way round, where a shell is already shrinking back
+     * toward the antipode: the flat formula would probe the last shell on 282
+     * bearings when it is a circle a few units across. Same spacing on the
+     * ground, a third of the candidates.
+     */
+    const circumference = 2 * Math.PI * GLOBE_RADIUS * Math.sin(distance / GLOBE_RADIUS);
+    const bearings = Math.max(MIN_BEARINGS, Math.ceil(circumference / SEARCH_STEP));
+    for (let b = 0; b < bearings; b++) {
+      const theta = (b / bearings) * Math.PI * 2;
       step(out, contact, bearing(_dir, contact, theta), distance);
       if (ringFits(heightMap, seaLevel, out)) {
         out.normalize();

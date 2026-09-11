@@ -293,8 +293,8 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   Their helm is not flawless either; one decision in four is a coin flip
   rather than a solved course, so watch it long enough and it visibly picks
   the wrong way. And the sea is not still under either of you — because it is
-  the same sea. **The fight happens where you were rammed**, on the world's own
-  water, under the world's own sky, with the clock still running. There is no
+  the same sea. **The fight happens on the world's own water**, under the
+  world's own sky, with the clock still running. There is no
   cut to somewhere else and no arena sea pretending to be this one. The waves
   that roll through the ring are the ocean's own, rolling on from wherever the
   wind raised them, and one that crosses your hull shoves you off your line
@@ -305,8 +305,15 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   The ring itself is not drawn. It is still there — both boats are held to it
   and it still closes — but it is a constraint you feel rather than a circle
   painted on the sea. If the sea where you were caught is too tight for a
-  fight, the ring slides to the nearest open water rather than laying a
-  duelling circle across a headland. **Three to six rafts of flotsam drift through**, no two the same
+  fight, the ring slides to the nearest water that will hold one rather than
+  laying a duelling circle across a headland — and inshore it usually is too
+  tight, because a ring wants a clear disc twenty-eight units across and most
+  bays are narrower than that. There is no limit on how far it slides. It will
+  cross an ocean to find sea room, and when it goes further than a ring's own
+  width the card tells you so before the guns start, because a fight that opens
+  on strange water with nothing said about it reads as a bug rather than as a
+  chase. You are put back exactly where you were rammed when it is over, so the
+  only thing the distance costs you is the view. **Three to six rafts of flotsam drift through**, no two the same
   size or the same speed, and they are the only obstacle now: one will swallow
   a ball that crosses it, and fouls whatever hull runs into it — half speed and
   a dead gun for a couple of seconds. As one is sunk or carried out the far

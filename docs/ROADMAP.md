@@ -251,7 +251,17 @@ globe's tangent plane at the ring, and the camera is parented into that group.
 The world's clock runs through a fight — cells, wind, weather, hazards and
 `globe.update` all tick — so the sun moves and a squall can arrive mid-duel.
 The ring is drawn on the sea and shrinks with the sim. `battlering.ts` keeps a
-fight off the coast, sampling the disc rather than the rim. Step 2 came almost
+fight off the coast, sampling the disc rather than the rim -- and, since
+2026-09-10, it searches the whole planet for water to do it in rather than the
+four ring-radii it shipped with. The cap was the bug: measured over 600 water
+points within twelve units of a coast on the shipped seed, **29% had no clear
+disc within 80 units**, fell through to the fallback, and staged a duelling
+circle across a headland with both hulls sailing over a beach. The median
+coastal contact has to move 56 units and the worst 168. Nothing is dragged
+anywhere -- the ship is returned to the contact point when the fight ends and
+both cuts are behind a blackout -- so the distance costs only the backdrop, and
+the cover card says so in a line of its own when the fight moves more than a
+ring's diameter (`RING_DRIVEN_OFF`). Step 2 came almost
 free with it: the sea under the ring IS the world's, so the wind sets the
 crests and a storm darkens the water without anything being fed anywhere, and
 the arena's own crests are switched off (`LIVE`) in favour of shoves from the
