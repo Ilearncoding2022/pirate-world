@@ -210,7 +210,7 @@ export function createHuntDial(deps: HuntDialDeps): HuntDial {
       const hintText = armed
         ? `${damageAt(state.dial)}`
         : state.banked > 0
-          ? 'BRING IT UNDER THE BOW'
+          ? 'HOLD THE MARK OFF THE BOW'
           : 'STEER ONTO THE MARK';
       lastHint = write(hintOut, hintText, lastHint);
       // Under the sound threshold the live number is a warning and not a

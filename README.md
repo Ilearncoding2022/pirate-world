@@ -32,7 +32,7 @@ the first frame you are handed does not stutter.
 | on-screen `[ANCHOR]` | Deploy a Sea Anchor — kills the ship's way fast, then holds it a few seconds. On the helm pad, under REVERSE |
 | on-screen `[COIL]` | Engage an Overdrive Coil — 20 seconds at 16 knots, burning fuel hard the whole time. On the helm pad, over THRUST |
 | `Space` / click / tap | Fire the harpoon, and tap to fight a big fish on the line |
-| `Space` | Loose a harpoon at a shoal, while the hunt's bar is lit. The bar lights only when the marked shadow is within four hull lengths AND within 30 degrees of the bow, so holding a target is steering |
+| `Space` | Loose a harpoon at a shoal, while the hunt's bar is lit. The bar lights only when the marked shadow is between two and four hull lengths ahead AND within 30 degrees of the bow, so holding a target is steering. Sail over it and the bar goes out |
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. Up to three a second, and the locker never runs out |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
 | `Esc` | Open the menu — and the controls guide inside it. Also ends a fishing session or closes any panel; it will not get you out of a battle |
@@ -493,8 +493,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   you see the water. They drift at four knots on one heading and turn, up to
   sixty degrees either way, every five to ten seconds. One shadow at a time
   wears a cyan ring, and a bar at the bottom of the screen lights **only** when
-  that one is within four hull lengths of you and within thirty degrees of the
-  bow. Nothing is paused: the wind still blows, the sun still crosses, raiders
+  that one is between two and four hull lengths ahead of you and within thirty
+  degrees of the bow. Overshoot it and the bar goes out: a harpoon is thrown at
+  water ahead of the ship, not at water under it. Nothing is paused: the wind still blows, the sun still crosses, raiders
   still close, and you are steering the whole time. That is the point of it —
   it is the only thing in this game played with the actual helm.
   When the bar lights, a needle sweeps it on a two-second sine, red through

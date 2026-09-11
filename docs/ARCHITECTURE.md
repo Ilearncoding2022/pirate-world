@@ -3563,16 +3563,28 @@ compiling.
 ### The gate is the design
 `leviathan.state.armed` is true only when all four of these hold:
 
-1. the marked shadow is within `HARPOON_RANGE` (12 units, four hull lengths);
-2. it is within `BOW_ARC` (30 degrees) of the bow;
-3. the locker has at least one spare;
-4. `main.ts`'s `suppressed()` is false.
+1. the marked shadow is inside `HARPOON_RANGE` (12 units, four hull lengths);
+2. and outside `HARPOON_MIN_RANGE` (5 units, under two);
+3. it is within `BOW_ARC` (30 degrees) of the bow;
+4. the locker has at least one spare;
+5. `main.ts`'s `suppressed()` is false.
 
-Two and three are the interesting ones. Without the **arc**, the dial is
+Three of these are interesting. Without the **arc**, the dial is
 `fishsim.ts:684`'s sine with a different readout and the helm does nothing:
 proximity alone is the fishing card played outdoors. The shoal reroll (a turn
 of up to 60 degrees every 5 to 10 seconds) is what keeps satisfying the arc a
 continuous act of steering rather than a one-time approach.
+
+The **floor** is not symmetry with the ceiling, it is what makes the arc
+satisfiable at all. Without it the gate is unreachable at point blank, and not
+as an edge case: the player's whole instinct is to close, and the bearing to
+something the hull is standing on swings past ninety degrees. A browser probe
+sailed the ship onto the marked shadow and read `markRange` 0.18 with
+`markOffBow` -88.4, having never armed once on the way in. It is the same
+geometry `aiboats.ts` leans on from the other side, where a bearing that swings
+faster than a chaser can turn is exactly what makes a raider shakeable. It also
+says something true: a harpoon is thrown at water ahead of the ship, not at
+water under it, so overshooting now costs a pass.
 
 Without the **locker check**, an empty locker would be a press that silently
 did nothing. Instead the bar stays dark and a `dry` event puts one line on the

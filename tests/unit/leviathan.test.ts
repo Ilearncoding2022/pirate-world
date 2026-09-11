@@ -5,6 +5,7 @@ import {
   DESPAWN_RANGE,
   DIAL_PERIOD,
   FADE_OUT,
+  HARPOON_MIN_RANGE,
   HARPOON_RANGE,
   HUNT_GOLD_PER_DAMAGE,
   HUNT_TARGETS,
@@ -419,6 +420,35 @@ describe('the gate, which is the whole design', () => {
     const ship = parkOnMark(h, HARPOON_RANGE * 0.5, BOW_ARC * 2);
     h.hunt.update(1 / 60, ship, false);
     expect(h.hunt.state.armed).toBe(false);
+  });
+
+  it('stays dark on top of the mark, which is the case that is easy to miss', () => {
+    /*
+     * The gate has a floor as well as a ceiling, and without one it is
+     * UNSATISFIABLE at point blank: the bearing to something the hull is
+     * standing on swings past ninety degrees, so the arc can never be met.
+     *
+     * This is not a hypothetical. A browser probe sailed the ship onto the
+     * marked shadow and read `markRange` 0.18 with `markOffBow` -88.4, having
+     * never armed once on the way in. A player's whole instinct is to close,
+     * so this is the path they take.
+     */
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    const ship = parkOnMark(h, HARPOON_MIN_RANGE * 0.4);
+    h.hunt.update(1 / 60, ship, false);
+    expect(h.hunt.state.armed).toBe(false);
+  });
+
+  it('arms in the band between the floor and the ceiling', () => {
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    // Both ends of the band, since one of them was missing entirely.
+    for (const range of [HARPOON_MIN_RANGE + 0.5, HARPOON_RANGE - 0.5]) {
+      const ship = parkOnMark(h, range);
+      h.hunt.update(1 / 60, ship, false);
+      expect(h.hunt.state.armed, `armed at ${range} units`).toBe(true);
+    }
   });
 
   it('arms inside both', () => {

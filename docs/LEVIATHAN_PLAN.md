@@ -461,6 +461,7 @@ else.
 | `HEADING_HOLD_MAX` | 10 | Seconds. The brief's figure |
 | `TURN_MAX` | 60 | Degrees either side on a reroll |
 | `HARPOON_RANGE` | 12 | Units. Four hull lengths: close enough to demand steering |
+| `HARPOON_MIN_RANGE` | 5 | Units. Under two hull lengths. Not in the plan; see departure 11 |
 | `BOW_ARC` | 30 | Degrees either side of the bow |
 | `DIAL_PERIOD` | 2.0 | Seconds for a full sweep. `fishsim.ts`'s swing is 2.4; this is tighter |
 | `HUNT_TARGETS` | 5 | Targetable shadows per hunt, and so the harpoons one hunt may take: exactly one `HARPOON_BUNDLE` |
@@ -636,7 +637,7 @@ Named here so the MVP's shape carries them, and so nobody re-derives them.
 
 ## Departures from this plan, as built
 
-Ten, each with the reason. Nothing else in the document was contradicted.
+Eleven, each with the reason. Nothing else in the document was contradicted.
 
 1. **An overlay freezes a hunt; it does not end one.** The plan said both an
    overlay and a fight end a hunt "through the `suppressed()` path", and that is
@@ -707,6 +708,19 @@ Ten, each with the reason. Nothing else in the document was contradicted.
     reach the strip. A shoal drifting onto a coast or out of range without ever
     being fired at is one the player either never engaged or deliberately
     sailed past, and the strip is for what they would otherwise miss.
+
+11. **The gate has a floor, `HARPOON_MIN_RANGE`, and needed one to work at
+    all.** The plan specified a maximum range and an arc, and that pair is
+    UNSATISFIABLE at point blank: the bearing to something the hull is standing
+    on swings past ninety degrees, so the arc can never be met. A player's whole
+    instinct is to close, so this is the path they take, not an edge case. A
+    browser probe steered the ship onto the marked shadow and read `markRange`
+    0.18 with `markOffBow` -88.4, having never armed once on the way in. Five
+    units. It is the same geometry `aiboats.ts` leans on from the other side,
+    and it says something true besides: a harpoon is thrown at water ahead of
+    the ship, not at water under it, so overshooting costs a pass. Found only by
+    playing it in a browser, which is the argument for the smoke case that found
+    it.
 
 One thing the plan flagged as needing the owner's word was built as flagged and
 is still open to it: **a press under `SOUND_BELOW` ends the whole hunt** rather

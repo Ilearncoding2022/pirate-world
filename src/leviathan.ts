@@ -168,6 +168,28 @@ export const TURN_MAX = (60 * Math.PI) / 180;
 export const HARPOON_RANGE = 12;
 
 /**
+ * How close is TOO close, world units.
+ *
+ * Without this the gate is unsatisfiable at point blank, and not as an edge
+ * case: a player's whole instinct is to close, and the bearing to something
+ * you are standing on swings to ninety degrees and past it. Measured in a
+ * browser before it was believed -- the hull reached `markRange` 0.18 with
+ * `markOffBow` at -88.4 and the dial had never once armed on the way in.
+ *
+ * It is the same geometry `aiboats.ts` already relies on from the other side:
+ * "inside about eleven units the bearing to a player crossing at 10 kn swings
+ * faster than fifty degrees a second and the chaser simply cannot hold it."
+ * That is what makes a raider shakeable, and it is what makes a harpoon
+ * unaimable.
+ *
+ * Five, which is under two hull lengths. It also says something true: a
+ * harpoon is thrown from the deck at water ahead of the ship, not at water
+ * under it. So overshooting the mark now costs a pass, which is the pressure a
+ * pursuit wanted anyway.
+ */
+export const HARPOON_MIN_RANGE = 5;
+
+/**
  * How far off the bow the marked shadow may be and still arm the dial, radians
  * either side.
  *
@@ -685,7 +707,8 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
 
     const target = marked();
     if (target === null) return false;
-    if (arcDistance(ship.position, target.position) > HARPOON_RANGE) return false;
+    const range = arcDistance(ship.position, target.position);
+    if (range > HARPOON_RANGE || range < HARPOON_MIN_RANGE) return false;
 
     // The bearing to the target, resolved against the bow. Two world vectors
     // and one dot product, never two compass bearings subtracted: see
