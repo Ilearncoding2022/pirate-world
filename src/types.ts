@@ -640,6 +640,22 @@ export interface PropulsionState {
   readonly maxForward: number;
   /** True for the whole kill-and-hold window of a deployed Sea Anchor. */
   readonly anchored: boolean;
+  /**
+   * What a tow leaves of the top speed: `TOW_SPEED_SHARE` while a derelict is
+   * on the line, and 1 otherwise. Absent means 1, so every existing caller and
+   * every test that builds this by hand is unchanged.
+   *
+   * **A separate field rather than a smaller `maxForward`, and that is a rule
+   * rather than plumbing.** `maxForward` is what the player BOUGHT — Trim's
+   * tier, or an Overdrive Coil's burn — and `ship.ts` takes the min of it and
+   * the worn hull's `speedCap`, which is docs/HARBOURS_PLAN.md's decision 14: a
+   * worn hull switches the Navigation shelf off. A tow is not a purchase, it is
+   * a LOAD, so it multiplies the result of that min instead of joining it.
+   * Folded into `maxForward` it would vanish in exactly the state it should
+   * hurt most: a hull worn below 25% is capped at 5 kn, and `min(0.75 * 10, 5)`
+   * is 5 — a free tow for the most broken ship in the game.
+   */
+  readonly towFactor?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1247,6 +1263,82 @@ export interface HuntEvent {
    * leviathan tired of them would be the game mislabelling their own choice.
    */
   readonly reason?: 'pinprick' | 'lost';
+}
+
+/* ------------------------------------------------------------------ */
+/* Salvage and the derelict                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One raft of salvage adrift on the open sea, owned by `salvage.ts` and
+ * mutated in place for as long as it floats. Hold the object, never a copy of
+ * its vectors.
+ *
+ * The same pile of timber the arena floats — `raftmesh.ts` draws both — but a
+ * different thing in the rules: an arena raft fouls a hull and stops a ball,
+ * and this one is taken by touching it and pays. See docs/SALVAGE_PLAN.md.
+ */
+export interface SalvageRaft {
+  /** Unit direction of the raft's centre. */
+  readonly position: Vector3;
+  /** Its own rolled radius, world units. Drives the mesh's scale and nothing else. */
+  readonly radius: number;
+  /** Fixed at birth, radians: which way the pile happens to be lying. */
+  readonly yaw: number;
+  /** Seconds since it was rolled. */
+  readonly age: number;
+  /** Seconds left before it sinks unclaimed. */
+  readonly life: number;
+  /** Fade in and out, 0..1, so a raft arrives and leaves rather than popping. */
+  readonly envelope: number;
+}
+
+/** The salvage afloat, mutated in place for the life of the run. */
+export interface SalvageState {
+  /** Live rafts, at most `LIVE_MAX` of them. */
+  readonly live: readonly SalvageRaft[];
+}
+
+/**
+ * The dead hull adrift, or what there is of one.
+ *
+ * At most one exists at a time, and it is `null` for most of a run. Once
+ * hooked it stops drifting and is carried astern of the player — see
+ * `derelict.ts`, which owns both halves of that.
+ */
+export interface Derelict {
+  /** Unit direction of the hull's centre. */
+  readonly position: Vector3;
+  /**
+   * Unit tangent the hull points along.
+   *
+   * Adrift it is the way the wind has pushed it; under tow it is the bearing
+   * from the derelict to the ship, so the dead hull follows nose-first on the
+   * line rather than being dragged sideways.
+   */
+  readonly forward: Vector3;
+  /** Harbour NAME it is bound for. A name and not a place: the world is redrawn, the name is not. */
+  readonly bound: string;
+  /** Great-circle distance from where it was found to the harbour it is bound for, world units. */
+  readonly voyage: number;
+  /** True once the towline is on. */
+  readonly towed: boolean;
+  /** Fade in, 0..1. A derelict never fades out: it is hooked, or it is still there. */
+  readonly envelope: number;
+}
+
+/** The derelict, mutated in place for the life of the run. */
+export interface DerelictState {
+  /** The one hull adrift or under tow, or null. */
+  readonly live: Derelict | null;
+  /**
+   * True while the ship is inside the hook ring of an untowed derelict.
+   *
+   * The same shape as `EnergyState.berthReady` and for the same reason: the
+   * ring's own verdict, published so that the notice strip, the `Space` ladder
+   * in `main.ts` and the tests all read one opinion of it.
+   */
+  readonly hookReady: boolean;
 }
 
 /**

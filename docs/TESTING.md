@@ -122,7 +122,14 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
   a real sun road on the water, low enough that land relief still casts.
 - `?hazard=wave|maelstrom` raises one, 25 units dead ahead, three
   seconds in. Already existed; it is listed here because the two are only
-  useful together.
+  useful together. `?hazard=maelstrom-now` opens the funnel ON the hull
+  instead, so the ship is swallowed at once and the run is about the sea it
+  comes back to — the near half of the pair `?battle=1` and `?salvage=take`
+  already carry. It exists because 25 units still has to be SAILED, and the
+  software rasteriser this tier runs on advances the simulation at about a
+  fiftieth of wall clock: measured, a hull under full throttle covered four
+  units in two hundred seconds, which puts a funnel dead ahead twenty minutes
+  away. That is the vigil this query was invented to end.
 - `?quality=low|medium|high` picks the tier. The hazard streams have to be
   looked at on all three: `low` registers no reflection plugin at all, and the
   displacement patch drops from 160 segments to 96.
@@ -134,6 +141,22 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
   in the session -- the same `CALM` the gunner's own unit cases are pinned
   against. Tuning the gunner against a hull that is also being shoved, fouled
   and blocked is tuning it against noise.
+- `?salvage=1` floats one raft 25 units ahead and `?salvage=take` puts one on
+  the hull so the payout runs at once; `?derelict=1` puts a dead hull just
+  outside its own hook ring and `?derelict=hook` just inside it. Each pair is
+  `?boat=`/`?battle=1` again -- one value to LOOK at the thing, one to make the
+  thing HAPPEN -- and the second of each exists because the first cannot be
+  reached by a headless run: the wind carries the hull several units sideways
+  (`wind.ts`'s `across`), so holding the throttle down passes a dead-ahead
+  target a unit or two off and nothing ever fires. A player steers; a
+  screenshot cannot.
+  Both sims publish on the debug hook under `?debug`, so a run waits on the
+  state rather than on a clock: `__pirateWorld.salvage` carries every raft's
+  distance and envelope plus a `taken` count, and `__pirateWorld.derelict`
+  carries the hull's distance, `towed`, `hookReady`, the harbour it is bound
+  for and a `settled` count. The two counters are the point -- a payout is not
+  visible in a screenshot, and a notice strip that has already timed out is not
+  evidence either.
 
 **The chandlery is reachable now, and it was not before.** `#btn-shop` ships
 `disabled`, only a berth enables it, and `main.ts` re-tests the berth on the

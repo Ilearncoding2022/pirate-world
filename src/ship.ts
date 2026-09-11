@@ -890,10 +890,19 @@ export function createShip(
        * `-effMaxForward` and MAX_REVERSE only bites when that is deeper than
        * the 7 kn it stands for.
        */
-      const effMaxForward = Math.min(
-        propulsion.maxForward,
-        hull === null ? Infinity : hull.state.speedCap,
-      );
+      /*
+       * ... and then whatever a tow leaves of it.
+       *
+       * AFTER the min, never inside it. Both terms above are things the player
+       * owns -- a bought tier and a worn hull -- and decision 14 is about which
+       * of those two wins. A derelict on the end of a line is neither: it is a
+       * load, and a load is paid by whatever the ship turns out to be capable
+       * of. Inside the min it would be free for any hull already capped below
+       * it, which is every worn hull in the game. See `PropulsionState`.
+       */
+      const effMaxForward =
+        Math.min(propulsion.maxForward, hull === null ? Infinity : hull.state.speedCap) *
+        (propulsion.towFactor ?? 1);
 
       const speedFrac = clamp(Math.abs(state.speed) / effMaxForward, 0, 1);
       const turnRate = TURN_RATE * (TURN_MIN_SCALE + (1 - TURN_MIN_SCALE) * speedFrac);

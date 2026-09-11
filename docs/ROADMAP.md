@@ -468,6 +468,14 @@ One hull. Two raiders that are the same mesh recoloured. Twenty fish. The
 36 harbours now have names and their own upgrade stock, which is the first
 identity any location in this game has had.
 
+**There is now something to find.** `docs/SALVAGE_PLAN.md` shipped two
+activities on 2026-09-11: rafts of salvage that dirty weather leaves floating
+and pay gold and the chandlery's own consumables, and derelict hulls that are
+hooked with `Space` and towed to a named harbour at three quarters speed and
+double the burn. Both are found on the open sea rather than posted on a board,
+both scale with the sky, and neither needed a new world system — they read the
+weather, the wind and the berths that were already there.
+
 **The leviathan hunt is the first thing on the water worth going to.** See
 `docs/LEVIATHAN_PLAN.md` and **The leviathan hunt** in `docs/ARCHITECTURE.md`.
 A shoal of shadows drifts across open water; a timing dial arms only while the
@@ -477,10 +485,11 @@ distance as a great-circle arc rather than as flat metres. It costs no asset:
 the shadows are procedurally textured quads, and the animal the feature is named
 for is still Phase 2.
 
-What it does NOT close: there are still no wrecks, no landmarks, no ruins and no
-NPCs, and the hunt's own figures are first guesses with no playtest behind them
-— the same caveat this file already carries for `questconstants.ts`, and now
-carried twice.
+What is still missing is everything that is not *floating*: no landmarks, no
+ruins, no NPCs, nothing on the land at all. The sea now has three reasons to be
+sailed through; the coast still has none. And the hunt’s own figures are first
+guesses with no playtest behind them — the same caveat this file already
+carries for `questconstants.ts`, and now carried twice.
 
 ### 8. Shadows
 

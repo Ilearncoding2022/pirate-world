@@ -37,6 +37,12 @@ import { createWaterHazardPlugin } from './waterhazard';
 import { createBlackout } from './blackout';
 import { createAiBoats } from './aiboats';
 import { createAiHulls } from './aihulls';
+import { createSalvage } from './salvage';
+import { createDerelicts, HOOK_RADIUS, TOW_SPEED_SHARE } from './derelict';
+import { createDerelictHull } from './derelicthull';
+import { createSalvageRafts } from './salvagerafts';
+import { ITEM_LABEL, TOW_REPUTATION, rollSalvage, towGold } from './salvagebounty';
+import type { SalvageItem } from './salvagebounty';
 import { createLeviathan, HUNT_TARGETS } from './leviathan';
 import { createShadowField } from './leviathanshadows';
 import { createHuntDial } from './leviathandial';
@@ -50,8 +56,10 @@ import { createQuests, daylightLeft, formatSpan } from './quests';
 import { createQuestCover } from './questcover';
 import { createToast } from './toast';
 import { QUEST_URGENT_BELOW } from './hud';
+import type { TowLineInput } from './hud';
 import { solarPhase } from './solartime';
 import { lossGold, rollDrawGold, rollWinGold } from './bounty';
+import { mulberry32 } from './towns';
 import type {
   AiBoat,
   AiBoatKind,
@@ -577,6 +585,19 @@ async function startGame(): Promise<void> {
    * nothing is ticking. That ordering is the whole rule, and it is the right
    * one because a chart goal cannot be lost and a deadline can.
    */
+  /**
+   * The tow, as the job strip reads it, or null when nothing is on the line.
+   *
+   * `harbourFix` is the contract line's own helper, so the two lines cannot
+   * develop two opinions of where a harbour is or how far off it lies.
+   */
+  function towLine(): TowLineInput | null {
+    const live = derelicts.state.live;
+    if (live === null || !live.towed) return null;
+    const fix = harbourFix(live.bound);
+    return { bound: live.bound, bearing: fix?.bearing ?? null, distance: fix?.distance ?? 0 };
+  }
+
   function urgentQuest(): QuestLineInput | null {
     let pick: ActiveQuest | null = null;
     for (const quest of quests.active) {
@@ -737,6 +758,146 @@ async function startGame(): Promise<void> {
     if (event.gold > 0) toast.push(`SHOAL SCATTERED  +${event.gold} GOLD`, 'info');
   }
 
+  /*
+   * The salvage, built from the same four things the raiders and the hazards
+   * are, and suppressed by the same verdict. It sits here rather than with the
+   * scene modules because it is a SIM: `salvagerafts.ts`, built further down, is
+   * what puts timber where this says.
+   *
+   * `onTake` is the whole of what a raft is worth, and it is wired straight
+   * into the stores rather than raised as an event, because every one of them
+   * already exists by now and nothing else in the game needs to know.
+   */
+  /**
+   * The stream a raft's contents come off.
+   *
+   * Seeded and fixed, so a given world pays the same salvage twice -- the
+   * argument `wind.ts` makes for WIND_SEED and `salvage.ts` for its own. It is
+   * deliberately NOT `salvage.ts`'s stream: what floats and what is aboard are
+   * two questions, and sharing one stream would make the contents of a raft
+   * depend on how many rafts had been rolled before it.
+   *
+   * `bounty.ts` is handed `Math.random` for a battle purse instead, and the
+   * difference is honest: a fight is an event the player walked into, and its
+   * tiered purse is meant to be a gamble. A raft is part of the world.
+   */
+  const salvageHaulRng = mulberry32(0x5a1f60);
+
+  /**
+   * Whether a found consumable has anywhere to go.
+   *
+   * One place, so the grant below and the roll that decides what floated cannot
+   * develop two opinions of a full locker -- which would silently drop the find.
+   */
+  function salvageRoom(item: SalvageItem): boolean {
+    switch (item) {
+      case 'cell':
+        return !records.battery.isFull;
+      case 'harpoons':
+        return records.harpoons.canBuy;
+      case 'anchor':
+        return records.seaAnchor.canBuy;
+      case 'overdrive':
+        return records.overdrive.canBuy;
+      case 'chum':
+        return records.chumDrum.canBuy;
+      case 'barbed':
+        return records.barbedHeads.canBuy;
+    }
+  }
+
+  /** Stows one found consumable. The mirror of `salvageRoom`, in the same order. */
+  function salvageStow(item: SalvageItem): void {
+    switch (item) {
+      case 'cell':
+        records.battery.charge();
+        break;
+      case 'harpoons':
+        records.harpoons.buy();
+        break;
+      case 'anchor':
+        records.seaAnchor.buy();
+        break;
+      case 'overdrive':
+        records.overdrive.buy();
+        break;
+      case 'chum':
+        records.chumDrum.buy();
+        break;
+      case 'barbed':
+        records.barbedHeads.buy();
+        break;
+    }
+  }
+
+  /**
+   * How many rafts have been taken this session.
+   *
+   * Published on the debug hook and read by nothing else. A headless look can
+   * see a raft appear on its own, but "the payout fired" is not visible in a
+   * screenshot -- and a notice strip that has already timed out is not evidence
+   * either.
+   */
+  let salvageTaken = 0;
+
+  const salvage = createSalvage({
+    terrain,
+    heightMap: globe.heightMap,
+    waterBodies: globe.waterBodies,
+    towns: globe.towns,
+    onTake: () => {
+      salvageTaken++;
+      const haul = rollSalvage(salvageHaulRng, salvageRoom);
+      records.wallet.add(haul.gold);
+      if (haul.item !== null) salvageStow(haul.item);
+      // Three shapes, and the third is the reason `soldOn` exists: a player
+      // whose lockers are full is told their cell was sold on rather than
+      // being handed a number with no story attached to it.
+      const gold = `SALVAGE RECOVERED - ${haul.gold} g`;
+      if (haul.item !== null) toast.push(`${gold} AND ${ITEM_LABEL[haul.item]}`, 'good');
+      else if (haul.soldOn !== null) {
+        toast.push(`${gold} - ${ITEM_LABEL[haul.soldOn]} SOLD ON, NO ROOM`, 'good');
+      } else toast.push(gold, 'good');
+    },
+  });
+
+  /*
+   * The derelict, on the salvage's own four dependencies and its own rarer roll.
+   *
+   * It raises no callback at all, unlike every other sim in this file: a
+   * derelict is hooked, released, lost and settled by acts this file already
+   * knows about -- a key press, an empty tank, a maelstrom, a mooring -- so the
+   * traffic runs the other way. See `derelict.ts`'s header.
+   */
+  const derelicts = createDerelicts({
+    terrain,
+    heightMap: globe.heightMap,
+    waterBodies: globe.waterBodies,
+    towns: globe.towns,
+  });
+
+  /** How many tows have been delivered this session. The debug hook's, and nothing else's. */
+  let towsSettled = 0;
+
+  /**
+   * The tow is gone, for the one reason the caller names.
+   *
+   * Both callers are places that were already taking something away from the
+   * player -- `energy.wreck()` inside a maelstrom, and the tank reaching zero --
+   * so the notice is `bad` and says which, because a hull silently vanishing
+   * from astern is the one thing here a player could read as a bug.
+   */
+  function loseTow(reason: 'power' | 'maelstrom'): void {
+    const lost = derelicts.lose();
+    if (lost === null) return;
+    toast.push(
+      reason === 'power'
+        ? `THE TOWLINE PARTS - NO POWER - ${lost.bound.toUpperCase()} LOST`
+        : `THE TOWLINE PARTS - ${lost.bound.toUpperCase()} LOST`,
+      'bad',
+    );
+  }
+
   // The sheet a wreck happens behind. It owns nothing but its own element and
   // the promise that `onBlack` runs when the screen is actually opaque.
   const blackout = createBlackout();
@@ -766,6 +927,11 @@ async function startGame(): Promise<void> {
     // numbers for it.
     records.hull.damage(HULL_MAELSTROM);
     energy.wreck();
+    // Before the fade rather than inside it, with the tank and the hull: a hull
+    // being carried to the far side of the world on the end of a line is not a
+    // thing to draw, and the notice belongs with the two other costs of going
+    // down a funnel rather than arriving on its own after the screen comes back.
+    loseTow('maelstrom');
     blackout.run(() => {
       // The heading is cosmetic -- the ship is stopped and the player will
       // turn it before doing anything else -- so it is the one number here
@@ -851,6 +1017,10 @@ async function startGame(): Promise<void> {
    * in docs/ARCHITECTURE.md exists to protect.
    */
   const aiHulls = createAiHulls(scene, () => ship.cloneHull(), postFx);
+  // Beside the raider hulls and for the same reason: scene objects only, placed
+  // from a sim that has already decided where everything is.
+  const salvageRafts = createSalvageRafts(scene, postFx);
+  const derelictHull = createDerelictHull(scene, () => ship.cloneHull(), postFx);
 
   /*
    * The shoal as things you can see, and the bar it is hunted through.
@@ -1026,6 +1196,41 @@ async function startGame(): Promise<void> {
     boatQuery === 'red' || boatQuery === 'orange' ? boatQuery : null;
   /** `?battle=1`: an orange boat put ON the hull, so the fight starts at once. */
   let forcedBattle = battleParams.get('battle') === '1';
+  /**
+   * `?salvage=1` -- one raft 25 units ahead -- and `?salvage=take`, which puts
+   * one ON the hull so it is collected at once.
+   *
+   * A raft is a 0.5% draw every ten seconds in clear air, about one every half
+   * hour, so waiting for one is a vigil rather than a test: the same argument
+   * `?hazard=` and `?cell=` are here on.
+   *
+   * The two values exist because they answer different questions, and the pair
+   * is `?boat=`/`?battle=1` again. `1` is for LOOKING at one: 25 units ahead,
+   * on the water, in frame. `take` is for the payout -- the wallet, the locker
+   * and the notice -- which cannot be reached by sailing at the first one in a
+   * headless browser: the wind carries the hull sideways several units a second
+   * (`wind.ts`'s `across`), so a run that holds the throttle down passes a
+   * dead-ahead raft about fifteen units off and nothing ever fires.
+   */
+  /**
+   * `?derelict=1` -- one dead hull just outside its own hook ring -- and
+   * `?derelict=hook`, which puts one INSIDE it so the offer is up at once.
+   *
+   * A derelict is a 0.2% draw every ten seconds in clear air, about one every
+   * eighty minutes, which is well past a vigil. The pair is `?salvage=`'s
+   * exactly, and the second value exists for the same reason that one's does:
+   * the tow itself -- the line, the strip, the speed cut, the cast-off -- cannot
+   * be reached by sailing at the first one in a headless browser, because the
+   * wind carries the hull several units sideways (`wind.ts`'s `across`) and a
+   * run that holds the throttle down passes a dead-ahead wreck a unit or two
+   * outside its ring. A player steers; a screenshot cannot.
+   */
+  const derelictQuery = battleParams.get('derelict');
+  let forcedDerelict: 'look' | 'hook' | null =
+    derelictQuery === '1' ? 'look' : derelictQuery === 'hook' ? 'hook' : null;
+  const salvageQuery = battleParams.get('salvage');
+  let forcedSalvage: 'look' | 'take' | null =
+    salvageQuery === '1' ? 'look' : salvageQuery === 'take' ? 'take' : null;
   /** Seconds of sailing before either fires. The same beat the forced hazard waits. */
   let boatCountdown = 3;
   /**
@@ -1091,6 +1296,16 @@ async function startGame(): Promise<void> {
    * chase in front of it. The fight is what this query is for.
    */
   const BATTLE_FORCE_DISTANCE = 1;
+
+  /**
+   * And how far ahead `?derelict=1` puts its hull, world units.
+   *
+   * Nine: just outside `derelict.ts`'s 5-unit hook ring, so the offer is not
+   * already up on the first frame, and inside a second of sailing so the ring,
+   * the notice and the tow can all be exercised without a voyage in front of
+   * them.
+   */
+  const DERELICT_FORCE_DISTANCE = 9;
 
   /*
    * The fight in progress. Replaced wholesale at every contact rather than
@@ -1866,10 +2081,60 @@ async function startGame(): Promise<void> {
     if (hazards.state.phase !== 'free') return;
     if (event.repeat) return;
     event.preventDefault();
-    // A ship carrying way into the ring is stopped by the mooring itself --
-    // `ship.ts` writes a dead stop the moment `mode` reads docked -- so this
-    // needs no `halt()` of its own the way [SHOP] does.
-    energy.toggleMooring();
+    /*
+     * The ladder, and the order is the rule.
+     *
+     * A BERTH WINS. A player standing in a harbour's ring with a derelict on
+     * the line means to finish the job, and mooring is also what settles a tow
+     * (see `settleTow` below, called off the mooring itself rather than from
+     * here, because a berth can also be reached by drifting into one).
+     *
+     * A derelict's ring is only consulted when there is no berth under the
+     * hull. `derelicts.hook` refuses unless its own `hookReady` is set, which
+     * keeps the ring's verdict and the act that consumes it in one file --
+     * exactly the split `energy.toggleMooring` keeps for the berth.
+     *
+     * Casting off is deliberately NOT here: a press that drops the hull you
+     * have towed across a hemisphere may not share a key with the most-pressed
+     * key on the helm. It is [CAST OFF] and `T`.
+     */
+    if (energy.state.berthReady) {
+      // A ship carrying way into the ring is stopped by the mooring itself --
+      // `ship.ts` writes a dead stop the moment `mode` reads docked -- so this
+      // needs no `halt()` of its own the way [SHOP] does.
+      energy.toggleMooring();
+      return;
+    }
+    if (derelicts.hook()) {
+      const live = derelicts.state.live;
+      toast.push(`TOW MADE FAST - BOUND FOR ${live?.bound.toUpperCase() ?? ''}`, 'good');
+    }
+  });
+
+  /**
+   * Cast off by hand: the key and the button, one handler.
+   *
+   * The same guard ladder [ANCHOR] and [COIL] carry, for the same reason -- the
+   * world is not the player's while a card is up -- minus the berth test, which
+   * this does not need: dropping a tow alongside is a perfectly sensible thing
+   * to want, and if the berth is the one it was bound for the mooring has
+   * already settled it.
+   */
+  function castOff(): void {
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen || questCover.isOpen) return;
+    if (menu.isOpen) return;
+    if (battleUi.isOpen || battleCover.isOpen) return;
+    if (hazards.state.phase !== 'free') return;
+    const dropped = derelicts.release();
+    if (dropped !== null) toast.push('TOW CAST OFF', 'info');
+  }
+
+  document.getElementById('btn-tow')?.addEventListener('click', castOff);
+
+  window.addEventListener('keydown', (event) => {
+    if (event.code !== 'KeyT') return;
+    if (event.repeat) return;
+    castOff();
   });
 
   /*
@@ -1936,9 +2201,26 @@ async function startGame(): Promise<void> {
    */
   const hazardQuery = new URLSearchParams(window.location.search).get('hazard');
   let forcedHazard: HazardKind | null =
-    hazardQuery === 'wave' || hazardQuery === 'maelstrom'
-      ? hazardQuery
+    hazardQuery === 'wave' || hazardQuery === 'maelstrom' || hazardQuery === 'maelstrom-now'
+      ? hazardQuery === 'maelstrom-now'
+        ? 'maelstrom'
+        : hazardQuery
       : null;
+  /**
+   * `?hazard=maelstrom-now` -- the funnel opens ON the hull, so it swallows the
+   * ship at once and the run is about what happens AFTERWARDS.
+   *
+   * The near half of the pair `?salvage=`, `?derelict=` and `?battle=1` all
+   * carry, and it is here for the same reason theirs are. 25 units is dead
+   * ahead but it still has to be SAILED to, and the browser tier runs on a
+   * software rasteriser that advances the simulation at about a fiftieth of
+   * wall clock: measured, a hull under full throttle covered four units in two
+   * hundred seconds, which puts the funnel twenty minutes away. That is a vigil
+   * again, which is the exact thing the comment above says this query exists to
+   * end -- and the state worth photographing is not the funnel, it is the sea
+   * the ship comes back to.
+   */
+  const forcedHazardOnHull = hazardQuery === 'maelstrom-now';
   /** Seconds of sailing before the forced hazard rises. Long enough to see the sea it rises out of. */
   let forceCountdown = 3;
   /**
@@ -1950,6 +2232,16 @@ async function startGame(): Promise<void> {
    * first frame of it.
    */
   const FORCE_DISTANCE = 25;
+
+  /**
+   * And how far ahead `?hazard=maelstrom-now` opens its, world units.
+   *
+   * One, which is well inside the funnel's own capture radius, so the very next
+   * `hazards.update` takes the hull. `BATTLE_FORCE_DISTANCE`'s trick, and the
+   * same number.
+   */
+  const HAZARD_ON_HULL_DISTANCE = 1;
+
   /** Scratch for the debug hook's bearing to the marked shadow. Never allocated per frame. */
   const _markBearing = new THREE.Vector3();
   const _markStarboard = new THREE.Vector3();
@@ -1989,7 +2281,7 @@ async function startGame(): Promise<void> {
   }
 
   function releaseForcedHazard(kind: HazardKind): void {
-    if (!aimAtShip(FORCE_DISTANCE)) return;
+    if (!aimAtShip(forcedHazardOnHull ? HAZARD_ON_HULL_DISTANCE : FORCE_DISTANCE)) return;
     hazards.force(kind, _forceCentre, _forceNorth);
   }
 
@@ -2121,6 +2413,38 @@ async function startGame(): Promise<void> {
    * Overlays are not in it and do not need to be: the loop does not call
    * `aiBoats.update` under one at all.
    */
+  /**
+   * Pay for a tow, if the berth the ship has just made fast to is the one the
+   * hull was bound for.
+   *
+   * Called every frame from the sailing branch rather than off the key press,
+   * because `Space` is not the only way to be moored at a harbour -- a reload,
+   * a `?spawn=` and a berth entered while already made fast all reach the same
+   * state -- and because the test is cheap: two string reads and a comparison.
+   *
+   * Moor at the WRONG harbour and nothing happens at all. Being in the wrong
+   * place is not a mistake that needs punishing; it is the voyage not being
+   * over, and the strip is still saying where the hull is bound.
+   */
+  function settleTow(): void {
+    const live = derelicts.state.live;
+    if (live === null || !live.towed) return;
+    if (energy.state.mode !== 'docked') return;
+    const berth = globe.towns.dockAt(ship.state.position)?.town ?? null;
+    if (berth === null || berth.name !== live.bound) return;
+
+    const settled = derelicts.settle();
+    if (settled === null) return;
+    towsSettled++;
+    const gold = towGold(settled.voyage);
+    records.wallet.add(gold);
+    records.reputation.award(TOW_REPUTATION);
+    toast.push(
+      `TOW DELIVERED - ${gold} g, +${TOW_REPUTATION} REP`,
+      'good',
+    );
+  }
+
   function suppressed(): boolean {
     return energy.state.mode === 'docked' || blackout.active || hazards.state.phase !== 'free';
   }
@@ -2350,7 +2674,26 @@ async function startGame(): Promise<void> {
     // Power first, on last frame's speed: the ship must not spend energy it
     // turns out not to have. `globe.update` is what writes `env`, so the sun the
     // solar panels see is also one frame old -- 16 ms of a 10-minute day.
-    energy.update(dt, ship.state, env, overdriveActive, moonNightFraction, weather.state);
+    /*
+     * The towline, as it stood at the END of last frame.
+     *
+     * The plant runs before `derelicts.update` below, so the burn doubles one
+     * frame after the hook goes on and stays doubled for one frame after it
+     * comes off. That is 16 ms of a bill measured in minutes, and the
+     * alternative -- moving the sim above the plant -- would cost the ordering
+     * that actually matters: `hookReady` has to be written after this frame's
+     * hazards so a maelstrom can suppress it, and the tow has to be placed
+     * against a hull that has not moved yet.
+     */
+    energy.update(
+      dt,
+      ship.state,
+      env,
+      overdriveActive,
+      moonNightFraction,
+      weather.state,
+      derelicts.state.live?.towed === true,
+    );
 
     /*
      * The hull, immediately after the plant and for the same reason: it is a
@@ -2486,7 +2829,7 @@ async function startGame(): Promise<void> {
     // force is transported and tested for contact on the very frame it lands,
     // which is what makes `?battle=1` open the arena rather than merely put a
     // hull on the water.
-    if (forcedBoat !== null || forcedBattle) {
+    if (forcedBoat !== null || forcedBattle || forcedSalvage !== null || forcedDerelict !== null) {
       boatCountdown -= dt;
       if (boatCountdown <= 0) {
         if (forcedBoat !== null && aimAtShip(BOAT_FORCE_DISTANCE)) {
@@ -2495,8 +2838,33 @@ async function startGame(): Promise<void> {
         if (forcedBattle && aimAtShip(BATTLE_FORCE_DISTANCE)) {
           aiBoats.force('orange', _forceCentre, _forceNorth);
         }
+        /*
+         * `FORCE_DISTANCE` -- the forced hazard's 25 units -- rather than the
+         * raider's 45: a raft is a thing to be steered at and then touched, so
+         * it wants to be close enough to reach while still being visibly out
+         * there. Nothing is aimed, so there is no chase to preserve.
+         *
+         * `take` puts it a unit off instead, which is `BATTLE_FORCE_DISTANCE`'s
+         * own trick: well inside `salvage.ts`'s TAKE_RADIUS, so the very next
+         * `salvage.update` collects it and the payout path runs without anybody
+         * having to steer.
+         */
+        if (forcedSalvage !== null) {
+          const reach = forcedSalvage === 'take' ? BATTLE_FORCE_DISTANCE : FORCE_DISTANCE;
+          if (aimAtShip(reach)) salvage.force(_forceCentre);
+        }
+        // Nearer than the raft's 25: a derelict has to be come ALONGSIDE rather
+        // than run over, so it is put just outside its own hook ring, close
+        // enough that a look at it does not begin with a minute of steering --
+        // or just inside it, for `hook`.
+        if (forcedDerelict !== null) {
+          const reach = forcedDerelict === 'hook' ? HOOK_RADIUS - 1 : DERELICT_FORCE_DISTANCE;
+          if (aimAtShip(reach)) derelicts.force(_forceCentre);
+        }
         forcedBoat = null;
         forcedBattle = false;
+        forcedSalvage = null;
+        forcedDerelict = null;
       }
     }
     // Hazards sit between the wind and the ship, for both of the wind's own
@@ -2554,6 +2922,27 @@ async function startGame(): Promise<void> {
           sprites: shadowField.visible,
         };
       }
+      window.__pirateWorld.salvage = {
+        rafts: salvage.state.live.map((raft) => ({
+          distance:
+            Math.acos(Math.max(-1, Math.min(1, raft.position.dot(ship.state.position)))) *
+            GLOBE_RADIUS,
+          envelope: raft.envelope,
+        })),
+        taken: salvageTaken,
+      };
+      window.__pirateWorld.derelict = {
+        distance:
+          derelicts.state.live === null
+            ? -1
+            : Math.acos(
+                Math.max(-1, Math.min(1, derelicts.state.live.position.dot(ship.state.position))),
+              ) * GLOBE_RADIUS,
+        towed: derelicts.state.live?.towed === true,
+        hookReady: derelicts.state.hookReady,
+        bound: derelicts.state.live?.bound ?? null,
+        settled: towsSettled,
+      };
       window.__pirateWorld.weather = {
         kind: weather.state.kind,
         storm: weather.state.storm,
@@ -2605,13 +2994,43 @@ async function startGame(): Promise<void> {
      * through this same path.
      */
     leviathan.update(dt, ship.state, suppressed());
+
+    // Beside the raiders, on the same verdict, and before the ship for the
+    // mirror of the raiders' reason: a raft reached this frame pays this frame,
+    // and the notice it raises belongs to the frame the timber went under the
+    // bow rather than the one after it.
+    salvage.update(dt, ship.state, wind.state, suppressed(), weather.state);
+    // With the salvage, on the same verdict. Before the ship because the hook
+    // ring's offer has to be true on the frame the player's `Space` is read,
+    // and because a towed hull is placed against the ship's position either
+    // way -- see `derelict.ts`'s `tow`.
+    derelicts.update(dt, ship.state, wind.state, suppressed(), weather.state);
+    // The two ways a tow ends that are not the player's doing. The maelstrom's
+    // half lives in `onSunk`; this is the tank, tested every frame because it
+    // can be reached by burning as easily as by losing a fight.
+    if (energy.state.level <= 0) loseTow('power');
+    settleTow();
     // The Navigation offers' one read this frame: the higher of Trim &
     // Sheathing's tier and an Overdrive Coil's burn speed -- never their sum,
     // see `types.ts`'s `PropulsionState` -- and whether a Sea Anchor is still
     // in its kill-and-hold window.
+    const towing = derelicts.state.live?.towed === true;
     const propulsion: PropulsionState = {
       maxForward: overdriveActive ? OVERDRIVE_MAX_FORWARD : records.trim.maxForward,
       anchored: records.seaAnchor.isDeployed,
+      /*
+       * A tow is a LOAD, not a purchase, which is why it is a separate field
+       * rather than a smaller `maxForward` from here.
+       *
+       * `ship.ts` takes `min(maxForward, hull.speedCap)` and applies this to
+       * the RESULT. Folded into `maxForward` it would join that `min` instead,
+       * and a hull worn below 25% -- capped at 5 kn -- would tow at 5 and feel
+       * no penalty at all, in exactly the state it should hurt most.
+       * docs/HARBOURS_PLAN.md's decision 14 is about what a player BOUGHT being
+       * overridden by a worn hull; a dead ship on the end of a rope is not
+       * something they bought.
+       */
+      towFactor: towing ? TOW_SPEED_SHARE : 1,
     };
     ship.update(
       dt,
@@ -2627,6 +3046,8 @@ async function startGame(): Promise<void> {
     // meshes from the state the sim wrote above, and nothing reads them until
     // the render at the foot of the frame.
     aiHulls.update(dt, aiBoats.state);
+    salvageRafts.update(dt, salvage.state);
+    derelictHull.update(dt, derelicts.state);
     // Beside the hulls, on the same terms and for the same reason: it places
     // sprites from a state already written and nothing reads them until the
     // render at the foot of the frame.
@@ -2677,7 +3098,8 @@ async function startGame(): Promise<void> {
      * time dial, whose canvas can be resized behind an overlay and come back
      * blank.
      */
-    hud.updateQuest(urgentQuest());
+    hud.updateQuest(urgentQuest(), towLine());
+    hud.updateTow(towing);
     radar.update(
       dt,
       ship.state,
@@ -2688,6 +3110,8 @@ async function startGame(): Promise<void> {
       weatherCells.state,
       chart,
       leviathan.state,
+      salvage.state,
+      derelicts.state,
     );
     // After globe.update, which is what writes `env.sunDirection`. Reading it
     // before would put the dial a frame behind the sky it is describing.

@@ -4,8 +4,10 @@ import type { HeightMap } from './heightmap';
 import type {
   AiBoatState,
   CellsState,
+  DerelictState,
   HazardState,
   HuntState,
+  SalvageState,
   ShipState,
   Towns,
   WeatherState,
@@ -250,6 +252,48 @@ const SHOAL_DOT = 0.012;
 const SHOAL_RING = 0.03;
 
 /**
+ * A raft of salvage: brass, the purse's own colour.
+ *
+ * The one warm figure on the telemetry panel is the purse, in brass, and this
+ * is the same fact in the other instrument -- a mark that means gold. It is
+ * deliberately neither of the raiders' two (those mean a hull), nor the
+ * hazards' magenta (which means steer around it), nor the instrument's own
+ * cyan: a salvage mark is the only thing on the scope the player is meant to
+ * steer TOWARD.
+ */
+const SALVAGE_FILL = 'rgb(214, 178, 96)';
+
+/**
+ * A derelict: steel grey, and the same grey its hull and its ring wear in the
+ * world (`derelicthull.ts`).
+ *
+ * Not a raider's red or orange, because it is not a hull under way; not the
+ * salvage's brass, because it is not gold lying on the water; not the hazards'
+ * magenta, because it is not something to steer around. Grey is the colour this
+ * game has left for a thing that has simply stopped, which is what it is.
+ */
+const DERELICT_FILL = 'rgb(158, 170, 180)';
+
+/**
+ * A raft, in scope radii, as a small diamond about its own centre.
+ *
+ * Not `blipPath`, and that is the point: an arrowhead means a hull with a bow
+ * and a heading, and a raft has neither. A diamond is the smallest shape that
+ * is obviously not a boat, reads at the size a blip does, and needs no
+ * rotation -- which is also why this one is issued without a transform while a
+ * raider's is issued under one.
+ */
+function raftPath(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const r = 0.075;
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r, y);
+  ctx.closePath();
+}
+
+/**
  * The hull arrowhead, in scope radii, pointing at 12 o'clock.
  *
  * ONE shape, issued for own ship at the centre and for every raider out on the
@@ -458,6 +502,8 @@ export interface Radar {
     cells?: CellsState,
     chart?: Chart,
     hunt?: HuntState,
+    salvage?: SalvageState,
+    derelict?: DerelictState,
   ): void;
 }
 
@@ -971,6 +1017,8 @@ export function createRadar(
     cells?: CellsState,
     chart?: Chart,
     hunt?: HuntState,
+    salvage?: SalvageState,
+    derelict?: DerelictState,
   ): void {
     if (!(dt > 0)) dt = 0;
     if (dt > 0.1) dt = 0.1;
@@ -1559,6 +1607,81 @@ export function createRadar(
       // Puts back the alpha, the line width and the clip together, the same
       // contract the two blocks above rely on.
       ctx.restore();
+    }
+
+    // ---- Salvage, from the LIVE frame -------------------------------------
+    /*
+     * Drawn after the raiders and under the compass, on the raiders' own terms:
+     * live rather than held back to the raster's frame, because a raft is a mark
+     * the player is steering AT and one that lagged the bow through a turn would
+     * lag exactly while it was being aimed for.
+     *
+     * `salvage` is optional so a hand-built call in a test draws a scope with no
+     * salvage on it rather than throwing -- the same courtesy `boats` gets, for
+     * the same reason. `live` is at most three entries and empty on most frames.
+     */
+    if (liveFrame && salvage && salvage.live.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 1, 0, Math.PI * 2);
+      ctx.clip();
+      ctx.lineWidth = 0.9 / R;
+      ctx.strokeStyle = BOAT_EDGE;
+      ctx.fillStyle = SALVAGE_FILL;
+
+      for (let i = 0; i < salvage.live.length; i++) {
+        const raft = salvage.live[i];
+        if (!projectLive(raft.position)) continue;
+        // The same envelope the timber itself is scaled by, so a raft arrives on
+        // the scope as it arrives on the water and sinks off it the same way --
+        // which matters more here than for a raider: a mark that outlived the
+        // thing it stood for would send the player at a patch of empty sea.
+        ctx.globalAlpha = raft.envelope < 0 ? 0 : raft.envelope > 1 ? 1 : raft.envelope;
+        raftPath(ctx, hazPoint.x, hazPoint.y);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Puts back the alpha, the line width, the styles and the clip together.
+      ctx.restore();
+    }
+
+    // ---- The derelict, from the LIVE frame --------------------------------
+    /*
+     * One hull at most, and only while it is ADRIFT: a derelict under tow is six
+     * units astern of own ship's own blip, where its mark would be a second
+     * arrowhead welded to the middle of the scope saying nothing the player does
+     * not already know. The job strip carries the tow instead.
+     *
+     * Drawn with `blipPath` rather than the raft's diamond, because this one IS
+     * a hull with a bow, and turned by the same two dot products a raider's mark
+     * is turned by.
+     */
+    if (liveFrame && derelict && derelict.live !== null && !derelict.live.towed) {
+      const hull = derelict.live;
+      if (projectLive(hull.position)) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(0, 0, 1, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.lineWidth = 0.9 / R;
+        ctx.strokeStyle = BOAT_EDGE;
+        ctx.fillStyle = DERELICT_FILL;
+        ctx.globalAlpha = hull.envelope < 0 ? 0 : hull.envelope > 1 ? 1 : hull.envelope;
+
+        const f = hFwd.x * hull.forward.x + hFwd.y * hull.forward.y + hFwd.z * hull.forward.z;
+        const st = hStb.x * hull.forward.x + hStb.y * hull.forward.y + hStb.z * hull.forward.z;
+        const a = Math.atan2(st, f);
+        const sinA = Math.sin(a);
+        const cosA = Math.cos(a);
+        ctx.save();
+        ctx.transform(cosA, sinA, -sinA, cosA, hazPoint.x, hazPoint.y);
+        blipPath(ctx);
+        ctx.restore();
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     // ---- Wind arrow, on the true bearing, from the LIVE frame -------------
