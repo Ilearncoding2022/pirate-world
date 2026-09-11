@@ -279,8 +279,8 @@ shader.
 | `layers.ts` | `LAYER_DEFAULT`, `LAYER_REFLECTED` | the two `Object3D.layers` bit indices every rendering stream shares; wiring constants, not world- or ship-scale |
 | `env.ts` | `WorldEnv`, `createEnv()` | shared frame state |
 | `heightmap.ts` | `HeightMap`, `createHeightMap(terrain, w?, h?)`, `HEIGHTMAP_GLSL` | built once; `aux`/`horizon` start `null` and are filled in later by `land.ts`'s startup bake (`terrainbake.ts`) |
-| `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG` | seeded fBm; owns where the player starts and the land/water ratio; `useLandMask` re-points collision at the culled raster |
-| `islets.ts` | `cullIslets(heightMap, seaLevel)`, `MIN_ISLAND_AREA` | sinks landmasses too small to see; runs once, before anything reads the map |
+| `terrain.ts` | `createTerrain(seed?)`, `SEA_LEVEL`, `DEFAULT_SEED`, `SPAWN_LAT_DEG`, `SPAWN_LON_DEG`, `BAND_GUARANTEE_RAD`, `BAND_WANDER_RAD`, `HEIGHT_GAIN`, `HEIGHT_BIAS` | seeded fBm; owns where the player starts, the land/water ratio and the equatorial strip's veto; `useLandMask` re-points collision at the culled raster. The two `HEIGHT_*` are exported for `tests/fixtures/measure.ts` alone |
+| `islets.ts` | `cullIslets(heightMap, seaLevel)`, `MIN_ISLAND_AREA`, `IsletCull` | sinks landmasses too small to see, and the equatorial strip's too big; runs once, before anything reads the map. The only pass that knows which texels belong to the same landmass, which is why `bandBridges` is computed here and carried on `WorldData` rather than recomputed |
 | `waterbodies.ts` | `WaterBodies`, `createWaterBodies(heightMap, seaLevel, spawnDir)` | built once; ocean vs. inland mask, texture + CPU `sample` |
 | `land.ts` | `createLand(terrain, heightMap, quality)`, `landRadius`, `MAX_LAND_RELIEF`, `COAST_LIFT` | land-only mesh, sub-sea vertices sink under the water; `MeshStandardMaterial` extended with a chained `onBeforeCompile` (see **Post-processing**) that modulates the vertex-coloured base with per-pixel slope, curvature, wetness, a detail-normal octave, noise, per-mask roughness, baked AO and a sun-tracking horizon shadow from `terrainbake.ts`. Every noise term is distance-faded (`landLod`), and the detail normal's two taps are branched away entirely past its fade, so the orbit framing costs what it did before any of it existed |
 | `terrainbake.ts` | `bakeTerrain(heightMap, seaLevel)`, `bakeAmbientOcclusion`, `bakeHorizon`, `TerrainBake`, `BAKE_WIDTH`, `BAKE_HEIGHT` | startup-only ambient-occlusion and 8-azimuth horizon bake over a half-resolution copy of the shared height map; called from inside `createLand`, after `globe.ts`'s islet cull, so it never occludes for an island that is about to be sunk |
@@ -387,8 +387,26 @@ shader.
 | `harbourstock.ts` | `HarbourStock`, `createHarbourStock(saved?, names?, random?)`, `LINE_MIN_HARBOURS` | which of the four durable ladders each harbour sells. Rolled for ALL 36 at once and saved, because the coverage guarantee — every ladder carried by at least six harbours — cannot be made one harbour at a time, and because a remembered harbour must keep the stock it had |
 
 ## Land / water split
-The world is **25% land, 75% water**, and that is one constant: `HEIGHT_BIAS`
-in `terrain.ts`, tuned against the figure *after* the islet cull below.
+The average world is **26.7% land, 73.3% water**, and that is one constant:
+`HEIGHT_BIAS` in `terrain.ts`, tuned against the figure *after* the islet cull
+below.
+
+**Tuned against the population, not against the pinned seed.** `HEIGHT_BIAS`
+moved from -0.0964 to -0.0657 when the equatorial strip went in: the veto
+drowns whatever the noise had put across the equator, and this puts that land
+back everywhere else. The target was the 50-seed MEAN, measured at 0.267151
+before the strip and landed on 0.267166 with it. Restoring seed 1337's own
+figure instead would have over-restored every other world — the strip takes
+more equatorial land off 1337 than off an average draw — pushing the mean up
+and the top of the distribution past `LAND_MAX`, turning a negligible rejection
+rate into roughly one world in six. Seed 1337 is 0.2409 as a result, down from
+0.2449.
+
+**It is a function of the strip's width.** Re-solve it whenever that moves: it
+was -0.0590 while the strip was fifty units wide and is -0.0657 at forty.
+
+`npm run world:measure` is what produces every number in this section — see
+**Measuring the world** below. Do not retune `HEIGHT_BIAS` by eye.
 
 `HEIGHT_GAIN` and `HEIGHT_BIAS` are **not two knobs**. Land is
 `raw * GAIN + BIAS > SEA_LEVEL`, i.e. `raw > (SEA_LEVEL - BIAS) / GAIN`, so the
@@ -402,8 +420,11 @@ shape of the world while silently retuning every constant written as a height
 The split between open ocean and enclosed water is **not tunable here at all**.
 It follows from that same threshold: lower the sea and deeper flooding joins
 more basins to it. At 33% land the world's lakes were 1.3% of its water; at 25%
-they are 0.66%, and no choice of `GAIN` recovers the difference. Only a
-different noise field would.
+they were 0.66%, and no choice of `GAIN` recovers the difference. Only a
+different noise field would. (The equatorial strip moved this too, and in the
+direction the rule predicts: a ring of ocean round the whole planet joins
+basins that used to be separate, so seed 1337's water bodies fell from 103 to
+86.)
 
 `land.ts` builds an icosphere, drops every face lying entirely below
 `seaLevel - CULL_MARGIN`, and displaces the rest. Kept vertices below sea level
@@ -417,8 +438,11 @@ pixel from the height map, so the water mesh stays cheap.
 ## Islands small enough to be invisible
 `islets.ts` flood-fills land components over the height map grid and sinks
 every one under `MIN_ISLAND_AREA` — 24.6 u², a disc 5.6 units across, a little
-under two ship lengths. 160 of the world's 253 islands go, and they take 0.63%
-of its land with them.
+under two ship lengths. 174 of seed 1337's 269 islands go, and they take about
+0.6% of its land with them.
+
+The same pass enforces the equatorial strip's own two caps, which are the
+mirror of that rule — see **The equatorial strip**.
 
 It has to be a **raster** pass. Whether a point belongs to a speck or to a
 continent is a fact about its neighbours, and no closed form over
@@ -988,12 +1012,122 @@ working** requires.
 
 ### Calibration, measured
 
-Seed 1337's land fraction is **0.2449**, and `LAND_MIN`/`LAND_MAX` are ±40% of
-it (0.147 / 0.343). Over 50 random seeds, **0 were rejected**; over the 270
-checked in total, none failed any check. The polar fade bias is therefore
-insurance rather than load-bearing — a control run with it at zero sealed no
-poles in 20 seeds. If a future terrain change pushes the rejection rate past
+All of this comes from `npm run world:measure` over its fixed 50-seed list —
+see **Measuring the world** below. Re-run it after any change to the noise
+field, and update these numbers in the same commit.
+
+| | |
+|---|---|
+| Land fraction, 50 seeds | min **0.2221**, mean **0.2672**, max **0.3304** |
+| Seed 1337 | **0.2409** |
+| `LAND_MIN` / `LAND_MAX` | 0.147 / 0.343 — unchanged, and the max sits 0.013 clear of the observed top |
+| Rejected | **2 of 50** (one sealed polar moat, one equatorial bridge) |
+| Closest mainland to the equator, accepted worlds | **21.2 u** against a 20 u floor; mean 25.5 u |
+| Islands kept inside the strip | **12 across 50 worlds**, largest 64 u² against a 150 u² cap |
+
+That islet figure is the one to watch. At the strip's original fifty units it
+was 45 across 50 worlds; at forty it is 12, so roughly three worlds in four now
+have an empty strip and seed 1337 is one of them. The islands did not go
+anywhere — the corridor they have to fit *entirely* inside got narrower, so
+more of them now count as ordinary coast rather than as the strip's. The
+feature is still alive, just rarer. If it ever reads as zero across a survey,
+`BAND_CEILING` has been tuned into "no land at the equator", which is a
+different feature that passes every test in the suite.
+
+`LAND_MIN`/`LAND_MAX` were ±40% of seed 1337's old 0.2449 and are deliberately
+**left where they are**: the retune held the population, so the distribution
+did not move and the bounds still bracket it. They are no longer ±40% of the
+pinned seed, which is fine — they were only ever calibrated *from* it, and what
+they have to do is bracket the population.
+
+**The rejection rate is no longer zero, and that is the design working.** Two
+failure modes remain that no local edit can prevent, and both are caught rather
+than prevented:
+
+- A **sealed polar moat** — whether the moat joins the ocean is a fact about
+  the whole world (a continent may simply be sitting on the pole). The polar
+  fade bias makes it rare; `polesReachable` catches the rest.
+- An **equatorial bridge** — a chain of band specks 4-connected out to a
+  coast, putting mainland-connected land inside the strip without any continent
+  having crossed the veto. `bandBridges` catches it. Tightening `BAND_CEILING`
+  does **not** fix this: at -0.085 the same seed still bridged, and 40% of the
+  strip's islands disappeared. Rejection is the cheaper answer.
+
+At 2 in 50 the expected number of attempts is 1.04, and the chance of
+exhausting all twelve is nil. If a future terrain change pushes the rate past
 about one in three, widen the fade band before raising `WORLD_ATTEMPTS`.
+
+### The equatorial strip
+
+**The mainland coast never comes within 20 units of the equator, in any world,
+at any longitude** — 40 units of open ocean the whole way round. The ship spawns
+at lat 0 and `waterbodies.ts` floods from exactly there, so the strip is
+reachable water by construction and circumnavigation stops being luck.
+
+**Why forty.** The width is set by what has to fit down the corridor. A
+maelstrom is 20 units across (`MAELSTROM_RADIUS` = 10), so one sitting on the
+equator has to leave room to steer round it without leaving the strip: at 30
+units there are 5 units either side, which is three hull beams and not a
+passage; at 40 there are 10, which is the tightest that still reads as sailing
+round something; at 50 there are 15. It was built at 50 and narrowed to 40
+(owner, 2026-09-11), because the strip's cost is not land — `HEIGHT_BIAS` puts
+every acre of that back — but a band of the planet with no mainland and
+therefore no harbours on it: 50 units is ±7.2° and about 12.5% of the sphere,
+40 is ±5.7° and about 10%.
+
+It is built in three places, and the split is the point:
+
+- **`terrain.ts` makes it true.** A veto on the **continental** noise term
+  alone, before the three fields are summed, holding it under `BAND_CEILING`
+  (-0.07) inside a half-width that wanders on its own noise field between
+  `BAND_GUARANTEE_RAD` (0.1 rad = 20 u) and that plus `BAND_WANDER_RAD`
+  (0.06 rad = 12 u more). `fbm` is bounded by ±1, so the continental
+  contribution inside the guarantee is at most 0.21 *below* `SEA_LEVEL`: a
+  bound, not a tendency. Only the speck-scale `shape` and `detail` terms can
+  reach the surface there, which is where the strip's islands come from — see
+  `BAND_GUARANTEE_RAD`'s own comment for why it vetoes a noise term rather than
+  flooring `h` like the spawn clearing does, and why the clamp is monotone
+  (`BAND_SQUASH`) rather than flat.
+- **`islets.ts` keeps the islands small.** `MAX_BAND_ISLET_AREA` (150 u²) and
+  `MAX_BAND_ISLET_SPAN` (0.05 rad = 10 u) are the mirror of `MIN_ISLAND_AREA`.
+  Only the span moved when the strip narrowed: area asks "landmark or
+  landmass", which is a judgement against the ship and is absolute; span asks
+  "can this bridge the strip", which scales with the corridor.
+  The span cap is not redundant: area alone does not bound a ribbon, and a
+  150 u² ribbon three units wide would cross the whole strip. A landmass counts
+  as the strip's only if it lies **entirely** inside the veto's reach — never
+  "has a texel inside", which would delete a continent for straying one pixel.
+- **`worldgen.ts` throws away what slips through.** `equatorOpen` (water at
+  every longitude inside the guarantee) and `bandBridges === 0`. Two gates
+  because they are two different failures: a strip can be intruded on without
+  being closed.
+
+### Measuring the world
+
+`npm run world:measure` (`tests/fixtures/measure.ts`, its own vitest config, the
+same invisibility argument as `golden:update`). Three modes by env var:
+
+| | |
+|---|---|
+| `WORLD_MODE=baseline` | land fraction per seed, using only the oldest API — so it runs against a `git stash`ed tree and a before/after is a real comparison rather than a number somebody wrote down once |
+| `WORLD_MODE=solve TARGET=<mean>` | sweeps a grid of candidate `HEIGHT_BIAS` values and interpolates the one that lands the mean on the target |
+| `WORLD_MODE=survey` | whole worlds through `checkWorld`, plus the strip's own numbers |
+
+`SEEDS=<n>` sets the count; the list is drawn from a fixed meta-seed so two runs
+are comparable, with `DEFAULT_SEED` always first. About a second a world.
+
+The `solve` mode is fast because heights are **linear in `HEIGHT_BIAS`**:
+changing it to `B'` shifts every height uniformly, so `h > SEA_LEVEL` becomes
+`h > SEA_LEVEL + BIAS - B'` on a map already built. `cullIslets` takes the sea
+level as an argument, so the real cull runs at a displaced waterline and one
+build serves every candidate. Exact except for the spawn floor, the polar floor
+and islet and the final clamp — none of which is near the waterline.
+
+This tool exists because the figures it replaces were produced by a throwaway
+run whose only artefact was the prose quoting it, which left the next person to
+touch `HEIGHT_BIAS` with no way to check whether those sentences were still
+true. **`WORLD_MODE=baseline` is the mode that must keep working against a
+stashed tree** — it imports nothing the strip added, and that is deliberate.
 
 ### The hull's clock is a property of where it is called
 

@@ -105,6 +105,28 @@ Use it for every visual iteration. It exists because diagnosing one shading bug
 once cost seven full production builds and seven browser launches, when the
 only thing actually needed was a picture.
 
+### Beside the tiers — `npm run world:measure`
+
+Not a tier and not a test: a measuring tape for the world generator, run by a
+person when a terrain constant moves. It builds whole worlds over a fixed
+50-seed list and prints a table -- land fraction, harbour count, the equatorial
+strip's numbers, and which of `worldgen.ts`'s checks each seed failed. About a
+second a world.
+
+```
+WORLD_MODE=baseline SEEDS=50 npm run world:measure   # land fraction per seed
+WORLD_MODE=solve TARGET=0.267 npm run world:measure  # which HEIGHT_BIAS hits that mean
+WORLD_MODE=survey SEEDS=50 npm run world:measure     # whole worlds, fully judged
+```
+
+`baseline` deliberately imports nothing newer than `cullIslets`, so it runs
+against a `git stash`ed tree -- which is the honest way to measure a terrain
+change: run the same seeds on both sides rather than comparing against a figure
+somebody wrote down once. That is exactly how `HEIGHT_BIAS` was retuned for the
+equatorial strip, and the numbers it produced are quoted in
+`docs/ARCHITECTURE.md` under **Calibration, measured**. Re-run it and update
+them in the same commit whenever the noise field changes.
+
 #### Pinning the sun and the hazard
 
 A day lasts `DAY_LENGTH` = 1200 seconds. Two shots taken a minute apart are lit
@@ -165,8 +187,16 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
 click rather than trusting the button -- so for as long as the only way to a
 berth was to sail there, no container could open it at a tenth of wall clock.
 `?spawn=<lat>,<lon>` puts the ship in a berth ring on the first frame, and
-`?seed=1337&spawn=26.31,-12.52` moors at Scrapmoor with the panel one click
+`?seed=1337&spawn=-38.57,-136.31` moors at Scrapmoor with the panel one click
 away. That is how the repair block and the per-harbour stock were checked.
+
+**That coordinate is a fact about seed 1337's world, so it moves whenever the
+world does.** It was `26.31,-12.52` until the equatorial strip retuned
+`HEIGHT_BIAS` and redrew every coastline. Nothing asserts on it -- it is prose,
+and prose goes stale silently -- so re-derive it after any terrain change:
+`npm run world:measure` builds the same world, or a throwaway test over
+`world1337()` can print `towns.all` with each `dock.dir` through
+`dirToLatLon`.
 
 It is still worth remembering, when reading the markup rather than driving it,
 that offers are addressed by template literal (`` `shop-${prefix}-price` ``),
@@ -197,7 +227,9 @@ so grepping a literal id finds nothing and proves nothing.
 5. **Golden fixtures are pinned behaviour, not decoration.** `npm run
    golden:update` regenerates them and is deliberately a separate command. A
    golden that moves without an explanation in the same commit is a
-   regression, not a stale fixture.
+   regression, not a stale fixture. The same command rewrites the two shader
+   fixtures; after a terrain-only change they must come out byte-identical, and
+   a diff there means something else moved.
 6. **Add a test only when it pins something a change could break silently.**
    Two here earn their place loudly: the CPU-versus-GPU wave field parity
    check, which agrees to 1/255 and would otherwise let the hull ride a
@@ -246,9 +278,9 @@ Six dev queries are worth knowing when you need to look at something:
 
 `?spawn=` is what retires this file's old note that the chandlery is
 unreachable from the browser tier. It is reachable now:
-`?seed=1337&spawn=26.31,-12.52` moors at Scrapmoor.
+`?seed=1337&spawn=-38.57,-136.31` moors at Scrapmoor.
 
 The two contract queries compose with it, and that pairing is the whole point:
-`?seed=1337&spawn=26.31,-12.52&quest=accept:0` moors at Scrapmoor carrying its
+`?seed=1337&spawn=-38.57,-136.31&quest=accept:0` moors at Scrapmoor carrying its
 first posting, which is one `[WORK]` press away from a board to look at and one
 passage away from a settlement.

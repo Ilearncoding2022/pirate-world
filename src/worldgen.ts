@@ -3,8 +3,15 @@ import type { Terrain } from './types';
 import type { Quality } from './quality';
 import type { WorldData } from './globe';
 import { buildWorldData } from './globe';
-import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from './terrain';
-import { latLonToDir } from './geo';
+import {
+  BAND_GUARANTEE_RAD,
+  createTerrain,
+  DEFAULT_SEED,
+  SPAWN_LAT_DEG,
+  SPAWN_LON_DEG,
+} from './terrain';
+import { GLOBE_RADIUS, latLonToDir } from './geo';
+import type { HeightMap } from './heightmap';
 import { HARBOUR_COUNT, HARBOUR_NAMES, NORTH_POLE_INDEX, SOUTH_POLE_INDEX } from './harbournames';
 
 /**
@@ -31,8 +38,9 @@ import { HARBOUR_COUNT, HARBOUR_NAMES, NORTH_POLE_INDEX, SOUTH_POLE_INDEX } from
  * A count, not a duration, because the cost per attempt is roughly fixed and
  * the number the player actually feels is the ceiling: twelve rejections is
  * about twelve seconds of loading bar, which is long but finite and is a case
- * that has never been observed -- the measured rejection rate is 0 in 50 random
- * seeds, so the expected number of attempts is one.
+ * that has never been observed -- the measured rejection rate is 2 in 50 random
+ * seeds, so the expected number of attempts is 1.04 and the chance of reaching
+ * the twelfth is nil.
  *
  * The exhaustion path is not a fallback to "some world"; it is a fallback to
  * DEFAULT_SEED, which is pinned by `tests/fixtures/world-golden.json` and
@@ -45,14 +53,22 @@ export const WORLD_ATTEMPTS = 12;
  * The band of land fraction a world has to fall in, as a share of the height
  * map's texels above sea level, after the islet cull.
  *
- * Calibrated, not chosen: seed 1337 measures 0.244906, and the band is that
- * value plus and minus 40%. Forty per cent is wide on purpose. This check is
- * not a taste filter -- `terrain.ts`'s HEIGHT_BIAS already decides what the
- * world should look like -- it is a catch for the draw that came out an
- * unsailable continent or an empty ocean with nowhere to moor. Over 50 random
- * seeds the observed fractions ran 0.2154 to 0.3421 with a mean of 0.2759, all
- * of them inside the band, which is the shape a catch should have: it fires on
- * the tail and never on the body.
+ * Calibrated, not chosen: the band is seed 1337's land fraction plus and minus
+ * 40% -- as that figure stood when these were set, which was 0.244906. Forty
+ * per cent is wide on purpose. This check is not a taste filter --
+ * `terrain.ts`'s HEIGHT_BIAS already decides what the world should look like --
+ * it is a catch for the draw that came out an unsailable continent or an empty
+ * ocean with nowhere to moor.
+ *
+ * They are deliberately NOT re-derived from the pinned seed's current 0.2409.
+ * The equatorial strip retuned HEIGHT_BIAS against the POPULATION rather than
+ * against seed 1337 (see that constant), so the distribution these bracket did
+ * not move even though the pinned seed did, and what a catch has to do is
+ * bracket the population. Re-measured after the strip, over 50 random seeds the
+ * observed fractions ran 0.2221 to 0.3304 with a mean of 0.2672 -- all of them
+ * inside the band, with the top of the range sitting 0.013 clear of LAND_MAX.
+ * That is the shape a catch should have: it fires on the tail and never on the
+ * body. `npm run world:measure` is what produced those numbers.
  *
  * A TEXEL fraction, and not an area fraction, because the height map is
  * equirectangular and its polar rows are enormously over-sampled. It is the
@@ -75,6 +91,31 @@ export interface WorldChecks {
   polesReachable: boolean;
   /** How many harbours the town search actually founded. */
   harbourCount: number;
+  /**
+   * Is there water somewhere inside the guaranteed strip at EVERY longitude?
+   *
+   * The player-facing half of the equatorial promise, and the one with a
+   * sentence attached to it: you can always sail round the world.
+   */
+  equatorOpen: boolean;
+  /**
+   * Landmasses with a foot inside the guaranteed strip and a body outside the
+   * veto's reach -- `islets.ts`'s `bandBridges`, passed through.
+   *
+   * The half `equatorOpen` cannot see. Land can intrude well inside the forty
+   * units without ever spanning them, so a column scan would pass a world whose
+   * coast had walked to within half the promised distance.
+   */
+  bandBridges: number;
+  /**
+   * Closest approach to the equator of any surviving mainland, in WORLD UNITS
+   * -- the promise as the one number a person can read.
+   *
+   * Reported, never gated on: `bandBridges` is the same fact expressed as a
+   * pass or a fail, and two gates on one property is one gate too many. This is
+   * what the failure message quotes and what the survey tabulates.
+   */
+  mainlandApproach: number;
 }
 
 const _spawn = new Vector3();
@@ -87,7 +128,7 @@ const _spawn = new Vector3();
  * building one is the second most expensive thing this project does.
  */
 export function checkWorld(data: WorldData, terrain: Terrain): WorldChecks {
-  const { heightMap, towns } = data;
+  const { heightMap, towns, isletCull } = data;
 
   let land = 0;
   for (let i = 0; i < heightMap.data.length; i++) {
@@ -111,7 +152,53 @@ export function checkWorld(data: WorldData, terrain: Terrain): WorldChecks {
       towns.byName(HARBOUR_NAMES[NORTH_POLE_INDEX]) !== null &&
       towns.byName(HARBOUR_NAMES[SOUTH_POLE_INDEX]) !== null,
     harbourCount: towns.all.length,
+    equatorOpen: equatorIsOpen(heightMap, terrain.seaLevel),
+    bandBridges: isletCull.bandBridges,
+    mainlandApproach: isletCull.mainlandMinAbsLat * GLOBE_RADIUS,
   };
+}
+
+/**
+ * Whether every longitude has open water inside the guaranteed strip.
+ *
+ * True by construction of `terrain.ts`'s veto, and measured anyway -- exactly
+ * the bargain `spawnIsSea` above is written under. The veto is a handful of
+ * constants somebody will retune one day, and the retune that breaks it will
+ * not look broken from inside `terrain.ts`: the guarantee there is an argument
+ * about a bound, and this is the only place the argument is ever tested against
+ * an actual world.
+ *
+ * A column scan and not a flood fill. `islets.ts` already did the connectivity
+ * work and `bandBridges` carries its answer, so what is left for this to add is
+ * the one thing a component walk cannot see: a longitude with no water in the
+ * strip at all, which is the difference between "the coast came too close" and
+ * "the way round the world is shut". They are different failures and they get
+ * different checks.
+ *
+ * Cost: 2048 columns x 82 rows worst case, and most columns stop on their first
+ * row because most of the strip is water. About 0.2 ms against the second
+ * `buildWorldData` spends, which is what makes it affordable on every attempt.
+ */
+function equatorIsOpen(heightMap: HeightMap, seaLevel: number): boolean {
+  const { data, width, height } = heightMap;
+  // The rows the guaranteed strip covers, in the equirectangular mapping
+  // `heightmap.ts` documents: v = lat / PI + 0.5, sampled at pixel centres.
+  const v0 = 0.5 - BAND_GUARANTEE_RAD / Math.PI;
+  const v1 = 0.5 + BAND_GUARANTEE_RAD / Math.PI;
+  const yLo = Math.max(0, Math.ceil(v0 * height - 0.5));
+  const yHi = Math.min(height - 1, Math.floor(v1 * height - 0.5));
+
+  for (let x = 0; x < width; x++) {
+    let open = false;
+    for (let y = yLo; y <= yHi; y++) {
+      if (data[y * width + x] <= seaLevel) {
+        open = true;
+        break;
+      }
+    }
+    if (!open) return false;
+  }
+  return true;
 }
 
 /** Whether a measured world is worth building meshes for. */
@@ -121,12 +208,20 @@ export function worldPasses(c: WorldChecks): boolean {
     c.landFraction >= LAND_MIN &&
     c.landFraction <= LAND_MAX &&
     c.polesReachable &&
-    c.harbourCount === HARBOUR_COUNT
+    c.harbourCount === HARBOUR_COUNT &&
+    c.equatorOpen &&
+    c.bandBridges === 0
   );
 }
 
-/** The failed checks, named, for the message a thrown `?seed=` carries. */
-function failures(c: WorldChecks): string[] {
+/**
+ * The failed checks, named, for the message a thrown `?seed=` carries.
+ *
+ * Exported for `tests/fixtures/measure.ts`, which tabulates it over a sweep of
+ * seeds: a survey that reported only a pass or a fail would leave whoever is
+ * retuning the generator to guess which gate they had broken.
+ */
+export function describeFailures(c: WorldChecks): string[] {
   const out: string[] = [];
   if (!c.spawnIsSea) out.push('the spawn point is land');
   if (c.landFraction < LAND_MIN || c.landFraction > LAND_MAX) {
@@ -135,6 +230,15 @@ function failures(c: WorldChecks): string[] {
   if (!c.polesReachable) out.push('a polar moat does not open to the sea');
   if (c.harbourCount !== HARBOUR_COUNT) {
     out.push(`only ${c.harbourCount} of ${HARBOUR_COUNT} harbours were founded`);
+  }
+  if (!c.equatorOpen) out.push('the equatorial strip is blocked at some longitude');
+  if (c.bandBridges > 0) {
+    out.push(
+      `${c.bandBridges} landmass(es) reach into the equatorial strip ` +
+        `(closest ${c.mainlandApproach.toFixed(1)} units, floor ${(
+          BAND_GUARANTEE_RAD * GLOBE_RADIUS
+        ).toFixed(0)})`,
+    );
   }
   return out;
 }
@@ -175,10 +279,10 @@ function drawSeed(): number {
  * pointed at one. An ordinary player's session sets no query and this returns
  * 0.
  *
- * It exists because the rejection loop is otherwise UNTESTABLE in a browser.
- * The measured rejection rate is 0 in 50 random seeds and 0 in the 270 that
- * have been checked in total -- there is no known seed that fails, which is
- * the point of the calibration but leaves the entire recovery path (the retry,
+ * It exists because the rejection loop is otherwise HARD to reach in a browser.
+ * The measured rejection rate is 2 in 50 random seeds, so a player will meet
+ * the retry about one session in twenty-five and an agent pointing a browser at
+ * it will not meet it at all -- which leaves the recovery path (the retry,
  * the loading bar's attempt counter, the fall back to DEFAULT_SEED) as code
  * nothing ever runs. `docs/TESTING.md` is blunt about what that is worth: the
  * browser tier earns its cost by executing what Node cannot, and a path with
@@ -232,7 +336,7 @@ function attempt(seed: number, quality: Quality): { world: GeneratedWorld; check
  * The loop is synchronous inside each attempt and there is no Worker. A Worker
  * would keep the tab responsive through a rejection and is the right next step
  * if rejections ever become common, but this project has no Worker anywhere
- * yet, the measured rejection rate is 0 in 50, and the loading bar already
+ * yet, the measured rejection rate is 2 in 50, and the loading bar already
  * covers the wait.
  */
 export async function generateWorld(
@@ -246,7 +350,9 @@ export async function generateWorld(
     await onAttempt(1, seed);
     const { world, checks } = attempt(seed, quality);
     if (forcedRejections > 0 || !worldPasses(checks)) {
-      throw new Error(`seed ${seed} does not make a usable world: ${failures(checks).join('; ')}`);
+      throw new Error(
+        `seed ${seed} does not make a usable world: ${describeFailures(checks).join('; ')}`,
+      );
     }
     return world;
   }

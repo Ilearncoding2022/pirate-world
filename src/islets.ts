@@ -1,6 +1,7 @@
 import type { HeightMap } from './heightmap';
 import { GLOBE_RADIUS } from './geo';
 import { CULL_MARGIN } from './land';
+import { BAND_GUARANTEE_RAD, BAND_WANDER_RAD } from './terrain';
 
 /**
  * Smallest landmass the world is allowed to keep, in world units squared.
@@ -33,6 +34,54 @@ export const MIN_ISLAND_AREA = 24.6;
  */
 const SINK_DEPTH = Math.max(CULL_MARGIN, 0.11) + 0.01;
 
+/* ---- The equatorial strip's own cull ------------------------------ */
+
+/**
+ * How far from the equator a landmass has to stay entirely inside to be
+ * judged as one of the strip's islets, radians.
+ *
+ * The outer edge of the veto's wander (`terrain.ts`), so this is "inside the
+ * widest the strip ever gets". Beyond it the veto was already fading and the
+ * land there is ordinary coast, which this rule must not touch.
+ */
+const BAND_ISLET_REACH = BAND_GUARANTEE_RAD + BAND_WANDER_RAD;
+
+/**
+ * The largest a landmass inside the strip is allowed to be, world units
+ * squared, and the most latitude it is allowed to span, radians.
+ *
+ * `terrain.ts` guarantees no CONTINENT reaches the strip -- see
+ * BAND_GUARANTEE_RAD for that arithmetic -- and the owner's rule allows small
+ * islands inside it. These two are what make "small" a number rather than a
+ * hope, and they are the mirror of MIN_ISLAND_AREA above: that one sinks what
+ * is too small to be worth steering round, this one sinks what is too big to
+ * be steered round at all.
+ *
+ * The two caps answer different questions, which is why only one of them moved
+ * when the strip narrowed from fifty units to forty.
+ *
+ * AREA asks "is this a landmark or a landmass", and that is a judgement against
+ * the SHIP, not against the corridor: 150 u^2 is a disc 13.8 units across, four
+ * hull lengths, six times the smallest island the world keeps. A boat does not
+ * care how wide the strip is when it decides whether the thing off the bow is
+ * an island or a coast. So this one is absolute and stays.
+ *
+ * SPAN asks "can this bridge the strip", which is a question about the corridor
+ * and therefore scales with it. It is not redundant with the area: area alone
+ * does not bound a ribbon, and a 150 u^2 ribbon three units wide would be fifty
+ * long -- across the whole strip while measuring well inside the area cap. Ten
+ * units of latitude inside a forty-unit minimum leaves thirty units of clear
+ * water whatever else happens, which is a maelstrom (20 across, see
+ * `terrain.ts`'s BAND_GUARANTEE_RAD) with five units either side of it. It was
+ * 0.06 rad against the old fifty-unit strip, the same quarter of the corridor.
+ *
+ * Both fire on the tail and never on the body, which is the shape a catch
+ * should have -- the same shape `worldgen.ts`'s land-fraction band has. See
+ * `npm run world:measure` for the surveyed largest.
+ */
+const MAX_BAND_ISLET_AREA = 150;
+const MAX_BAND_ISLET_SPAN = 0.05;
+
 /** What a cull did. Diagnostics only -- nothing reads this to make a decision. */
 export interface IsletCull {
   /** Landmasses found before the cull. */
@@ -43,6 +92,39 @@ export interface IsletCull {
   areaRemoved: number;
   /** Area of the smallest surviving landmass, in world units squared. */
   smallestKept: number;
+  /** Landmasses sunk for being too big or too long inside the equatorial strip. */
+  bandIsletsSunk: number;
+  /**
+   * Islands the strip kept: entirely inside it, and inside both caps.
+   *
+   * The feature, counted. The owner's rule is that small islands ARE allowed in
+   * the strip, so a world where this is always zero would mean the veto had
+   * been tuned into a rule that says "no land" -- which is a different feature
+   * that happens to pass the same tests.
+   */
+  bandIsletsKept: number;
+  /** Area of the largest island the strip kept, world units squared. 0 if none. */
+  largestBandIslet: number;
+  /**
+   * Landmasses with a foot inside the guaranteed strip that also reach past
+   * BAND_ISLET_REACH -- a coast that grew a causeway into water the generator
+   * promised would be clear.
+   *
+   * NOT sunk, deliberately: such a thing is a continent, and deleting a
+   * continent is far worse than the fault it would be hiding. It is counted so
+   * `worldgen.ts` can throw the whole world away instead, which is the only
+   * honest answer. Zero in every world measured; if it is ever not, the veto in
+   * `terrain.ts` has been retuned past what it can promise.
+   */
+  bandBridges: number;
+  /**
+   * Closest approach to the equator of any surviving landmass that is NOT one
+   * of the strip's islets, radians of latitude. `Infinity` if there is none.
+   *
+   * The promise this whole feature exists to keep, as one number: it must never
+   * be under BAND_GUARANTEE_RAD.
+   */
+  mainlandMinAbsLat: number;
 }
 
 /**
@@ -76,9 +158,14 @@ export function cullIslets(heightMap: HeightMap, seaLevel: number): IsletCull {
   const rowArea = new Float64Array(height);
   const dLon = (2 * Math.PI) / width;
   const dLat = Math.PI / height;
+  // Distance from the equator, per row, for the band rules below. Precomputed
+  // beside the area for the same reason: it is a function of the row alone, and
+  // the fill visits far more texels than there are rows.
+  const rowAbsLat = new Float64Array(height);
   for (let y = 0; y < height; y++) {
     const lat = ((y + 0.5) / height - 0.5) * Math.PI;
     rowArea[y] = GLOBE_RADIUS * GLOBE_RADIUS * Math.cos(lat) * dLon * dLat;
+    rowAbsLat[y] = Math.abs(lat);
   }
 
   const land = new Uint8Array(cells);
@@ -96,6 +183,11 @@ export function cullIslets(heightMap: HeightMap, seaLevel: number): IsletCull {
   let totalArea = 0;
   let removedArea = 0;
   let smallestKept = Infinity;
+  let bandIsletsSunk = 0;
+  let bandIsletsKept = 0;
+  let largestBandIslet = 0;
+  let bandBridges = 0;
+  let mainlandMinAbsLat = Infinity;
 
   for (let start = 0; start < cells; start++) {
     if (!land[start] || seen[start]) continue;
@@ -103,6 +195,12 @@ export function cullIslets(heightMap: HeightMap, seaLevel: number): IsletCull {
     let sp = 0;
     let count = 0;
     let area = 0;
+    // The component's latitude extent, tracked through the fill it is already
+    // doing. Two comparisons a texel and no second pass -- the alternative is
+    // walking `member` again afterwards, which costs the same work and one more
+    // place for the two loops to disagree about what a member is.
+    let loAbsLat = Infinity;
+    let hiAbsLat = 0;
     stack[sp++] = start;
     seen[start] = 1;
 
@@ -112,6 +210,9 @@ export function cullIslets(heightMap: HeightMap, seaLevel: number): IsletCull {
       const x = i - y * width;
       member[count++] = i;
       area += rowArea[y];
+      const absLat = rowAbsLat[y];
+      if (absLat < loAbsLat) loAbsLat = absLat;
+      if (absLat > hiAbsLat) hiAbsLat = absLat;
 
       const east = y * width + ((x + 1) % width);
       const west = y * width + ((x - 1 + width) % width);
@@ -130,12 +231,39 @@ export function cullIslets(heightMap: HeightMap, seaLevel: number): IsletCull {
     islandsBefore++;
     totalArea += area;
 
-    if (area < MIN_ISLAND_AREA) {
+    /*
+     * "Entirely inside the strip", and never "has a texel inside it".
+     *
+     * The tempting version is the dangerous one. The day someone retunes
+     * `terrain.ts`'s BAND_CEILING and a continental tongue reaches the band,
+     * "any texel inside" would sink the continent it belongs to -- a rule that
+     * deletes a landmass the size of a continent because one pixel of it
+     * strayed. This version can only ever fail the other way: a speck survives
+     * that should have gone, which is a speck.
+     */
+    const bandIslet = hiAbsLat <= BAND_ISLET_REACH;
+    const tooBig =
+      bandIslet && (area > MAX_BAND_ISLET_AREA || hiAbsLat - loAbsLat > MAX_BAND_ISLET_SPAN);
+
+    // A foot in the guaranteed strip and a body outside the veto's reach: a
+    // coast that walked in. Counted, never sunk -- see `bandBridges`.
+    if (!bandIslet && loAbsLat < BAND_GUARANTEE_RAD) bandBridges++;
+
+    if (area < MIN_ISLAND_AREA || tooBig) {
       islandsRemoved++;
+      if (tooBig) bandIsletsSunk++;
       removedArea += area;
       for (let k = 0; k < count; k++) heightMap.setAt(member[k], sunkTo);
-    } else if (area < smallestKept) {
-      smallestKept = area;
+    } else {
+      if (area < smallestKept) smallestKept = area;
+      if (bandIslet) {
+        bandIsletsKept++;
+        if (area > largestBandIslet) largestBandIslet = area;
+      } else if (loAbsLat < mainlandMinAbsLat) {
+        // Measured over what SURVIVES, and over mainland only: an islet the
+        // strip is allowed to keep is not the coast this promise is about.
+        mainlandMinAbsLat = loAbsLat;
+      }
     }
   }
 
@@ -146,5 +274,13 @@ export function cullIslets(heightMap: HeightMap, seaLevel: number): IsletCull {
     islandsRemoved,
     areaRemoved: totalArea > 0 ? removedArea / totalArea : 0,
     smallestKept: smallestKept === Infinity ? 0 : smallestKept,
+    bandIsletsSunk,
+    bandIsletsKept,
+    largestBandIslet,
+    bandBridges,
+    // Left as Infinity when there is no mainland at all, which is a world with
+    // no land outside the strip. `worldgen.ts`'s land fraction would have
+    // thrown that away long before anything read this.
+    mainlandMinAbsLat,
   };
 }

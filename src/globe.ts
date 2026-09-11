@@ -9,6 +9,7 @@ import { createWater } from './water';
 import type { Water, WaterPlugin } from './water';
 import { createWaterBodies } from './waterbodies';
 import { cullIslets } from './islets';
+import type { IsletCull } from './islets';
 import { createGrid } from './grid';
 import { createSky } from './sky';
 import { createCelestial } from './celestial';
@@ -50,6 +51,18 @@ export interface WorldData {
   readonly seed: number;
   /** Rasterised, islets already culled, installed as the terrain's land mask. */
   readonly heightMap: HeightMap;
+  /**
+   * What the cull did, carried rather than dropped because `worldgen.ts` reads
+   * two of its counts to judge the world.
+   *
+   * The flood fill in `islets.ts` is the only thing in the pipeline that knows
+   * which texels belong to the same landmass, and the equatorial strip's
+   * guarantee is a connectivity question -- whether land INSIDE the strip is
+   * joined to a coast outside it. Asking again downstream would mean a second
+   * flood fill over the same raster to recompute an answer that was already
+   * worked out and thrown away.
+   */
+  readonly isletCull: IsletCull;
   /** Flooded from the spawn point: which water the ship can reach. */
   readonly waterBodies: WaterBodies;
   /** Settlements and their berths. Short of HARBOUR_COUNT means a bad world. */
@@ -116,7 +129,7 @@ export function buildWorldData(
   // Sink the specks before anything reads the map. Everything downstream --
   // the flood fill, the berth search, the land mesh, the scope -- then sees one
   // world, and none of them has to know the cull happened.
-  cullIslets(heightMap, terrain.seaLevel);
+  const isletCull = cullIslets(heightMap, terrain.seaLevel);
   // Collision is the exception: `ship.ts` asks the terrain, not the map. Hand
   // the culled map over as the land mask so the hull stops snagging on islets
   // that no longer exist anywhere else.
@@ -136,7 +149,7 @@ export function buildWorldData(
   // that judgement is not made here.
   const towns = createTowns(heightMap, waterBodies, terrain.seaLevel);
 
-  return { seed, heightMap, waterBodies, towns };
+  return { seed, heightMap, isletCull, waterBodies, towns };
 }
 
 /**

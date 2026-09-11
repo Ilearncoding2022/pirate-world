@@ -31,15 +31,30 @@ const GOOD: WorldChecks = {
   landFraction: (LAND_MIN + LAND_MAX) / 2,
   polesReachable: true,
   harbourCount: HARBOUR_COUNT,
+  equatorOpen: true,
+  bandBridges: 0,
+  // Reported, never gated on -- so a value here can be anything a passing
+  // world would plausibly show. 25 units is the measured mean across the 50
+  // worlds `npm run world:measure` surveys.
+  mainlandApproach: 25,
 };
 
 /**
  * A `WorldData` with `n` towns and nothing else real.
  *
- * `checkWorld` reads exactly three things off a world -- the height map's
- * data, one height sample, and the town list -- so a fake carrying those is a
- * complete input, and building a real world to assert "35 harbours is a
- * rejection" would cost 1.3 s to learn something arithmetic already knows.
+ * `checkWorld` reads four things off a world -- the height map's data, one
+ * height sample, the town list and the islet cull's counts -- so a fake
+ * carrying those is a complete input, and building a real world to assert "35
+ * harbours is a rejection" would cost 1.3 s to learn something arithmetic
+ * already knows.
+ *
+ * The map is 8x32 rather than the four texels it used to be, and the shape is
+ * load-bearing now: `equatorIsOpen` scans the rows the guaranteed strip covers,
+ * which is under 8% of them, so a map fewer than about thirteen rows tall has
+ * NO row inside the band and the scan reports a blocked equator by default.
+ * Every case below would then fail for two reasons at once and stop pinning the
+ * one it names. At 32 rows the band is rows 15-16, the land sits in rows 0-7
+ * well clear of it, and the fraction is still the 0.25 that lands mid-band.
  */
 function fakeWorld(n: number, poles = true): WorldData {
   const towns: Town[] = Array.from({ length: n }, (_, i) => ({
@@ -62,14 +77,23 @@ function fakeWorld(n: number, poles = true): WorldData {
     byName: (name: string) => named.get(name) ?? null,
   } as unknown as Towns;
 
-  // One texel of land in four, so the land fraction lands mid-band.
-  const data = new Float32Array(4);
-  data[0] = 1;
+  // One texel of land in four, so the land fraction lands mid-band -- all of it
+  // in the northern rows, so the equatorial strip reads as open.
+  const width = 8;
+  const height = 32;
+  const data = new Float32Array(width * height);
+  for (let i = 0; i < width * 8; i++) data[i] = 1;
   return {
     seed: 1,
     heightMap: {
       data,
+      width,
+      height,
       sample: () => -0.5,
+    },
+    isletCull: {
+      bandBridges: 0,
+      mainlandMinAbsLat: 0.2,
     },
     waterBodies: {},
     towns: fakeTowns,
@@ -102,6 +126,31 @@ describe('worldPasses', () => {
   it('rejects any harbour count that is not exactly HARBOUR_COUNT', () => {
     expect(worldPasses({ ...GOOD, harbourCount: HARBOUR_COUNT - 1 })).toBe(false);
     expect(worldPasses({ ...GOOD, harbourCount: HARBOUR_COUNT + 1 })).toBe(false);
+  });
+
+  /*
+   * The equatorial strip's two gates, and they are two on purpose -- see
+   * `WorldChecks`. `equatorOpen` is "the way round the world is shut
+   * somewhere"; `bandBridges` is "the coast walked into water that was
+   * promised clear" without necessarily closing it. A world can fail either
+   * without failing the other, so neither can stand in for the other.
+   */
+  it('rejects a blocked equator', () => {
+    expect(worldPasses({ ...GOOD, equatorOpen: false })).toBe(false);
+  });
+
+  it('rejects any landmass reaching into the strip, however few', () => {
+    expect(worldPasses({ ...GOOD, bandBridges: 1 })).toBe(false);
+  });
+
+  /*
+   * `mainlandApproach` is REPORTED and never gated on -- `bandBridges` is the
+   * same property expressed as a verdict, and two gates on one fact is one too
+   * many. Pinned so that stays deliberate: a future edit that starts rejecting
+   * on the distance has to delete this case to do it.
+   */
+  it('does not judge a world on the reported approach distance', () => {
+    expect(worldPasses({ ...GOOD, mainlandApproach: 0 })).toBe(true);
   });
 });
 

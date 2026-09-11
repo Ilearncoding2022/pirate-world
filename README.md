@@ -56,8 +56,18 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   — a little under two ship lengths — is sunk before the world is handed over.
   The sea used to be full of specks a fraction of the hull wide, too small to
   see against the water and too small to steer around, and the ship stopped
-  dead on every one of them. 160 of the world's 253 islands went; they were
-  worth 0.6% of its land.
+  dead on every one of them. 174 of the pinned world's 269 islands went; they
+  were worth 0.6% of its land.
+- **An ocean road round the equator.** Every world is guaranteed **forty units
+  of open water** along its equator — the mainland coast never comes within
+  twenty units of it, at any longitude, in any world. You spawn in the middle
+  of it, so you can always sail round the world. Forty is not a round number
+  picked for looks: a maelstrom is twenty units across, and forty is the
+  narrowest corridor that still lets you steer round one without leaving it.
+  The coast that bounds the strip is not a ruled line — it wanders on its own
+  noise and opens out to sixty-odd units where a continent stands well back.
+  Small islands are allowed inside, and can carry harbours, but nothing bigger
+  than a disc fourteen units across, so none of them is ever a wall.
 - **Land and water are separate meshes.** Land is an icosphere with every
   fully-submerged face removed and the rest displaced outward. Water is one
   smooth sphere beneath it. Coastal detail is computed per pixel from a shared
