@@ -2049,9 +2049,26 @@ async function startGame(): Promise<void> {
    */
   const hazardQuery = new URLSearchParams(window.location.search).get('hazard');
   let forcedHazard: HazardKind | null =
-    hazardQuery === 'wave' || hazardQuery === 'maelstrom'
-      ? hazardQuery
+    hazardQuery === 'wave' || hazardQuery === 'maelstrom' || hazardQuery === 'maelstrom-now'
+      ? hazardQuery === 'maelstrom-now'
+        ? 'maelstrom'
+        : hazardQuery
       : null;
+  /**
+   * `?hazard=maelstrom-now` -- the funnel opens ON the hull, so it swallows the
+   * ship at once and the run is about what happens AFTERWARDS.
+   *
+   * The near half of the pair `?salvage=`, `?derelict=` and `?battle=1` all
+   * carry, and it is here for the same reason theirs are. 25 units is dead
+   * ahead but it still has to be SAILED to, and the browser tier runs on a
+   * software rasteriser that advances the simulation at about a fiftieth of
+   * wall clock: measured, a hull under full throttle covered four units in two
+   * hundred seconds, which puts the funnel twenty minutes away. That is a vigil
+   * again, which is the exact thing the comment above says this query exists to
+   * end -- and the state worth photographing is not the funnel, it is the sea
+   * the ship comes back to.
+   */
+  const forcedHazardOnHull = hazardQuery === 'maelstrom-now';
   /** Seconds of sailing before the forced hazard rises. Long enough to see the sea it rises out of. */
   let forceCountdown = 3;
   /**
@@ -2063,6 +2080,15 @@ async function startGame(): Promise<void> {
    * first frame of it.
    */
   const FORCE_DISTANCE = 25;
+
+  /**
+   * And how far ahead `?hazard=maelstrom-now` opens its, world units.
+   *
+   * One, which is well inside the funnel's own capture radius, so the very next
+   * `hazards.update` takes the hull. `BATTLE_FORCE_DISTANCE`'s trick, and the
+   * same number.
+   */
+  const HAZARD_ON_HULL_DISTANCE = 1;
   const _forceAxis = new THREE.Vector3();
   const _forceCentre = new THREE.Vector3();
   const _forceNorth = new THREE.Vector3();
@@ -2099,7 +2125,7 @@ async function startGame(): Promise<void> {
   }
 
   function releaseForcedHazard(kind: HazardKind): void {
-    if (!aimAtShip(FORCE_DISTANCE)) return;
+    if (!aimAtShip(forcedHazardOnHull ? HAZARD_ON_HULL_DISTANCE : FORCE_DISTANCE)) return;
     hazards.force(kind, _forceCentre, _forceNorth);
   }
 

@@ -97,7 +97,14 @@ npm run shots -- --label before-maelstrom --query "?clock=10&hazard=maelstrom&qu
   a real sun road on the water, low enough that land relief still casts.
 - `?hazard=wave|maelstrom` raises one, 25 units dead ahead, three
   seconds in. Already existed; it is listed here because the two are only
-  useful together.
+  useful together. `?hazard=maelstrom-now` opens the funnel ON the hull
+  instead, so the ship is swallowed at once and the run is about the sea it
+  comes back to — the near half of the pair `?battle=1` and `?salvage=take`
+  already carry. It exists because 25 units still has to be SAILED, and the
+  software rasteriser this tier runs on advances the simulation at about a
+  fiftieth of wall clock: measured, a hull under full throttle covered four
+  units in two hundred seconds, which puts a funnel dead ahead twenty minutes
+  away. That is the vigil this query was invented to end.
 - `?quality=low|medium|high` picks the tier. The hazard streams have to be
   looked at on all three: `low` registers no reflection plugin at all, and the
   displacement patch drops from 160 segments to 96.

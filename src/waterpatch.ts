@@ -235,11 +235,39 @@ export function createWaterPatch(water: Water, quality: Quality): WaterPatch {
     _raw.copy(ship.position).multiplyScalar(GLOBE_RADIUS);
     const centre = uniforms.uPatchCentre.value as THREE.Vector3;
 
-    if (!centreInitialised) {
+    _delta.copy(_raw).sub(centre);
+
+    /*
+     * A hull that was MOVED rather than sailed, and the one case the grid snap
+     * below cannot answer.
+     *
+     * The snap walks the centre along the tangent plane at the ship in whole
+     * grid steps, which is exactly right for a hull making at most 1.3 units a
+     * frame and meaningless for one that has been teleported: the tangent plane
+     * is a flat approximation of the sphere, and a chord walked across a
+     * quarter of the planet lands nowhere near the arc. A maelstrom respawn
+     * (`hazards.pickRespawn`, through `main.ts`'s `onSunk`) can move the ship
+     * anywhere on the globe; measured, the centre came to rest 628 units from
+     * the hull -- the far side of the world -- and stayed there.
+     *
+     * That used to be invisible. It is not any more: since the sphere started
+     * cutting its shell away under this patch (commit e829a02) so the funnel
+     * could be seen, `uPatchCentre` is also where the HOLE is. A centre left
+     * behind is a hole in the ocean where the player is not, and flat,
+     * undisplaced water where they are.
+     *
+     * So a move the patch could not possibly cover re-seeds the centre outright,
+     * exactly as the first frame does. The threshold is the patch's own
+     * half-extent because that is the honest definition of "could not cover":
+     * past it, not one pixel of the old footprint is anywhere near the ship.
+     * Nothing that sails can reach it -- 40 units is four seconds at the hull's
+     * top speed and thirty frames of the loop's own `dt` clamp -- so this only
+     * ever fires on a teleport, which is the only thing it is for.
+     */
+    if (!centreInitialised || _delta.length() > PATCH_EXTENT * 0.5) {
       centre.copy(_raw);
       centreInitialised = true;
     } else {
-      _delta.copy(_raw).sub(centre);
       const spacing = PATCH_EXTENT / (segments - 1);
       if (_delta.length() > spacing * 0.5) {
         // Fresh every call, never stored -- tangentFrame(up) is degenerate at

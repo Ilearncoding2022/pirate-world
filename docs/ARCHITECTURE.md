@@ -1110,6 +1110,37 @@ arrives on the same frame its clock runs out against the player, by up to 16 ms
 of a several-minute deadline, and the player did get there. The clock is
 decremented and clamped at zero before anything else, so the HUD never shows a
 negative; the expiry sweep runs last.
+
+### The displacement patch has to be told about a teleport
+
+The patch is the only water that actually displaces, and since the sphere began
+cutting its shell away underneath it (commit e829a02, so the funnel could be
+seen at all) `uPatchCentre` is two facts at once: where the displaced water is
+drawn, and where the hole in the shell is.
+
+`waterpatch.ts` follows the ship by snapping that centre along the tangent
+plane in whole grid steps, which keeps the vertices on a fixed world grid so
+the displacement does not swim under a moving hull. It is exactly right for a
+hull that SAILS -- at most 1.3 units a frame -- and meaningless for one that is
+MOVED: the tangent plane is a flat approximation of the sphere, and a chord
+walked across a quarter of the planet lands nowhere near the arc.
+
+The maelstrom moves one. `main.ts`'s `onSunk` teleports the hull to
+`hazards.pickRespawn()` inside the blackout, and measured, the patch centre
+came to rest **628 units** from the ship -- the far side of the world -- and
+stayed there. What the player saw on the other side of the fade was a dead flat
+sea with no crest in it anywhere, and a hole in the ocean nobody was near.
+
+So a move the patch could not possibly cover re-seeds the centre outright, on
+the same branch the first frame takes. The threshold is the patch's own
+half-extent, which is the honest definition of "could not cover", and nothing
+that sails can reach it: 40 units is four seconds at the hull's top speed and
+thirty frames of the loop's own `dt` clamp.
+
+`wake.ts` already had its own answer to the same event (`BREAK_GAP` splits the
+ribbon rather than drawing a streak across the planet), and `view.snap` is the
+camera's. This was the third thing that needed one and did not have it.
+
 ## Salvage and the tow
 
 Two activities off one idea: the sky decides what the sea leaves lying about.
