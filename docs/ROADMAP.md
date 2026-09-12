@@ -1,6 +1,6 @@
 # Roadmap and handoff
 
-Status of the project as of **v0.25.0** (2026-09-11), and what is worth doing
+Status of the project as of **v0.26.0** (2026-09-12), and what is worth doing
 next. This is a handoff document: it assumes you have read `README.md` for what
 the game is and `docs/ARCHITECTURE.md` for how it is built, and it exists so
 the next person does not have to re-derive which of the obvious improvements
@@ -16,10 +16,10 @@ of a market rather than of a codebase and say so where they start.
 
 | | |
 |---|---|
-| Version | 0.25.0 |
-| Source | 117 TypeScript modules, ~51 300 lines, plus 5 700 lines of CSS |
-| Tests | 58 unit files / 657 cases (~5 s), 9 browser cases (~3.4 min) |
-| Bundle | 978 KB JS (289 KB gzipped), 52 KB CSS, one chunk |
+| Version | 0.26.0 |
+| Source | 127 TypeScript modules, ~54 700 lines, plus 5 900 lines of CSS |
+| Tests | 60 unit files / 693 cases (~5 s), 13 browser cases (~7.6 min) |
+| Bundle | 1 004 KB JS (294 KB gzipped), 54 KB CSS, one chunk |
 | Assets | One 5.1 MB glTF hull, four WebP illustrations. Everything else procedural |
 | Dependencies | 2 runtime (`three`, `simplex-noise`), 7 dev |
 
@@ -28,7 +28,7 @@ unusually exposed in the ways that are not. There is **not one TODO, FIXME,
 HACK or XXX comment** in `src/` — search case-sensitively, or the `C.xxx`
 swizzles in the GLSL modules will give you six false hits. The sim half is
 densely tested and the architecture document is genuinely authoritative. What is missing is almost entirely
-*category* rather than *quality*: no audio, no CI, no linter. **"No goal" came
+*category* rather than *quality*: no CI, no linter, and audio that exists but reaches exactly one activity. **Audio stopped being total on 2026-09-12**, when the leviathan hunt's phase 2 built `audio.ts` and a mute setting; the wind, the hull, the thruster and the broadside are all still silent. **"No goal" came
 off that list on 2026-09-10**, when harbour-issued contracts landed
 (`docs/QUESTS_PLAN.md` Phase 1). The game still has no win condition and no
 failure state, and both of those are choices rather than gaps.
