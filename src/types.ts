@@ -1208,7 +1208,61 @@ export interface Shadow {
   readonly marked: boolean;
   /** Fade in and out, 0..1. Drives the sprite's opacity and the scope's alpha. */
   readonly envelope: number;
+  /**
+   * Position in the body. 0 is the head. Stable for the shoal's life.
+   *
+   * The shoal is one chained animal rather than fourteen drifters: segment `i`
+   * follows the point `BODY_SPACING` behind segment `i - 1`. See
+   * docs/LEVIATHAN_PHASE2_PLAN.md item 1, which reverses the MVP's
+   * interpretation 1.
+   */
+  readonly rank: number;
+  /**
+   * 0 deep, 1 breaching.
+   *
+   * Drives the water term's darkening strength, the sprite's scale and edge
+   * sharpness, and the foam ring on the mark. One number, three renderers, so
+   * a surfacing animal cannot look surfaced on one tier and sunk on another.
+   */
+  readonly surfacing: number;
+  /**
+   * Signed roll, negative to port.
+   *
+   * Ramps over `TURN_TELEGRAPH` BEFORE the heading moves and decays after it.
+   * This is the whole visible content of item 7: a player who cannot see a
+   * turn coming cannot lead the body, and leading it is the skill.
+   */
+  readonly bank: number;
+  /** 0..1, spikes on a strike and decays. The bolt's visible urgency. */
+  readonly burst: number;
+  /**
+   * A fixed per-shadow phase, drawn once at spawn.
+   *
+   * The swim wiggle's offset, so no two segments beat in step. Drawn from the
+   * sim's seeded stream, never from `Math.random`, or two runs on one seed
+   * would not draw the same animal.
+   */
+  readonly wobble: number;
 }
+
+/**
+ * Which of the gate's conditions is failing, in priority order.
+ *
+ * `'ok'` is the armed case. The rest name the ONE thing standing between the
+ * player and a live dial, and the order is the order they are reported in when
+ * more than one is true at once: the reticle colours by it and the dial's hint
+ * says it in words.
+ *
+ * The order is the teaching progression rather than the tidy one. A player
+ * sails closer (`far`), then points the bow (`arc`), then backs off if they
+ * have overshot into the flee radius (`close`). `dry` sits last because an
+ * empty locker already gets its own toast from `main.ts`'s `onHuntEvent`, so
+ * surfacing it in the bar as well is a second telling rather than a first.
+ *
+ * `suppressed` is docked, mid-blackout or in a maelstrom, and is the one entry
+ * the player cannot act on, which is why it sorts below everything they can.
+ */
+export type HuntGate = 'ok' | 'far' | 'arc' | 'close' | 'dry' | 'suppressed';
 
 /**
  * The hunt as everything downstream sees it. One object, mutated in place for
@@ -1234,7 +1288,109 @@ export interface HuntState {
   readonly dial: number;
   /** Seconds of spawn suppression left after a hunt settles. */
   readonly grace: number;
+
+  /* ---- Phase 2: the picture, and why the bar is dark ---------------- */
+
+  /**
+   * WHICH of the five conditions is failing.
+   *
+   * The single biggest onboarding fix in phase 2. `armed` says the dial is
+   * dead; this says why, and the reticle and the dial's hint both read it so
+   * the two can never disagree.
+   */
+  readonly gate: HuntGate;
+  /**
+   * False during the arm-up. `armed && ready` is what a press needs.
+   *
+   * The sweep now starts at the red edge and charges for `ARM_UP` before it
+   * will take a press, which is what removes the MVP's mash exploit: tapping
+   * Space on the arming frame used to be worth very nearly 100.
+   */
+  readonly ready: boolean;
+  /** 0 with the mark dead ahead, 1 at the arc's edge. The needle's rate input. */
+  readonly centring: number;
+  /** The sweep rate actually in use this frame, published so the HUD can show it. */
+  readonly sweepRate: number;
+  /**
+   * 0..4, the index into the escalation tables.
+   *
+   * `target` counts banked targets and reaches `HUNT_TARGETS`; this clamps one
+   * below it, because the fifth bank ends the hunt and there is no sixth row
+   * in `LEVEL_SPEED`, `LEVEL_HOLD` or `LEVEL_MULTIPLIER` for it to index.
+   */
+  readonly level: number;
+  /** Consecutive presses in the green band. Drives the streak counter. */
+  readonly streak: number;
+  /** `LEVEL_MULTIPLIER[level]`, published so the dial can print it. */
+  readonly multiplier: number;
+  /** Seconds until the next heading change; negative while turning. */
+  readonly turnIn: number;
+  /** 0..1 progress of the mark's walk up one segment. */
+  readonly handoff: number;
+  /** The rank the mark is leaving. Meaningless while `handoff` is 0. */
+  readonly handoffFrom: number;
+  /** The rank the mark is walking to. Meaningless while `handoff` is 0. */
+  readonly handoffTo: number;
+  /** 0..1, the shoal-wide flee response to a hull or a strike. */
+  readonly bolt: number;
+  /**
+   * How a hunt ended, set once on the transition into `settling`.
+   *
+   * Null everywhere else. A word on the existing phase rather than a fourth
+   * `HuntPhase`, because a fourth phase would be a fourth branch in every
+   * consumer for something that is already a word. Everything that draws an
+   * ending reads this and the per-ending fade in `ENDING_FADE`.
+   */
+  readonly ending: HuntEnding | null;
+  /** The marked segment's `rank`, so six consumers do not each scan the array. */
+  readonly mark: number;
 }
+
+/** How a hunt ended. Three endings, three pictures, three fade lengths. */
+export type HuntEnding = 'sounded' | 'scattered' | 'settled';
+
+/**
+ * One thing that just happened, for the views to draw and sound.
+ *
+ * Separate from `HuntEvent` on purpose, and the separation is load-bearing.
+ * `HuntEvent` is money and the notification strip and has exactly one
+ * consumer; a cue is pictures and sounds and has six. Folding them together
+ * would put `wallet.add` behind a switch that six view modules also read, and
+ * the first bug from that is a splash ring able to pay gold.
+ *
+ * A value object with no methods and no identity: a consumer that wants to
+ * remember one copies what it needs out of it.
+ */
+export interface HuntCue {
+  readonly kind: HuntCueKind;
+  /** Unit direction. Present on `strike`, `spout` and `dive`. */
+  readonly position?: Vector3;
+  /** Present on `strike`. */
+  readonly damage?: number;
+  /**
+   * The sim's own reading of its ramp. Present on `strike`.
+   *
+   * Published rather than recomputed so five consumers cannot each get the
+   * thresholds wrong, which is the same reason `SOUND_BELOW` is exported
+   * rather than restated in the dial.
+   */
+  readonly band?: HuntBand;
+  /** Which way the head is about to turn. Present on `turn`. */
+  readonly sign?: number;
+}
+
+export type HuntCueKind =
+  | 'spawn'
+  | 'armed'
+  | 'disarmed'
+  | 'turn'
+  | 'handoff'
+  | 'strike'
+  | 'spout'
+  | 'dive'
+  | 'settled';
+
+export type HuntBand = 'green' | 'yellow' | 'red';
 
 /**
  * What just happened, for `main.ts` to pay and announce.
@@ -1263,6 +1419,14 @@ export interface HuntEvent {
    * leviathan tired of them would be the game mislabelling their own choice.
    */
   readonly reason?: 'pinprick' | 'lost';
+  /**
+   * How the hunt ended, mirroring `HuntState.ending`. Absent on `hit` and `dry`.
+   *
+   * `reason` says whose doing it was and is a word for the player; this says
+   * which PICTURE was drawn, and is what lets `main.ts` match the fade it sees
+   * on the water to the line it pushes on the strip.
+   */
+  readonly ending?: HuntEnding;
 }
 
 /* ------------------------------------------------------------------ */

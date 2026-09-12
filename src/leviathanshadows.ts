@@ -1,4 +1,13 @@
-import { CanvasTexture, Group, Matrix4, Mesh, MeshBasicMaterial, PlaneGeometry, Vector3 } from 'three';
+import {
+  CanvasTexture,
+  Group,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
+  Quaternion,
+  Vector3,
+} from 'three';
 import type { Object3D, Scene } from 'three';
 import type { HuntState, Shadow } from './types';
 import type { PostFx } from './postfx';
@@ -114,6 +123,54 @@ const DRIFT_RATE = 1.1;
 /** Phase step between pool slots, radians. Irrational-ish, so no two slots pulse in step. */
 const DRIFT_PHASE_STEP = 0.7;
 
+/**
+ * The swim: how fast a segment sways, and how far, world units.
+ *
+ * Applied HERE and not in `leviathan.ts`, deliberately. The sim's chain is
+ * rigid and its spacing is exact — the unit tier asserts it to four places —
+ * so the undulation is something the eye is shown rather than something the
+ * gate has to reason about. A wiggle that moved the real positions could put a
+ * segment inside `BOW_ARC` that geometrically was not, and the gate is the
+ * whole design.
+ *
+ * Under half a hull's beam: enough that the body reads as swimming, little
+ * enough that the chain still reads as one line.
+ */
+const SWIM_RATE = 2.4;
+const SWIM_SWAY = 0.45;
+
+/** How far a full `bank` tips a segment, radians. */
+const BANK_TILT = 0.5;
+
+/**
+ * How much higher a fully surfaced segment floats, world units.
+ *
+ * Added to `SHADOW_LIFT`, so a breaching animal genuinely clears the swell
+ * rather than merely brightening. Modest, because the sprite is flat and a
+ * plane lifted too far stops reading as a thing in the water and starts
+ * reading as a decal hanging over it.
+ */
+const SURFACE_RISE = 0.55;
+
+/**
+ * How much smaller the tail is than the head.
+ *
+ * The body tapers, which is what makes a line of fourteen identical blobs read
+ * as an animal with a front. Rank 0 keeps its full size and the tail is this
+ * fraction of it, interpolated between.
+ */
+const TAIL_TAPER = 0.7;
+
+/**
+ * How large a segment is at the instant it arrives, as a fraction of full.
+ *
+ * Item 19. The MVP faded a full-sized shoal up from nothing, which reads as a
+ * decal switching on; this grows it out of the water. Not zero, because a
+ * segment that started at literally no size would pop on its first visible
+ * frame rather than rise.
+ */
+const ARRIVAL_MIN = 0.35;
+
 /* ------------------------------------------------------------------ */
 /* Palette                                                             */
 /* ------------------------------------------------------------------ */
@@ -143,6 +200,7 @@ const TEXTURE_SIZE = 128;
 const _right = new Vector3();
 const _back = new Vector3();
 const _basis = new Matrix4();
+const _tilt = new Quaternion();
 
 export interface ShadowField {
   /** After `ship.update`, before `globe.update`. Places the sprites. */
@@ -179,18 +237,67 @@ function blobTexture(ring: boolean): CanvasTexture | null {
   const half = TEXTURE_SIZE / 2;
   ctx.clearRect(0, 0, TEXTURE_SIZE, TEXTURE_SIZE);
 
-  // Soft-edged, and soft over most of its radius rather than only at the rim:
-  // a hard-edged ellipse on open water reads as a decal, which is the exact
-  // failure this whole approach is exposed to.
+  /*
+   * A TEARDROP, not a disc.
+   *
+   * The geometry is authored with +Z astern, so on this canvas the top edge is
+   * the segment's nose. Tapering the shape toward the bottom gives every
+   * segment a front, and fourteen of them nose to tail then read as one animal
+   * travelling in a direction rather than as a string of beads. That direction
+   * cue is what item 1 is actually buying: a player who can see which end is
+   * the head can see which way the body is about to go.
+   *
+   * Drawn by scaling the canvas about the nose rather than by plotting a
+   * curve: one transform, and the soft radial falloff below — which is what
+   * keeps a flat quad from reading as a decal, and is the MVP's hard-won
+   * lesson — survives it unchanged.
+   */
   const fill = ctx.createRadialGradient(half, half, 0, half, half, half);
   fill.addColorStop(0, 'rgba(2, 8, 14, 1)');
   fill.addColorStop(0.45, 'rgba(3, 12, 22, 0.82)');
   fill.addColorStop(0.78, 'rgba(4, 16, 28, 0.28)');
   fill.addColorStop(1, 'rgba(4, 16, 28, 0)');
+
+  ctx.save();
+  if (!ring) {
+    /*
+     * Widest a third of the way back from the nose and drawn to a point at the
+     * tail. The mark keeps the plain disc: it carries a ring and is read as an
+     * instrument mark rather than as anatomy, and tapering it would fight the
+     * ring for the same pixels.
+     */
+    ctx.translate(half, TEXTURE_SIZE * 0.34);
+    ctx.scale(1, 1.15);
+    ctx.translate(-half, -TEXTURE_SIZE * 0.34);
+  }
   ctx.fillStyle = fill;
   ctx.beginPath();
   ctx.arc(half, half, half, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+
+  if (!ring) {
+    /*
+     * A lighter head. `docs/LEVIATHAN_PHASE2_PLAN.md` asks for the falloff to
+     * lighten toward the nose on both shadow paths, and on this one it is a
+     * second, smaller gradient laid over the first: the body is an absence of
+     * light, and the nose is slightly less of one.
+     */
+    const nose = ctx.createRadialGradient(
+      half,
+      TEXTURE_SIZE * 0.3,
+      0,
+      half,
+      TEXTURE_SIZE * 0.3,
+      half * 0.55,
+    );
+    nose.addColorStop(0, 'rgba(26, 54, 74, 0.55)');
+    nose.addColorStop(1, 'rgba(26, 54, 74, 0)');
+    ctx.fillStyle = nose;
+    ctx.beginPath();
+    ctx.arc(half, TEXTURE_SIZE * 0.3, half * 0.55, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (ring) {
     ctx.strokeStyle = MARK_RING;
@@ -219,7 +326,20 @@ function blobTexture(ring: boolean): CanvasTexture | null {
  *   call `aihulls.ts` makes for a raider's recoloured neon. Optional so a test
  *   or a caller with no composer can still construct this.
  */
-export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>): ShadowField {
+export function createShadowField(
+  scene: Scene,
+  postFx?: Pick<PostFx, 'adopt'>,
+  /**
+   * Which renderer the quality tier chose. `'shader'` means the water term in
+   * `leviathanwater.ts` is drawing the body, so this pool hides itself
+   * entirely rather than drawing a second set of shadows on top of it.
+   *
+   * Defaults to the sprite path so that every existing caller and every
+   * existing test keeps the behaviour it had. Stream B2 owns what this does
+   * beyond hiding.
+   */
+  path: 'sprites' | 'shader' = 'sprites',
+): ShadowField {
   const group = new Group();
   group.name = 'leviathan-shadows';
   scene.add(group);
@@ -302,8 +422,39 @@ export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>):
     _basis.makeBasis(_right, shadow.position, _back);
     mesh.quaternion.setFromRotationMatrix(_basis);
 
+    /*
+     * The swim wiggle, and the roll.
+     *
+     * A segment eases side to side about the body's centre line on its own
+     * `wobble` phase, so the chain undulates instead of sliding along its own
+     * path like a train on rails. `leviathan.ts` keeps the SIM's chain rigid —
+     * spacing is exact there, and the tests assert it — and the waving is
+     * purely what the eye is shown, which is why it lives here and why it can
+     * never make the animal miss a gate it geometrically passed.
+     *
+     * The roll is `bank`, tipped about the body's own forward axis. On the
+     * head that is item 7's telegraph; on the body it is the same roll
+     * arriving a beat later, which is `leviathan.ts`'s `BANK_TRAVEL`.
+     */
+    const swim = Math.sin(elapsed * SWIM_RATE + phase) * SWIM_SWAY;
+    if (shadow.bank !== 0) {
+      _tilt.setFromAxisAngle(_back, -shadow.bank * BANK_TILT);
+      mesh.quaternion.multiply(_tilt);
+    }
+
+    /*
+     * How high it floats, and the arrival from depth.
+     *
+     * `surfacing` runs 0 deep to 1 breaching, so a segment that is merely
+     * cruising sits at the old clearance and the MARK — which `leviathan.ts`
+     * lifts to `SURFACE_MARK` — rides visibly higher. That is most of what
+     * makes the mark findable at chase distance without a HUD marker on it.
+     */
     const drift = DRIFT_AMPLITUDE * Math.sin(elapsed * DRIFT_RATE + phase);
-    mesh.position.copy(shadow.position).multiplyScalar(GLOBE_RADIUS + SHADOW_LIFT + drift);
+    const lift = SHADOW_LIFT + drift + shadow.surfacing * SURFACE_RISE;
+    mesh.position.copy(shadow.position).multiplyScalar(GLOBE_RADIUS + lift);
+    // The lateral sway, applied in world units along the body's own starboard.
+    mesh.position.addScaledVector(_right, swim);
     return true;
   }
 
@@ -311,6 +462,21 @@ export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>):
     update(dt: number, state: HuntState): void {
       elapsed += dt;
       visibleCount = 0;
+
+      /*
+       * The shader tier draws the body inside the water's own fragment shader,
+       * so this pool stands down entirely rather than laying a second set of
+       * shadows over the top of it.
+       *
+       * `visibleCount` stays 0, which is the honest answer and the one the
+       * debug hook needs: it is what lets a screenshot distinguish "the sprite
+       * path drew nothing" from "the sprite path was not the one asked to
+       * draw", and only one of those is a bug.
+       */
+      if (path === 'shader') {
+        for (const mesh of slots) mesh.visible = false;
+        return;
+      }
 
       const shadows = state.shadows;
       for (let i = 0; i < slots.length; i++) {
@@ -342,7 +508,22 @@ export function createShadowField(scene: Scene, postFx?: Pick<PostFx, 'adopt'>):
          * waiting for the frame the two disagree.
          */
         mesh.material = shadow.marked ? markMaterial : bodyMaterial;
-        const scale = shadow.marked ? MARKED_SCALE : 1;
+
+        /*
+         * Three things decide how big a segment draws, multiplied together.
+         *
+         * The TAPER makes the body an animal with a front rather than a line
+         * of identical blobs: rank 0 is full size and the tail is
+         * `TAIL_TAPER` of it. The MARK is enlarged on top of that, as it was
+         * in the MVP. And `envelope` scales the whole thing from nearly
+         * nothing to full size, which is item 19: a shoal grows out of the sea
+         * as it arrives instead of fading in at full size, and leaves by
+         * shrinking back into it.
+         */
+        const last = Math.max(1, shadows.length - 1);
+        const taper = 1 - (1 - TAIL_TAPER) * (shadow.rank / last);
+        const arrival = ARRIVAL_MIN + (1 - ARRIVAL_MIN) * envelope;
+        const scale = taper * arrival * (shadow.marked ? MARKED_SCALE : 1);
         mesh.scale.set(scale, scale, scale);
 
         /*

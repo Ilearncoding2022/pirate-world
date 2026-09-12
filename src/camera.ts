@@ -46,6 +46,22 @@ const FAR_HEIGHT = GLOBE_RADIUS * 0.55;
 export const OPENING_ZOOM = 0.08;
 
 /**
+ * The chase camera's resting field of view, degrees.
+ *
+ * Named rather than left as the literal the constructor used to carry, because
+ * `kick` now offsets it and a kick that decayed back to a different number
+ * than the one the camera was built with would leave the world permanently a
+ * degree wider than it started.
+ */
+export const BASE_FOV = 55;
+
+/** How far a full-strength kick widens the field of view, degrees. */
+export const KICK_FOV = 4;
+
+/** How fast a kick decays. Mostly gone in about two hundred milliseconds. */
+export const KICK_DAMP = 9;
+
+/**
  * How far the chase camera sits from the globe's CENTRE at the opening framing.
  *
  * Exported for one reason, and it is not the camera's: on a planet this small
@@ -104,6 +120,21 @@ export interface FollowCamera {
    * The zoom is left alone; it is the player's setting and did not move.
    */
   snap(ship: ShipState): void;
+  /**
+   * A jolt, for a thing that just hit hard. `amount` is 0..1 and saturates.
+   *
+   * Widens the field of view by up to `KICK_FOV` and lets it decay back, which
+   * reads as the world lurching toward the player. It deliberately does NOT
+   * move the rig: the rig is damped toward a destination computed from the
+   * hull every frame, so a displacement would be chased back over several
+   * frames and would fight the damping rather than decay cleanly. A field of
+   * view has no destination and no damping, so it is the one channel a kick
+   * can use without arguing with the chase.
+   *
+   * Additive and clamped rather than assigned, so two strikes in quick
+   * succession are one bigger jolt instead of the second cancelling the first.
+   */
+  kick(amount: number): void;
   resize(aspect: number): void;
 }
 
@@ -114,7 +145,7 @@ export interface FollowCamera {
  */
 export function createFollowCamera(aspect: number): FollowCamera {
   const safeAspect = aspect > 0 && Number.isFinite(aspect) ? aspect : 1;
-  const camera = new PerspectiveCamera(55, safeAspect, 0.1, 6000);
+  const camera = new PerspectiveCamera(BASE_FOV, safeAspect, 0.1, 6000);
 
   // Smoothed state.
   const smoothPos = new Vector3();
@@ -125,6 +156,11 @@ export function createFollowCamera(aspect: number): FollowCamera {
   let zoomTarget = OPENING_ZOOM;
   let zoom = zoomTarget;
   let initialized = false;
+
+  /** 0..1, raised by `kick` and decayed by `update`. See `FollowCamera.kick`. */
+  let kickAmount = 0;
+  /** The field of view the projection currently carries, to avoid a rebuild. */
+  let appliedFov = BASE_FOV;
 
   function update(dt: number, ship: ShipState, input: InputState): void {
     if (!(dt > 0)) dt = 0;
@@ -176,6 +212,23 @@ export function createFollowCamera(aspect: number): FollowCamera {
     if (camera.position.distanceToSquared(smoothTarget) > 1e-8) {
       camera.lookAt(smoothTarget);
     }
+
+    /*
+     * The kick's decay, last, so the projection is rebuilt at most once a
+     * frame and only on the frames a kick is actually live. An exponential
+     * rather than a linear fall: a jolt should be mostly gone within a couple
+     * of hundred milliseconds and entirely gone without a visible arrival.
+     */
+    if (kickAmount > 0) {
+      kickAmount *= Math.exp(-KICK_DAMP * dt);
+      if (kickAmount < 1e-3) kickAmount = 0;
+    }
+    const wantFov = BASE_FOV + KICK_FOV * kickAmount;
+    if (Math.abs(wantFov - appliedFov) > 1e-4) {
+      appliedFov = wantFov;
+      camera.fov = wantFov;
+      camera.updateProjectionMatrix();
+    }
   }
 
   /**
@@ -213,11 +266,16 @@ export function createFollowCamera(aspect: number): FollowCamera {
     }
   }
 
+  function kick(amount: number): void {
+    if (!Number.isFinite(amount) || amount <= 0) return;
+    kickAmount = Math.min(1, kickAmount + amount);
+  }
+
   function resize(newAspect: number): void {
     if (!(newAspect > 0) || !Number.isFinite(newAspect)) return;
     camera.aspect = newAspect;
     camera.updateProjectionMatrix();
   }
 
-  return { camera, update, snap, resize };
+  return { camera, update, snap, resize, kick };
 }

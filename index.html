@@ -607,6 +607,29 @@
       </div>
       <!-- /HUNT -->
 
+      <!-- HUNT FX -->
+      <!-- ===================== THE HUNT'S SCREEN LAYER =====================
+           Floating damage numbers, the green streak, the off-screen pointer
+           toward the mark, and the viewport vignette.
+
+           Everything here is decoration. `leviathandial.ts`'s missing-element
+           contract applies to it too: a document without this block must not
+           take the frame loop down, and must leave Space bound exactly as it
+           was. The hunt is fully playable with none of it.
+
+           The number layer is EMPTY and filled from a pool at runtime, so
+           there is no markup here to keep in step with `huntnumbers.ts`.
+      ====================================================================== -->
+      <div class="huntfx" id="hunt-fx" aria-hidden="true">
+        <div class="huntfx__numbers" id="hunt-numbers"></div>
+        <div class="huntfx__pointer" id="hunt-pointer" hidden>
+          <span class="huntfx__arrow" id="hunt-pointer-arrow">&#9650;</span>
+          <span class="huntfx__range" id="hunt-pointer-range">0</span>
+        </div>
+        <div class="huntfx__vignette" id="hunt-vignette"></div>
+      </div>
+      <!-- /HUNT FX -->
+
     </div>
 
     <!-- ===================== FISHING CARD =====================

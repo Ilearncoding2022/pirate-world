@@ -43,9 +43,18 @@ import { createDerelictHull } from './derelicthull';
 import { createSalvageRafts } from './salvagerafts';
 import { ITEM_LABEL, TOW_REPUTATION, rollSalvage, towGold } from './salvagebounty';
 import type { SalvageItem } from './salvagebounty';
-import { createLeviathan, HUNT_TARGETS } from './leviathan';
+import { createLeviathan, HUNT_TARGETS, SOUND_BELOW, damageAt } from './leviathan';
 import { createShadowField } from './leviathanshadows';
 import { createHuntDial } from './leviathandial';
+// The hunt's phase 2 views. Every one of these is a stub in Step 0 and is
+// filled in by its owning stream; the wiring below is final either way.
+import { createLeviathanWaterPlugin } from './leviathanwater';
+import { createHuntFx } from './huntfx';
+import { createHuntReticle } from './huntreticle';
+import { createHuntTells } from './hunttells';
+import { createHuntPointer } from './huntpointer';
+import { createHuntNumbers } from './huntnumbers';
+import { createScreenFx } from './screenfx';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
 import { CALM, LIVE, ROUGH, SWAY_MAX, SWAY_MIN } from './battlesea';
@@ -63,6 +72,7 @@ import { mulberry32 } from './towns';
 import type {
   AiBoat,
   AiBoatKind,
+  HuntCue,
   ActiveQuest,
   BattleOutcome,
   HazardKind,
@@ -248,7 +258,22 @@ async function startGame(): Promise<void> {
   // exists. Unbound it simply writes `uHazCount = 0` and the sea is the sea.
   const waterHazard = createWaterHazardPlugin();
 
-  const waterPlugins = [createWaterWakePlugin(wake), waterHazard];
+  /*
+   * The fourth, on exactly the same footing and for exactly the same reason:
+   * `leviathan.ts` needs the three world maps that only exist after
+   * `createGlobe`, and a plugin cannot be registered after that call. So this
+   * is built empty here and handed the live hunt with `bind` once the sim
+   * exists. Unbound it writes a count of zero and the sea is the sea.
+   *
+   * Registered on every tier, not just the two that use it: a plugin that came
+   * and went with the quality row would change the water shader's source
+   * between tiers, and `wave-parity.spec.ts` exists to prove that it does not.
+   * The SPRITE tier is switched off at `createShadowField` instead, which is
+   * where the choice can be made without recompiling anything.
+   */
+  const leviathanWater = createLeviathanWaterPlugin();
+
+  const waterPlugins = [createWaterWakePlugin(wake), waterHazard, leviathanWater];
   if (reflection.texture) waterPlugins.push(createWaterReflectPlugin(reflection.texture));
 
   /*
@@ -698,7 +723,37 @@ async function startGame(): Promise<void> {
     towns: globe.towns,
     harpoons: records.harpoons,
     onEvent: (event) => onHuntEvent(event),
+    onCue: (cue) => onHuntCue(cue),
   });
+  // The plugin's uniforms now have something to copy from, exactly as
+  // `waterHazard.bind` above. `night` is read through a closure rather than
+  // passed once, because it changes every frame and the plugin must not hold
+  // a stale copy of a sky.
+  leviathanWater.bind(leviathan.state, () => 1 - env.dayFactor);
+
+  /**
+   * One cue, handed to everyone who draws or sounds it.
+   *
+   * The whole fan-out, and the reason `HuntCue` exists as a second callback
+   * rather than as four more fields on `HuntEvent`: six consumers read this
+   * and none of them may ever be in a position to pay gold. `wallet.add` keeps
+   * its three activities, and "where did that gold come from" stays
+   * answerable by grep.
+   *
+   * Six calls and no registry. A registry would be a sixth thing to keep in
+   * step for no gain at this size, and the order here is not significant —
+   * every consumer reads the cue and none of them writes it.
+   */
+  function onHuntCue(cue: HuntCue): void {
+    huntFx.cue(cue, ship.state);
+    huntTells.cue(cue);
+    screenFx.cue(cue);
+    huntNumbers.cue(cue, view.camera, leviathan.state.streak);
+    // The reticle takes only the one cue it has a use for. It reads `gate`
+    // every frame for its colour, so an `armed` pulse is the single thing it
+    // cannot get from the state alone.
+    if (cue.kind === 'armed') huntReticle.pulse();
+  }
 
   /**
    * What a hunt just did, in gold and in words.
@@ -1041,8 +1096,24 @@ async function startGame(): Promise<void> {
    * It is not quite enough on its own, and `fireHarpoon` below is the rest of
    * it. Read that comment before touching either.
    */
-  const shadowField = createShadowField(scene, postFx);
+  const shadowField = createShadowField(scene, postFx, quality.huntShadows);
   const huntDial = createHuntDial({ onFire: () => fireHarpoon() });
+
+  /*
+   * The hunt's six views. None of them knows another exists: the sim emits a
+   * cue, `onHuntCue` above hands it to each in turn, and every one of these
+   * draws or sounds what it is told and decides nothing.
+   *
+   * This is the `aiboats.ts`-to-`aihulls.ts` split the codebase already has,
+   * extended to six consumers instead of one, and it is what keeps the whole
+   * of the hunt testable under node with no DOM and no `three` scene.
+   */
+  const huntFx = createHuntFx(scene, postFx);
+  const huntReticle = createHuntReticle(scene, postFx);
+  const huntTells = createHuntTells(scene, postFx);
+  const huntPointer = createHuntPointer();
+  const huntNumbers = createHuntNumbers();
+  const screenFx = createScreenFx(view);
 
   /**
    * A Space press from the hunt's bar, guarded.
@@ -2346,7 +2417,27 @@ async function startGame(): Promise<void> {
    * all to photograph.
    */
   const huntQuery = new URLSearchParams(window.location.search).get('hunt');
-  const forcedHunt = huntQuery === 'shoal' || huntQuery === 'armed' || huntQuery === '1';
+  /**
+   * `?hunt=sound`, `?hunt=settle`, `?hunt=scatter` — force one ending.
+   *
+   * The three endings are three PICTURES as of phase 2, and the browser tier
+   * cannot steer, so without these it cannot photograph any of them: reaching
+   * `settled` needs five held presses and reaching `sounded` needs a
+   * deliberately feeble one. Each lays an armed shoal and then ends it two
+   * seconds later, which is long enough for the arrival to have played.
+   *
+   * The same affordance `?hunt=armed` already is, and the same reasoning: the
+   * state under test cannot be reached by waiting.
+   */
+  const forcedEnding =
+    huntQuery === 'sound' || huntQuery === 'settle' || huntQuery === 'scatter'
+      ? huntQuery
+      : null;
+  const forcedHunt =
+    huntQuery === 'shoal' ||
+    huntQuery === 'armed' ||
+    huntQuery === '1' ||
+    forcedEnding !== null;
   /**
    * `?hunt=armed` lays the shoal INSIDE the gate with the mark on the bow.
    *
@@ -2359,7 +2450,9 @@ async function startGame(): Promise<void> {
    * `?hunt=shoal` still lays one out at `SHOAL_SPAWN_MIN`, which is the query
    * to use to LOOK at a shoal rather than to fire at one.
    */
-  const forcedHuntArmed = huntQuery === 'armed';
+  const forcedHuntArmed = huntQuery === 'armed' || forcedEnding !== null;
+  /** Seconds until a forced ending fires, or null when none is queued. */
+  let endingCountdown: number | null = null;
   /**
    * `?hunt=armed` stocks the locker, because otherwise it cannot possibly arm.
    *
@@ -2813,6 +2906,94 @@ async function startGame(): Promise<void> {
       if (huntCountdown <= 0) {
         leviathan.force(ship.state, forcedHuntArmed);
         huntCountdown = HUNT_RELAY_SECONDS;
+        // Queued on the lay rather than on a wall clock, so the two seconds
+        // are two seconds of the sim the picture is being taken of.
+        if (forcedEnding !== null) endingCountdown = 2;
+      }
+    }
+
+    /*
+     * The forced ending, two simulated seconds after the shoal was laid.
+     *
+     * `scatter()` is the sim's own public way to end a hunt and is what a
+     * wreck already calls, so `?hunt=scatter` needs nothing new. The other two
+     * are reached through `fire()`, which is the honest route: a settled hunt
+     * is five presses and a sounded one is a press under the threshold, and
+     * forcing the STATE rather than the presses would photograph a picture the
+     * game cannot actually produce.
+     */
+    if (endingCountdown !== null && leviathan.state.phase === 'drifting') {
+      endingCountdown -= dt;
+      if (endingCountdown <= 0) {
+        endingCountdown = null;
+        if (forcedEnding === 'scatter') {
+          leviathan.scatter();
+        } else if (forcedEnding === 'settle') {
+          /*
+           * Five banked targets, re-laying the animal on the bow between each.
+           *
+           * The re-lay is not a cheat around the gate, it is a substitute for
+           * the HELM. After item 6 the mark walks up the body away from the
+           * hull, so a stationary tier loses it after the first handoff; a
+           * player would chase up the body and this cannot. Every press below
+           * still has to arm, still has to wait out `ARM_UP`, and still has to
+           * beat `SOUND_BELOW` or the hunt sounds instead — which is why it
+           * waits for the needle rather than pressing on sight.
+           */
+          for (let target = 0; target < HUNT_TARGETS; target++) {
+            if (leviathan.state.phase !== 'drifting') break;
+            /*
+             * Re-laid before EVERY press, including the first.
+             *
+             * The two seconds this waits after the shoal appears — which are
+             * there so the arrival has played before the picture is taken —
+             * are also two seconds of drift, and at four to six units a second
+             * that is enough to carry the mark out of a twelve-unit gate. The
+             * first press was failing for exactly that reason and the hunt was
+             * then lost passively, which reaches the screen as `sounded` and
+             * looks like a bug in the endings rather than a mark that drifted.
+             */
+            leviathan.force(ship.state, true, true);
+            /*
+             * Topped up before every press. The locker is SHARED with fishing
+             * and a fresh save carries exactly one bundle — five spares, which
+             * is exactly five presses with nothing spare for a refused one. A
+             * single `dry` press here would leave the hunt unfinished and the
+             * animal would then be lost passively, which photographs as
+             * `sounded` and looks like a bug in the endings rather than an
+             * empty locker.
+             */
+            while (records.harpoons.count < 1 && records.harpoons.buy()) {
+              /* one bundle a turn until there is something to throw */
+            }
+            let banked = false;
+            for (let i = 0; i < 4000 && !banked; i++) {
+              if (leviathan.state.phase !== 'drifting') break;
+              leviathan.update(1 / 240, ship.state, false);
+              if (!leviathan.state.ready) continue;
+              // Comfortably green, so no press here can ever be the one that
+              // sounds the animal and turns this into the wrong picture.
+              if (damageAt(leviathan.state.dial) <= 80) continue;
+              banked = leviathan.fire() >= 0;
+            }
+          }
+        } else if (forcedEnding === 'sound') {
+          /*
+           * A press feeble enough to sound the animal cannot be taken on
+           * demand — the sweep has to have run past the centre and out to the
+           * far red, which after `ARM_UP` is over a second away. So this runs
+           * the sim until the needle is there and presses then, which is
+           * exactly what a player would have to do.
+           */
+          for (let i = 0; i < 2000 && leviathan.state.phase === 'drifting'; i++) {
+            leviathan.update(1 / 240, ship.state, false);
+            const live = leviathan.state;
+            if (live.ready && damageAt(live.dial) > 0 && damageAt(live.dial) < SOUND_BELOW) {
+              leviathan.fire();
+              break;
+            }
+          }
+        }
       }
     }
 
@@ -2920,6 +3101,25 @@ async function startGame(): Promise<void> {
           markRange,
           markOffBow,
           sprites: shadowField.visible,
+          /*
+           * Phase 2's rows. `gate` and `ready` are here because the browser
+           * tier cannot steer and therefore cannot otherwise tell a dark bar
+           * apart from a bar that is merely still charging — and after item 3
+           * those are two different states with two different fixes.
+           *
+           * `shadowPath` closes the gap `sprites` alone leaves: a count of
+           * zero means "the sprite pool drew nothing", which is a BUG on the
+           * sprite tier and the correct answer on the shader tier. Reporting
+           * which renderer was asked to draw is what separates them.
+           */
+          gate: leviathan.state.gate,
+          ready: leviathan.state.ready,
+          level: leviathan.state.level,
+          multiplier: leviathan.state.multiplier,
+          ending: leviathan.state.ending,
+          mark: leviathan.state.mark,
+          shadowPath: quality.huntShadows,
+          effects: huntFx.live,
         };
       }
       window.__pirateWorld.salvage = {
@@ -3052,10 +3252,23 @@ async function startGame(): Promise<void> {
     // sprites from a state already written and nothing reads them until the
     // render at the foot of the frame.
     shadowField.update(dt, leviathan.state);
+    // Beside the shadows, on the same terms: both only PLACE things, and the
+    // camera has already moved this frame, so the reticle lands on the water
+    // where the player is about to see it rather than one frame behind.
+    huntReticle.update(dt, leviathan.state, ship.state);
+    huntFx.update(dt, leviathan.state, ship.state);
+    huntTells.update(dt, leviathan.state, 1 - env.dayFactor);
     // The bar is a HUD element rather than a scene object, so it could sit
     // anywhere below the sim; it is here so that everything the hunt touches
     // in a frame reads as one block.
     huntDial.update(leviathan.state);
+    // After the dial, because these three read the camera that `view.update`
+    // settled above and project through it. A HUD element that projected
+    // against last frame's camera would lag the thing it is pointing at by
+    // exactly the amount the player was turning.
+    huntPointer.update(leviathan.state, view.camera, ship.state);
+    huntNumbers.update(dt);
+    screenFx.update(dt, leviathan.state);
     globe.update(
       dt,
       env,

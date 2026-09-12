@@ -320,8 +320,17 @@ shader.
 | `raftmesh.ts` | `buildRaft(name, yaw, radius?)`, `RAFT_PIECES`, `RAFT_NOMINAL_R`, `RAFT_COLOR` | one pile of lost timber, drawn the same way in both seas. Lifted unchanged out of `battlescene.ts` so the arena's flotsam and the ocean's salvage are one object rather than two tables that would drift apart on the first retune. Geometry and material are shared across every raft in the game |
 | `derelict.ts` | `createDerelicts(deps)`, `DerelictDeps`, `Derelicts`, `oddsFor(weather)`, `TOW_SPEED_SHARE`, `HOOK_RADIUS`, `TOW_DISTANCE`, the odds and band constants | the dead hull adrift and the tow: the same ten-second clock and weather sum as the salvage at a tenth of the odds (0.2% clear, 3% ceiling), **one at a time ever**, bound for a harbour drawn 120-350 units off, hooked by `Space` inside `HOOK_RADIUS` and then held rigidly `TOW_DISTANCE` astern. Owns `DerelictState`; publishes `hookReady` the way `energy.ts` publishes `berthReady`. It does not pay, does not slow the ship and does not decide when a tow is lost — `main.ts`, `ship.ts` and `energy.ts` do, off `towed` |
 | `derelicthull.ts` | `createDerelictHull(scene, cloneHull, postFx?)`, `DerelictHull` | the dead hull as something you can see, and the ring you hook it from: one clone from `ship.cloneHull()` with its neon zeroed, its planking darkened to a third and `rimglow.ts` installed at a tenth of a raider's strength — without which an unlit hull on dark water is unfindable. `aihulls.ts`'s opposite number in every visible respect |
-| `leviathan.ts` | `createLeviathan(deps)`, `LeviathanDeps`, `Leviathan`, `HuntLocker`, `damageAt`, `huntGold`, the roll, shoal, gate and purse constants | the hunt sim: the roll, the shoal's drift and heading reroll, the mark, the range-and-arc gate, the dial, the damage, the scatter and the purse figure. Owns `HuntState`, mutated in place; DOM-free, scene-free and seeded, cut from `aiboats.ts`; see **The leviathan hunt** |
-| `leviathanshadows.ts` | `createShadowField(scene, postFx?)`, `ShadowField` | the shoal as things you can see: a pool of `SHOAL_COUNT` flat planes with two procedurally drawn textures, placed on the globe from `HuntState` each frame. No asset file, no mesh |
+| `leviathan.ts` | `createLeviathan(deps)`, `LeviathanDeps`, `Leviathan`, `HuntLocker`, `damageAt`, `huntGoldFor`, the roll, shoal, gate and purse constants | the hunt sim: the roll, the shoal's drift and heading reroll, the mark, the range-and-arc gate, the dial, the damage, the scatter and the purse figure. Owns `HuntState`, mutated in place; DOM-free, scene-free and seeded, cut from `aiboats.ts`; see **The leviathan hunt** |
+| `leviathanshadows.ts` | `createShadowField(scene, postFx?, path?)`, `ShadowField` | the body as things you can see, on the `low` tier: a pool of `SHOAL_COUNT` tapered teardrop planes with two procedurally drawn textures, placed on the globe from `HuntState` each frame. Stands down entirely when `path` is `'shader'`. No asset file, no mesh |
+| `huntsweep.ts` | `createSweep`, `arm`, `step`, `position`, `canPress`, `rateFor`, `multiplierFor`, `damageAt`, `bandFor`, `huntGoldFor`, `Sweep`, the dial and escalation constants | the needle and the money: the sweep that starts at the RED EDGE, the arm-up, the rate tied to how centred the mark is, `LEVEL_MULTIPLIER` and the purse. Pure functions over a two-field struct — no module state, no DOM, no `three` |
+| `leviathanwater.ts` | `createLeviathanWaterPlugin()`, `LeviathanWaterPlugin` | the body as a darkening term INSIDE the water shader, on `medium` and `high`: a tapered teardrop per segment in its own tangent frame, plus the mark's foam ring and a night rim held under `BLOOM_THRESHOLD`. A `WaterPlugin`, built before `createGlobe` and `bind`-ed after |
+| `huntreticle.ts` | `createHuntReticle(scene, postFx?)`, `HuntReticle` | the gate, drawn: an annulus sector on the water from `HARPOON_MIN_RANGE` to `HARPOON_RANGE` across `BOW_ARC`, coloured by `HuntState.gate`. Shown on every tier, because it is the onboarding rather than an effect |
+| `hunttells.ts` | `createHuntTells(scene, postFx?)`, `HuntTells` | the in-world tells: birds circling the head and a spout on the sim's own seeded timer. What makes finding a shoal navigation by eye rather than a dot on the scope |
+| `huntfx.ts` | `createHuntFx(scene, postFx?)`, `HuntFx` | the throw: harpoon line, splash rings, a procedural spray plume, ink on a green strike, and the dive swell. Fixed pools, no lights, no allocation after construction |
+| `anchor.ts` | `project(position, camera, width, height, out)`, `createScreenPoint`, `ScreenPoint` | world position to CSS pixels, with an honest `behind` flag that un-mirrors the direction. Its own module because every HUD overlay wants it and every ad-hoc copy gets the behind-the-camera case wrong |
+| `huntnumbers.ts` | `createHuntNumbers()`, `HuntNumbers` | floating damage numbers in the cue's band colour, and the green streak from the second onward. Pooled elements, `dt` lifetimes, CSS transitions for the float |
+| `huntpointer.ts` | `createHuntPointer()`, `HuntPointer` | an edge arrow toward a mark the camera cannot see, hidden while armed. The chase camera looks forward, so a shoal astern is otherwise invisible |
+| `screenfx.ts` | `createScreenFx(camera?)`, `ScreenFx` | the viewport vignette and the camera kick. Obeys `prefers-reduced-motion` by disabling both outright |
 | `leviathandial.ts` | `createHuntDial(deps)`, `HuntDial`, `HuntDialDeps` | the hunt's bar: the bands, the needle, the targets-left and damage strip, and the Space binding — which is LIVE, acting only while `HuntState.armed` is true |
 | `rimglow.ts` | `installRimGlow(root, color, strength?)`, `RimGlow`, `RIM_STRENGTH` | the Fresnel `onBeforeCompile` patch that lights a whole silhouette in one colour. Installed BEFORE `postFx.adopt` chains its own hook; see **Post-processing** |
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the gun's cadence, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
@@ -1566,6 +1575,15 @@ aiBoats.update(dt, shipState, energyState, hazards.state, suppressed(), stormOdd
 ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust cut to LIMP_SPEED (1 kn) when energy.canThrust is false; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
+shadowField.update(dt, leviathan.state)    // the hunt's body, sprite tier; hides itself entirely when quality.huntShadows is 'shader'
+huntReticle.update(dt, leviathan.state, shipState)  // beside the shadows: both only PLACE things, and the camera has already moved
+huntFx.update(dt, leviathan.state, shipState)       // the throw's pools, aged on dt
+huntTells.update(dt, leviathan.state, 1 - env.dayFactor)  // birds and spouts
+huntDial.update(leviathan.state)           // a HUD element, kept here so the hunt reads as one block
+huntPointer.update(leviathan.state, view.camera, shipState)  // after the dial: these three project through the camera view.update settled
+huntNumbers.update(dt)
+screenFx.update(dt, leviathan.state)
+huntAudio.update(dt, leviathan.state)      // the armed tick, driven by STATE so a missed cue cannot leave it running
 globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)  // daynight (places sun AND moon, writes env; the weather reaches the LIGHTS here and never env), fog, the weather map's own bake, then water (reads wind + its plugins), the displacement patch, land, citylights, clouds, the fog bank (needs `ship` for the cap it follows and `cells` for whether it is drawn at all), sky (dome + shell + stars), celestial (the two discs, last: it only draws what env already says)
 rain.update(dt, shipState, wind.state, weather.state, view.camera)  // after globe: the box hangs on the hull the camera has just been framed against, and is SIZED off that camera
 lightning.update(dt, shipState, weather.state)  // alongside the rain, for the same reason; rebuilds its geometry only when flashSeed changes
@@ -3824,10 +3842,63 @@ is what finally caught it, asserting `10 000` on a real click.
 
 
 ## The leviathan hunt
-`docs/LEVIATHAN_PLAN.md` is the brief; this section is the contract the rest of
-the codebase has to keep. Three modules, no HUD button, and **no branch in the
-frame loop**, which is the whole of what makes it different from everything
-above it.
+`docs/LEVIATHAN_PLAN.md` is the MVP's brief and
+`docs/LEVIATHAN_PHASE2_PLAN.md` is phase 2's; this section is the contract the
+rest of the codebase has to keep. No HUD button, and **no branch in the frame
+loop**, which is the whole of what makes it different from everything above it.
+
+### The modules, and the one rule between them
+Two modules own every rule and eight draw or sound what they are told.
+
+| Module | Owns |
+|---|---|
+| `leviathan.ts` | The animal: the roll, the chained body, the turn, the flee, the gate, the endings, the purse's caller |
+| `huntsweep.ts` | The needle and the money: the sweep, `damageAt`, `LEVEL_MULTIPLIER`, `huntGoldFor`. Pure functions, no state, no DOM, no `three` |
+| `leviathanshadows.ts` | The body as sprites — the `low` tier's path |
+| `leviathanwater.ts` | The body as a darkening term in the water shader — `medium` and `high` |
+| `huntreticle.ts` | The gate, drawn on the water |
+| `hunttells.ts` | Birds and spouts |
+| `huntfx.ts` | The throw: line, splash, spray, ink, the dive swell |
+| `huntnumbers.ts`, `huntpointer.ts`, `screenfx.ts` | The screen layer |
+| `leviathandial.ts` | The bar, and the only place `Space` is bound |
+
+**The rule: one sim, many views, one fan-out.** The sim emits a `HuntCue`,
+`main.ts` hands it to everyone who cares, and no view knows another view
+exists. This is the `aiboats.ts`-to-`aihulls.ts` split extended to eight
+consumers, and it is what keeps the whole of the hunt testable under node with
+no DOM and no scene.
+
+**Cues are not events.** `HuntEvent` is money and the notification strip and
+has exactly one consumer; `HuntCue` is pictures and sounds and has six. They
+are separate types because folding them together would put `wallet.add` behind
+a switch that six view modules also read, and the first bug from that is a
+splash ring able to pay gold.
+
+### Two shadow renderers, and why both
+`quality.huntShadows` picks one. The shader term is the right answer — a term
+INSIDE the surface cannot be above or below it and has no height to tune — but
+the `low` tier is the software rasteriser the browser tier runs on, and a
+fragment loop over fourteen segments there is a real cost. So both are built.
+
+This is also a debugging contract: `sprites` on the debug hook is 0 on the
+shader tier by design and a BUG on the sprite tier, and `shadowPath` is what
+tells the two apart. "Illegible" and "absent" look identical in a screenshot
+and only one of them is a design trade.
+
+### The gate is a word, not a boolean
+`HuntState.gate` says WHICH of five conditions is failing, in the order a
+player meets them: `far`, `arc`, `close`, `dry`, `suppressed`. The reticle
+colours by it and the dial's hint prints it, so the shape on the water and the
+text in the HUD can never tell the player two different stories. This is the
+single biggest onboarding fix phase 2 made, and it is one field.
+
+### The sweep starts at the red edge
+The MVP reset a clock to zero and read `sin(0)` — the middle of the bar, worth
+very nearly 100 damage — so tapping `Space` on the frame the gate opened beat
+reading the needle. `huntsweep.ts` starts at `cos(0)`, the edge, worth nothing,
+and refuses a press for `ARM_UP` while the needle visibly charges.
+`tests/unit/huntsweep.test.ts` holds the 1 000-trial mash case that keeps it
+honest.
 
 ### It is not an overlay, and that is the feature
 Fishing, the chandlery, the contract board, the fish book and the menu are all

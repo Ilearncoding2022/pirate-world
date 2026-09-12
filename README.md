@@ -552,30 +552,42 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   exactly when you want to read it. The panels keep charging while you fish, at
   the elevation the sun was frozen at. There is no refund for quitting early.
 - **The leviathan hunt.** The one activity that does not stop the world. Sail
-  open water and a shoal of shadows may resolve out of it, thirty to
-  forty-five units off, inside the scope's range, so you see the marks before
-  you see the water. They drift at four knots on one heading and turn, up to
-  sixty degrees either way, every five to ten seconds. One shadow at a time
-  wears a cyan ring, and a bar at the bottom of the screen lights **only** when
-  that one is between two and four hull lengths ahead of you and within thirty
-  degrees of the bow. Overshoot it and the bar goes out: a harpoon is thrown at
-  water ahead of the ship, not at water under it. Nothing is paused: the wind still blows, the sun still crosses, raiders
-  still close, and you are steering the whole time. That is the point of it:
-  it is the only thing in this game played with the actual helm.
-  When the bar lights, a needle sweeps it on a two-second sine, red through
-  yellow to green and back, and `Space` looses a harpoon worth what the needle
-  was on: 100 dead centre, nothing at either end. Five targets, banked, and
-  the shoal pays ten gold a point. But a press worth under 10, the outer tenth
-  of the bar at either end, is too feeble to hold the animal: it sounds, the
-  hunt is over, and you keep only what you had banked. Five is a ceiling, not a
-  promise. The last target is the one exception, since a hunt with four in the
+  open water and a long dark body may resolve out of it, thirty to forty-five
+  units off — fourteen segments nose to tail, about seven hull lengths of
+  animal, with birds circling the head and a spout going up every few seconds.
+  You find it by looking at the sea, not at the scope. It swims at four knots
+  and it **tells you before it turns**: the head rolls into the turn a full
+  second early and the roll travels down the body, so a lead is something you
+  can read rather than guess.
+  A **cyan band is drawn on the water ahead of your bow** — the strike zone,
+  between two and four hull lengths out and thirty degrees either side. One
+  segment at a time wears a ring, and the bar at the bottom of the screen
+  lights only when that one is inside the band. When it is dark the bar says
+  *why*: too far, bring it onto the bow, too close, or no harpoons. Come in too
+  close and the animal **flees the bow** — ramming it does not work, because it
+  moves. Nothing is paused: the wind still blows, raiders still close, and you
+  are steering the whole time. That is the point of it: it is the only thing in
+  this game played with the actual helm.
+  When the bar lights, the needle starts at the **red edge** and sweeps inward,
+  and it will not take a press for the first quarter second while it charges —
+  so mashing `Space` as the zone opens buys you nothing. The needle runs
+  *slower* the more squarely you are holding the mark, which is the whole
+  trick: steering well is what makes the timing easy. `Space` looses a harpoon
+  worth what the needle was on: 100 dead centre, nothing at either end. A line
+  goes out, the water throws spray, the number floats up where it landed, and
+  the animal bolts.
+  Five targets, and **the mark walks up the body from the tail to the head**,
+  so each one is further on than the last and you have to chase it. Each target
+  banks harder than the one before — a flawless hunt is 610 damage and 6,100
+  gold. But a press worth under 10 is too feeble to hold the animal: it sounds,
+  the body converges and dives under a swell, and you keep only what you
+  banked. The last target is the one exception, since a hunt with four in the
   bank is finished whatever the fifth is worth.
   Harpoons come out of the **same locker the fishing card draws from**, one per
   press, five per hunt, which is exactly one bundle. A new captain starts with
-  one bundle aboard, so the first hunt is free; after that an empty locker
-  means the bar never lights, and the strip says so. A full hunt is 500 damage
-  and 5,000 gold. A maelstrom, a fight, or simply sailing seventy units away all end a
-  hunt the same way, paying what it had earned.
+  one bundle aboard, so the first hunt is free. A maelstrom, a fight, or simply
+  sailing seventy units away all end a hunt, paying what it had earned — and
+  the three endings look like three different things.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the
   world is built from. Under it, a dial shows where the ship stands in its own

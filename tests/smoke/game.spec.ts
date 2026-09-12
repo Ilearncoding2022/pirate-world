@@ -277,10 +277,22 @@ test.describe('game smoke', () => {
       .waitForFunction(
         () => {
           const w = window as unknown as {
-            __pirateWorld?: { hunt?: { phase: string; armed: boolean; sprites: number } };
+            __pirateWorld?: {
+              hunt?: { phase: string; armed: boolean; ready: boolean; sprites: number };
+            };
           };
           const h = w.__pirateWorld?.hunt;
-          return h && h.phase === 'drifting' && h.armed ? h : null;
+          /*
+           * `ready` as well as `armed`, and it is not belt-and-braces.
+           *
+           * Phase 2 refuses a press for `ARM_UP` after the gate opens, so a
+           * keystroke sent on the arming frame is correctly dropped. This tier
+           * is slow enough that the arm-up has always elapsed by the time the
+           * press below is sent, which means waiting on `armed` alone would
+           * pass for a reason that has nothing to do with the assertion — and
+           * would start failing mysteriously the day the rasteriser got fast.
+           */
+          return h && h.phase === 'drifting' && h.armed && h.ready ? h : null;
         },
         null,
         { timeout: 150_000 },
@@ -330,6 +342,109 @@ test.describe('game smoke', () => {
 
     expect(problems, problems.join('\n')).toEqual([]);
   });
+
+  test('the shader shadow tier draws the body, and compiles', async ({ page }) => {
+    /*
+     * The case the sprite tier cannot stand in for.
+     *
+     * On `medium` and `high` the body is a darkening term spliced into the
+     * water's own fragment shader and `leviathanshadows.ts` stands down
+     * entirely — so a GLSL error here is not a missing effect, it is an
+     * INVISIBLE ANIMAL on two of the three tiers, with the sprite tier still
+     * looking perfect. Nothing in the unit tier can see that: it has no GPU.
+     *
+     * `sprites` must be 0 and `shadowPath` must say `shader`, which together
+     * are what separate "the term drew nothing" from "the pool was the one
+     * asked to draw and did not". Those are different bugs.
+     */
+    test.setTimeout(240_000);
+    const problems = collectConsoleProblems(page);
+
+    await boot(page, `/?hunt=armed&quality=high&clock=13&${SEED}`);
+
+    const hunt = await page
+      .waitForFunction(
+        () => {
+          const w = window as unknown as {
+            __pirateWorld?: {
+              hunt?: { phase: string; shadows: number; sprites: number; shadowPath: string };
+            };
+          };
+          const h = w.__pirateWorld?.hunt;
+          return h && h.phase === 'drifting' && h.shadows > 0 ? h : null;
+        },
+        null,
+        { timeout: 150_000 },
+      )
+      .then((handle) => handle.jsonValue() as Promise<{ sprites: number; shadowPath: string }>)
+      .catch(() => null);
+
+    expect(hunt, '?hunt=armed laid a shoal on the shader tier').not.toBeNull();
+    expect(hunt!.shadowPath, 'high tier uses the shader term').toBe('shader');
+    expect(hunt!.sprites, 'the sprite pool stands down').toBe(0);
+
+    await screenshot(page, 'hunt-shader-tier');
+
+    // The assertion this case exists for: a water shader that failed to
+    // compile with the plugin spliced logs, and the sea would be flat.
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
+
+  for (const [query, want] of [
+    ['sound', 'sounded'],
+    ['settle', 'settled'],
+    ['scatter', 'scattered'],
+  ] as const) {
+    test(`?hunt=${query} draws the ${want} ending`, async ({ page }) => {
+      /*
+       * Three endings, three pictures, one case each.
+       *
+       * They shared a single `FADE_OUT` in the MVP and were indistinguishable:
+       * a player who lost a hunt and one who finished it saw the same thing
+       * happen on the water. These photograph the difference, which is the
+       * only way to know it is there — no assertion can say what a picture
+       * looks like, but `ending` says which one was drawn and the screenshot
+       * is what a human checks against it.
+       */
+      test.setTimeout(240_000);
+      const problems = collectConsoleProblems(page);
+
+      await boot(page, `/?hunt=${query}&quality=low&clock=13&${SEED}`);
+
+      const ending = await page
+        .waitForFunction(
+          () => {
+            const w = window as unknown as {
+              __pirateWorld?: { hunt?: { ending: string | null } };
+            };
+            return w.__pirateWorld?.hunt?.ending ?? null;
+          },
+          null,
+          { timeout: 150_000 },
+        )
+        .then((handle) => handle.jsonValue() as Promise<string>)
+        .catch(() => null);
+
+      /*
+       * On a timeout, say what the hunt was actually doing. "Expected settled,
+       * got null" is true and useless; the phase, the gate and the target
+       * count between them say whether the shoal never laid, never armed, or
+       * armed and could not be pressed.
+       */
+      const seen =
+        ending === null
+          ? await page.evaluate(() =>
+              JSON.stringify(
+                (window as unknown as { __pirateWorld?: { hunt?: unknown } }).__pirateWorld
+                  ?.hunt ?? null,
+              ),
+            )
+          : '';
+      expect(ending, `?hunt=${query} reached an ending; hook said ${seen}`).toBe(want);
+      await screenshot(page, `hunt-ending-${want}`);
+      expect(problems, problems.join('\n')).toEqual([]);
+    });
+  }
 
   test('the dev gold row is invisible and inert without ?dev', async ({ page }) => {
     /*

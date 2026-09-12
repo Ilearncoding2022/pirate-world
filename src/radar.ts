@@ -1,5 +1,6 @@
 import { Vector3 } from 'three';
 import { GLOBE_RADIUS } from './geo';
+import { BOW_ARC, HARPOON_MIN_RANGE, HARPOON_RANGE } from './leviathan';
 import type { HeightMap } from './heightmap';
 import type {
   AiBoatState,
@@ -1510,6 +1511,58 @@ export function createRadar(
       ctx.beginPath();
       ctx.arc(0, 0, 1, 0, Math.PI * 2);
       ctx.clip();
+
+      /*
+       * The bow's arc, at the ship's own dot.
+       *
+       * The gate exists on the water as `huntreticle.ts`'s sector and it
+       * exists here too, so a player reading the instrument and a player
+       * reading the sea are told the same thing. It is the INSTRUMENT's half
+       * of the same fact, which is the rule the scope already keeps for
+       * crests and raiders.
+       *
+       * The scope is bow-up and canvas y runs down, so the bow is -y and the
+       * arc is measured either side of it. Radii are world units over
+       * `RADAR_RANGE`, the same scaling every other mark here uses.
+       */
+      ctx.globalAlpha = 1;
+      const arcInner = HARPOON_MIN_RANGE / RADAR_RANGE;
+      const arcOuter = HARPOON_RANGE / RADAR_RANGE;
+      ctx.beginPath();
+      ctx.arc(0, 0, arcOuter, -Math.PI / 2 - BOW_ARC, -Math.PI / 2 + BOW_ARC);
+      ctx.arc(0, 0, arcInner, -Math.PI / 2 + BOW_ARC, -Math.PI / 2 - BOW_ARC, true);
+      ctx.closePath();
+      // Faint: it is a standing reference, not a reading. The dots and the
+      // chain above it are what the player is actually looking for.
+      ctx.fillStyle = hunt.gate === 'ok' ? SHOAL_MARK_EDGE : SHOAL_FILL;
+      ctx.globalAlpha = hunt.gate === 'ok' ? 0.22 : 0.1;
+      ctx.fill();
+
+      /*
+       * The body as a CHAIN, drawn in rank order before the dots.
+       *
+       * Fourteen loose dots read as a cloud and told the player nothing about
+       * which way the animal was going. A line through them in rank order says
+       * where the head is and therefore where to lead, which is the same thing
+       * the sprites and the water term say — the instrument and the water
+       * agree, which is how a hunt is navigated.
+       */
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < hunt.shadows.length; i++) {
+        if (!projectLive(hunt.shadows[i].position)) continue;
+        if (started) ctx.lineTo(hazPoint.x, hazPoint.y);
+        else {
+          ctx.moveTo(hazPoint.x, hazPoint.y);
+          started = true;
+        }
+      }
+      if (started) {
+        ctx.lineWidth = 1.4 / R;
+        ctx.strokeStyle = SHOAL_FILL;
+        ctx.stroke();
+      }
 
       for (let i = 0; i < hunt.shadows.length; i++) {
         const shadow = hunt.shadows[i];

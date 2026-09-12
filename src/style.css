@@ -5741,3 +5741,118 @@ body.in-battle .dbtn--right {
   }
 }
 /* /HUNT */
+
+/* ===================== THE HUNT'S SCREEN LAYER ===================== */
+/* HUNT FX */
+/*
+ * Floating damage numbers, the streak, the off-screen pointer and the
+ * viewport vignette.
+ *
+ * Two rules bind everything here.
+ *
+ * A CSS transition on an element with no gameplay meaning is fine; a CSS
+ * ANIMATION whose duration gates game state is not. A number floating and
+ * fading is pure decoration and may transition. How long it lives before
+ * being returned to the pool is counted in frame `dt`, in `huntnumbers.ts`.
+ *
+ * And all of it obeys `prefers-reduced-motion`: the kick and both pulses go
+ * away entirely under that query rather than being scaled down. A player who
+ * asked the system for no motion asked for no motion, and the dial, the
+ * reticle and the numbers already carry the whole of the information.
+ */
+.huntfx {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+
+.huntfx__numbers {
+  position: absolute;
+  inset: 0;
+}
+
+/*
+ * One floating number. Positioned in CSS pixels from `anchor.ts`'s projection
+ * and moved by a transform rather than by `top`, so the compositor carries it
+ * and the main thread is left for the frame loop.
+ */
+.huntfx__num {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font: 700 22px/1 'Courier New', monospace;
+  letter-spacing: 0.06em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+
+.huntfx__num--green { color: #8fffc8; }
+.huntfx__num--yellow { color: #ffe08a; }
+.huntfx__num--red { color: #ff8a6a; }
+
+.huntfx__streak {
+  margin-left: 6px;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+/* The off-screen pointer: an edge arrow toward a mark the camera cannot see. */
+.huntfx__pointer {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transform: translate(-50%, -50%);
+  color: #3fe0ff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+}
+
+.huntfx__arrow {
+  display: block;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.huntfx__range {
+  font: 700 12px/1 'Courier New', monospace;
+  letter-spacing: 0.08em;
+}
+
+/*
+ * The viewport vignette. One element, tinted by a class, and never animated on
+ * a timer: `screenfx.ts` writes its opacity every frame from `dt`.
+ */
+.huntfx__vignette {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 120ms linear;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 45%,
+    var(--huntfx-vignette, rgba(63, 224, 255, 0.5)) 100%
+  );
+}
+
+.huntfx__vignette--armed { --huntfx-vignette: rgba(63, 224, 255, 0.45); }
+.huntfx__vignette--danger { --huntfx-vignette: rgba(208, 90, 74, 0.55); }
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * No motion means no motion. The numbers still appear and still carry their
+   * colour and value — the information is untouched — they simply do not
+   * travel, and the vignette stops pulsing. `screenfx.ts` reads the same query
+   * and suppresses the camera kick, which cannot be done from here.
+   */
+  .huntfx__num {
+    transition: none !important;
+  }
+  .huntfx__vignette {
+    transition: none !important;
+    opacity: 0 !important;
+  }
+}
+/* /HUNT FX */

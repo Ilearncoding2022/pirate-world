@@ -121,6 +121,23 @@ export interface QualitySettings {
    * A pipeline number, like the rest of this table.
    */
   fogSlices: number;
+  /**
+   * Which of the two leviathan-shadow renderers draws the body.
+   *
+   * `'shader'` is a darkening term inside the water's own fragment shader,
+   * which is the right answer and the one `docs/LEVIATHAN_PLAN.md` staged as
+   * Phase 2: a term INSIDE the surface cannot be above or below it and has no
+   * height to tune, so the sprite pool's accepted artefact goes away rather
+   * than being tuned. `'sprites'` is that pool, kept rather than deleted.
+   *
+   * Split by tier rather than replaced outright for two reasons. The low tier
+   * is the software rasteriser the browser tier runs on, and a fragment loop
+   * over fourteen segments there is a real cost. And if the shader term
+   * disappoints under a screenshot there is a BUILT fallback rather than a
+   * revert — which matters because "illegible" and "absent" look identical in
+   * a screenshot and only one of them is a design trade.
+   */
+  huntShadows: 'sprites' | 'shader';
 }
 
 /**
@@ -147,6 +164,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     landFacetBlend: 0.6,
     rainDrops: 0,
     fogSlices: 0,
+    huntShadows: 'sprites',
   },
   medium: {
     pixelRatioCap: 1.5,
@@ -160,6 +178,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     landFacetBlend: 0.8,
     rainDrops: 12000,
     fogSlices: 9,
+    huntShadows: 'shader',
   },
   high: {
     pixelRatioCap: 2,
@@ -173,6 +192,7 @@ const QUALITY_TABLE: Readonly<Record<QualityTier, QualitySettings>> = {
     landFacetBlend: 0.85,
     rainDrops: 24000,
     fogSlices: 14,
+    huntShadows: 'shader',
   },
 };
 
@@ -272,6 +292,40 @@ declare global {
          * bugs, so this is here rather than in a comment about how to guess.
          */
         sprites: number;
+        /**
+         * Which of the five gate conditions is failing, or `'ok'`.
+         *
+         * The browser tier cannot steer, so without this it cannot tell a bar
+         * that is dark because the shoal is out of range from one that is dark
+         * because the locker is empty. Those have nothing in common as bugs.
+         */
+        gate: string;
+        /**
+         * False during the arm-up, when a press is refused.
+         *
+         * Separate from `armed` because after phase 2's item 3 they are two
+         * different states: the gate is open and the needle is still charging.
+         * A browser case that pressed on `armed` alone would be dropped.
+         */
+        ready: boolean;
+        /** 0..4, the index into the escalation tables. */
+        level: number;
+        /** `LEVEL_MULTIPLIER[level]`, the factor the next bank is worth. */
+        multiplier: number;
+        /** How the hunt ended, or null while one is still running. */
+        ending: string | null;
+        /** The marked segment's rank. 0 is the head. */
+        mark: number;
+        /**
+         * Which renderer was asked to draw the body this run.
+         *
+         * Closes the gap `sprites` alone leaves: a count of zero is a WIRING
+         * BUG on the sprite tier and the correct answer on the shader tier,
+         * and a screenshot cannot tell those apart either.
+         */
+        shadowPath: string;
+        /** Live effects in `huntfx.ts`. 0 on an idle sea. */
+        effects: number;
       };
       /**
        * The live weather: the envelopes at the ship, and every cell with its

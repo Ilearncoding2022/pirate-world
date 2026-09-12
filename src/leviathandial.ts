@@ -1,5 +1,27 @@
 import type { HuntState } from './types';
 import { HUNT_TARGETS, SOUND_BELOW, damageAt } from './leviathan';
+import type { HuntGate } from './types';
+
+/**
+ * What the bar says when it is dark, by which condition is failing.
+ *
+ * Phase 2's single biggest onboarding fix, and it is four strings. The MVP
+ * could only guess between "steer onto the mark" and "hold the mark off the
+ * bow" from whether anything had been banked, which meant it told a player to
+ * steer onto a mark they were already pointing at and merely too far from.
+ *
+ * Each line names the ACTION, not the rule: a player who reads "too far" knows
+ * what to do with the helm, and one who reads "outside harpoon range" has to
+ * translate first. `close` is the one that would otherwise be unguessable — the
+ * gate has a FLOOR, and closing to nothing is the instinct that fails.
+ */
+const GATE_HINT: Partial<Record<HuntGate, string>> = {
+  far: 'TOO FAR — CLOSE ON THE MARK',
+  arc: 'BRING THE MARK ONTO THE BOW',
+  close: 'TOO CLOSE — FALL BACK',
+  dry: 'NO HARPOONS — BUY A BUNDLE',
+  suppressed: 'STEER ONTO THE MARK',
+};
 
 /**
  * leviathandial.ts: the hunt's one piece of interface.
@@ -201,17 +223,23 @@ export function createHuntDial(deps: HuntDialDeps): HuntDial {
       /*
        * The hint, which is the whole of the feature's onboarding.
        *
-       * Three states and they are the three reasons the dial can be dark, in
-       * the order a player meets them. The armed line prints what the press
-       * is worth RIGHT NOW rather than a static instruction, because a live
-       * number is the fastest way to learn that the middle is worth more, and
-       * it is also the honest readout: it is exactly what `fire` would bank.
+       * The MVP guessed between two lines from `banked`, which meant it told a
+       * player "steer onto the mark" while they were already on it and out of
+       * range. Phase 2's `gate` says which ONE of five conditions is failing,
+       * so the bar can name it — and the reticle on the water is coloured from
+       * the same field, so the two can never tell different stories.
+       *
+       * The armed line prints what the press is worth RIGHT NOW rather than a
+       * static instruction, because a live number is the fastest way to learn
+       * that the middle is worth more, and it is the honest readout: it is
+       * exactly what `fire` would bank. During the arm-up it says so instead,
+       * because a number that cannot yet be taken would be a lie.
        */
       const hintText = armed
-        ? `${damageAt(state.dial)}`
-        : state.banked > 0
-          ? 'HOLD THE MARK OFF THE BOW'
-          : 'STEER ONTO THE MARK';
+        ? state.ready
+          ? `${damageAt(state.dial)}`
+          : 'READY...'
+        : GATE_HINT[state.gate] ?? 'STEER ONTO THE MARK';
       lastHint = write(hintOut, hintText, lastHint);
       // Under the sound threshold the live number is a warning and not a
       // score, and it says so in the colour before it says so in the purse.

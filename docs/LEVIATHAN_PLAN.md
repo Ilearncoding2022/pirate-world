@@ -9,6 +9,13 @@ dev query and a `window.__pirateWorld.hunt` hook. 32 unit cases in
 built; this file is kept as the brief it was, plus the list of departures at
 the end.
 
+**Phase 2's Step 0 is built:** `docs/LEVIATHAN_PHASE2_PLAN.md`, which addresses
+the MVP's feel and its picture, and which re-decides four things this document
+settles. Read it before changing anything named here, because the decision you
+are reading may already have been reversed there — and as of Step 0 the
+reversals are LIVE IN CODE rather than briefed. See **Re-decided in phase 2**
+at the end of this file for the four, and what replaced each.
+
 This document is the complete brief for the MVP. An implementing agent should
 not need the conversation it came from. Read `docs/ARCHITECTURE.md` first,
 especially **Conventions**, **Units, pinned**, **World scale**, **Frame loop**,
@@ -785,3 +792,33 @@ Sound. Any change to the fishing card's behaviour: `fishsim.ts` and
 nothing else.
 Any change to `battle.ts` or the arena. A second shoal. Shoals on inland water.
 Difficulty scaling. A hunt in the save file. Multiplayer anything. The mesh.
+
+## Re-decided in phase 2
+
+Four entries above no longer describe what the build does.
+`docs/LEVIATHAN_PHASE2_PLAN.md` settled each with the owner on 2026-09-11 and
+Step 0 landed all four in `src/`. They are recorded here rather than edited in
+place, so this file stays the brief it was and the reasoning that produced the
+MVP's answer is still readable beside the reason it changed.
+
+| Was | Where | Now, and why |
+|---|---|---|
+| "The shoal holds one heading, with a fixed per-shadow jitter offset", because sub-groups are "unreadable at chase-camera distance" | Interpretation 1 | A single chained body. The original reasoning was right about sub-groups and wrong about the conclusion: the unreadable thing was fourteen independent blobs. One body with a head that leads is MORE legible at distance, not less, and it telegraphs its own turns for free. `Shadow.rank` is the position in it, 0 at the head |
+| `HARPOON_MIN_RANGE` is "what makes the arc satisfiable at all" and nothing else | Departure 11 | The floor stays, at the same 5 units, and keeps every one of its unit cases. It gains a reason the player can see: `FLEE_RADIUS` equals it, and the animal flees the bow inside that radius. Ramming now fails because the thing moves, not because a rule says so |
+| The mark moves to a seeded shadow, "never the same one twice in a row" | The mark | The mark walks the body tail to head across the five targets, with a visible handoff. The seeded stream is still drawn from unconditionally, so nothing behind it reorders; it simply no longer decides which segment is next |
+| `HUNT_GOLD_PER_DAMAGE` is 10 flat, and a perfect hunt is 500 damage for 5 000 gold | The purse | 10 a point stands, and a press is still worth its face value in `[0, 100]`. `LEVEL_MULTIPLIER` escalates the BANK, so a perfect hunt is 610 damage and 6 100 gold. Still under `bounty.ts`'s 20 000 jackpot and a little over the best contract's 5 250, which is the ordering the purse section argued for |
+
+A fifth thing changed that this document did not decide, because the MVP did
+not notice it: **the dial's sweep started at `sin(0)`**, the middle of the bar,
+so a press on the frame the gate opened was worth very nearly 100 damage.
+Tapping Space while steering in beat reading the needle, which is an exploit
+against the one skill the feature exists to test. The needle now starts at the
+red edge and refuses a press for `ARM_UP` while it charges. `huntsweep.ts` owns
+both, and `tests/unit/huntsweep.test.ts` holds the mash case that would have
+caught it.
+
+The gate's five conditions, the shared locker, one bundle to one hunt, the
+sine's shape, `SOUND_BELOW` at 10 damage with the last target exempt, no
+reputation, no new save field, the five-target count, the rule that a hunt pays
+exactly once on the transition into `settling`, and "it is not an overlay" are
+all **unchanged**.

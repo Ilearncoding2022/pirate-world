@@ -41,6 +41,37 @@ that moved one pixel, a dial that cannot arm on a fresh save, and a warning
 colour the cascade was eating. Every one of those needed pixels, a real
 keystroke, or the game's actual starting state.
 
+### Phase 2's four cases, and what the tier costs now
+
+The hunt's phase 2 added four browser cases and the tier went from **3.2 to
+7.6 minutes** (measured 2026-09-12). That is over the five-minute line and is
+stated here rather than hidden, because this file is where the budget is
+tracked and a number nobody wrote down is a number nobody can argue with.
+
+| Case | Cost | What it buys |
+|---|---|---|
+| `shader shadow tier` | ~37 s | The one bug the sprite tier structurally cannot show: a water shader that fails to compile with the plugin spliced leaves the animal INVISIBLE on `medium` and `high` while the `low` tier looks perfect. No unit case has a GPU |
+| `?hunt=settle` | ~49 s | The settled picture, which needs five banked targets |
+| `?hunt=scatter` | ~49 s | The scattered picture |
+| `?hunt=sound` | **~2.3 min** | The sounded picture — and it is the new outlier |
+
+`?hunt=sound` is slow for a reason worth knowing: a press feeble enough to
+sound the animal cannot be taken on demand any more. After item 3 the needle
+starts at the red edge and `ARM_UP` refuses the first quarter second, so the
+earliest press a masher can reach is worth about fifteen — above the threshold.
+The contemptible press is only reachable on the far side of the sweep, over a
+second later, and the query waits for it exactly as a player would. **That
+slowness is the exploit fix, visible in the test suite.**
+
+**What these cases do NOT prove** is that the three endings look different.
+They assert `ending` reached the right value and take a screenshot, but the
+screenshot lands after the fade has run and shows open water. A human still has
+to launch the game to answer "do the three endings look like three things",
+which is the fifth of the plan's five look-questions and the one still open.
+
+If this tier has to come back under five minutes, cut `?hunt=scatter` first: it
+is the cheapest ending to reach by hand and the least distinct picture.
+
 **The owner's call, 2026-09-11: keep it, and amend the rule rather than the
 suite.** The two-minute line above is a guard against a suite nobody waits for,
 not a law, and a case returning six bugs in one feature is the wrong place to

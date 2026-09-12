@@ -7,8 +7,15 @@ import {
   FADE_OUT,
   HARPOON_MIN_RANGE,
   HARPOON_RANGE,
+  ARM_UP,
+  BODY_LENGTH,
+  BODY_SPACING,
+  ENDING_FADE,
+  FLEE_RADIUS,
+  SWEEP_SLOW,
   HUNT_GOLD_PER_DAMAGE,
   HUNT_TARGETS,
+  LEVEL_MULTIPLIER,
   ROLL_PERIOD,
   SHOAL_COUNT,
   SHOAL_SPAWN_MAX,
@@ -16,7 +23,7 @@ import {
   SOUND_BELOW,
   createLeviathan,
   damageAt,
-  huntGold,
+  huntGoldFor,
 } from '../../src/leviathan';
 import type { HuntEvent, HuntLocker, Leviathan } from '../../src/leviathan';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
@@ -188,11 +195,117 @@ function parkOnMark(h: Harness, range: number, offArcRad = 0): ShipState {
  */
 const ARM_DT = 1e-4;
 
+/**
+ * A range to shadow the body at: outside the gate, outside the flee radius.
+ *
+ * Three times `HARPOON_RANGE`, so the dial never arms and the animal never
+ * takes fright, which leaves a case free to watch the body do its own thing
+ * for a minute without either mechanism firing.
+ */
+const SHADOW_RANGE = HARPOON_RANGE * 3;
+
 /** Runs `seconds` of frames at `dt`, holding the ship still. */
 function sail(h: Harness, ship: ShipState, seconds: number, dt = 1 / 60): void {
   const frames = Math.round(seconds / dt);
   for (let i = 0; i < frames; i++) h.hunt.update(dt, ship, false);
 }
+
+/**
+ * Sail with a perfect helm: re-aim at the mark after every frame.
+ *
+ * Phase 2 made a press something that has to be WAITED for — the sweep starts
+ * at the red edge and `ARM_UP` refuses the first quarter-second — so a test
+ * that wants a real press has to hold the gate for the better part of a
+ * second while the body drifts. A stationary hull loses the arc in that time,
+ * which would make every press test a test of the drift instead.
+ *
+ * Teleporting the hull onto the mark each frame is the same affordance
+ * `force(ship, true)` already is, and for the same reason the module's own
+ * header gives for it: the armed state cannot be reached by waiting, only by
+ * steering, and a test that has to steer is a test that fails when the shoal
+ * turns.
+ */
+function holdOnMark(h: Harness, range: number, seconds: number, dt = 1 / 480): ShipState {
+  let ship = parkOnMark(h, range);
+  const frames = Math.round(seconds / dt);
+  for (let i = 0; i < frames; i++) {
+    h.hunt.update(dt, ship, false);
+    if (h.hunt.state.phase !== 'drifting') break;
+    ship = parkOnMark(h, range);
+  }
+  return ship;
+}
+
+/**
+ * Hold the mark until the needle reaches the middle of the bar, then press.
+ *
+ * Returns what `fire` returned, so a caller can assert on the damage. The
+ * frame budget is generous because the sweep's rate rises with the level: the
+ * fifth target's needle runs half again as fast as the first's, and a fixed
+ * number of frames would quietly stop finding the centre partway up the
+ * escalation.
+ */
+function strikeWhen(
+  h: Harness,
+  range: number,
+  want: (damage: number) => boolean,
+  dt = 1 / 480,
+): number {
+  let ship = parkOnMark(h, range);
+  for (let i = 0; i < 4000; i++) {
+    h.hunt.update(dt, ship, false);
+    if (h.hunt.state.phase !== 'drifting') return -1;
+    if (h.hunt.state.ready && want(damageAt(h.hunt.state.dial))) return h.hunt.fire();
+    ship = parkOnMark(h, range);
+  }
+  return -1;
+}
+
+function strikeAtCentre(h: Harness, range: number, dt = 1 / 480): number {
+  return strikeWhen(h, range, (d) => d === 100, dt);
+}
+
+/**
+ * Hold the mark and press as feebly as the sim will let you.
+ *
+ * Note what this has to do: it CANNOT press below the threshold on the way in.
+ * At `centring` 0 the arm-up ends with the needle already worth about fifteen,
+ * so a contemptible press is only reachable on the far side of the centre, a
+ * second and a quarter later. That is a real and welcome property of item 3 —
+ * the cheapest press a masher can reach is no longer the cheapest press there
+ * is — and it is why this waits rather than firing early.
+ */
+function strikeBelowThreshold(h: Harness, range: number): number {
+  return strikeWhen(h, range, (d) => d > 0 && d < SOUND_BELOW);
+}
+
+/**
+ * Put one feeble press into the water so the animal sounds, and hand back a
+ * hull to run the fade out with.
+ *
+ * The hull's geometry stops mattering the instant the phase turns to
+ * `settling` — that branch returns before the gate is ever consulted — so the
+ * one captured before the press is as good as any.
+ */
+function strikeToEnding(h: Harness, range: number): ShipState {
+  const ship = parkOnMark(h, range);
+  strikeBelowThreshold(h, range);
+  return ship;
+}
+
+/**
+ * What a flawless hunt banks: 100 damage a press, each multiplied by its
+ * level.
+ *
+ * `LEVEL_MULTIPLIER` sums to 6.1, so this is 610 rather than the MVP's 500.
+ * Computed from the table rather than written as a literal, so retuning the
+ * escalation retunes the expectation with it and does not quietly leave a test
+ * asserting a figure the game stopped paying.
+ */
+const PERFECT_BANK = LEVEL_MULTIPLIER.slice(0, HUNT_TARGETS).reduce(
+  (sum, m) => sum + 100 * m,
+  0,
+);
 
 /* ------------------------------------------------------------------ */
 
@@ -225,21 +338,37 @@ describe('the damage ramp', () => {
 
 describe('the purse', () => {
   it('pays ten a point, rounded to fifty', () => {
-    expect(huntGold(500)).toBe(500 * HUNT_GOLD_PER_DAMAGE);
-    expect(huntGold(0)).toBe(0);
-    expect(huntGold(-5)).toBe(0);
+    expect(huntGoldFor(500)).toBe(500 * HUNT_GOLD_PER_DAMAGE);
+    expect(huntGoldFor(0)).toBe(0);
+    expect(huntGoldFor(-5)).toBe(0);
   });
 
   it('never pays a figure that is not a quoted price', () => {
-    for (const banked of [1, 37, 182, 425, 499]) {
-      expect(huntGold(banked) % 50).toBe(0);
+    for (const banked of [1, 37, 182, 425, 499, 610]) {
+      expect(huntGoldFor(banked) % 50).toBe(0);
     }
   });
 
-  it('sits under a won fight at its very best', () => {
-    // `bounty.ts`'s top tier is 20 000. A perfect hunt must not beat it, or
-    // the fight stops being the jackpot. See docs/LEVIATHAN_PLAN.md.
-    expect(huntGold(100 * HUNT_TARGETS)).toBeLessThan(20000);
+  it('escalates to 6 100 on a flawless hunt', () => {
+    /*
+     * Phase 2's `LEVEL_MULTIPLIER` sums to 6.1, so five perfect presses bank
+     * 610 rather than the MVP's 500. The figure matters because the ordering
+     * it sits in was argued for rather than picked: see the table in
+     * docs/LEVIATHAN_PHASE2_PLAN.md.
+     */
+    expect(PERFECT_BANK).toBeCloseTo(610, 6);
+    expect(huntGoldFor(PERFECT_BANK)).toBe(6100);
+  });
+
+  it('sits under a won fight, and over the best contract, at its very best', () => {
+    /*
+     * `bounty.ts`'s top tier is 20 000 and the best contract pays 5 250. A
+     * perfect hunt must beat the contract and lose to the fight, or one of the
+     * two stops having a reason to exist. This is the ordering the MVP's purse
+     * argued for and the escalation had to preserve rather than break.
+     */
+    expect(huntGoldFor(PERFECT_BANK)).toBeLessThan(20000);
+    expect(huntGoldFor(PERFECT_BANK)).toBeGreaterThan(5250);
   });
 });
 
@@ -345,13 +474,125 @@ describe('the roll', () => {
     expect(h.hunt.force(ship)).toBe(true);
     expect(h.hunt.state.shadows).toHaveLength(SHOAL_COUNT);
 
+    /*
+     * The HEAD is what the spawn band places, and the body trails astern of
+     * it. Phase 2's animal is `BODY_LENGTH` — about twenty-two units — from
+     * nose to tail, so asserting that every segment sits inside a fifteen-unit
+     * band is asserting something a chained body cannot do. The MVP's disc
+     * could, which is why the case was written that way.
+     */
+    const head = h.hunt.state.shadows[0];
+    expect(head.rank).toBe(0);
+    const headRange = arc(ship.position, head.position);
+    expect(headRange).toBeGreaterThan(SHOAL_SPAWN_MIN - 12);
+    expect(headRange).toBeLessThan(SHOAL_SPAWN_MAX);
+
     for (const shadow of h.hunt.state.shadows) {
       const d = arc(ship.position, shadow.position);
-      // The centre is laid at SHOAL_SPAWN_MIN and the shadows spread about it,
-      // so the band is the centre's distance give or take the shoal's radius.
       expect(d).toBeGreaterThan(SHOAL_SPAWN_MIN - 12);
-      expect(d).toBeLessThan(SHOAL_SPAWN_MAX);
+      // No segment may be further out than the head plus the whole body, which
+      // is the real bound and the one that would catch a chain laid wrong.
+      expect(d).toBeLessThan(SHOAL_SPAWN_MAX + BODY_LENGTH);
     }
+  });
+
+  it('lays the body nose to tail, one spacing apart', () => {
+    /*
+     * Item 1. The MVP scattered fourteen shadows over a nine-unit disc; this
+     * is one animal, and the spacing is what makes it one.
+     */
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    expect(h.hunt.force(ship)).toBe(true);
+
+    const shadows = h.hunt.state.shadows;
+    for (let i = 0; i < shadows.length; i++) expect(shadows[i].rank).toBe(i);
+    for (let i = 1; i < shadows.length; i++) {
+      expect(arc(shadows[i - 1].position, shadows[i].position)).toBeCloseTo(BODY_SPACING, 4);
+    }
+  });
+
+  it('holds its spacing at cruise and through a turn', () => {
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    h.hunt.force(ship);
+
+    // Long enough to cover several telegraphed turns at every level, with the
+    // hull SHADOWING the body: parked, it would be out of `DESPAWN_RANGE`
+    // inside twenty seconds and the hunt would end before the case ran.
+    for (let i = 0; i < 60 * 60; i++) {
+      h.hunt.update(1 / 60, parkOnMark(h, SHADOW_RANGE), false);
+      if (h.hunt.state.phase !== 'drifting') break;
+    }
+    expect(h.hunt.state.phase).toBe('drifting');
+
+    const shadows = h.hunt.state.shadows;
+    expect(shadows.length).toBe(SHOAL_COUNT);
+    for (let i = 1; i < shadows.length; i++) {
+      // Within one unit of the spacing, which is the plan's own tolerance and
+      // is what a rigid chain on a sphere should comfortably hold.
+      expect(Math.abs(arc(shadows[i - 1].position, shadows[i].position) - BODY_SPACING)).toBeLessThan(1);
+    }
+    // And every segment is still ON the sphere, with a tangent that is
+    // actually tangent. A chain is the easiest way to lose both.
+    for (const shadow of shadows) {
+      expect(shadow.position.length()).toBeCloseTo(1, 6);
+      expect(shadow.forward.length()).toBeCloseTo(1, 6);
+      expect(Math.abs(shadow.forward.dot(shadow.position))).toBeLessThan(1e-6);
+    }
+  });
+
+  it('telegraphs a turn before the heading moves', () => {
+    /*
+     * Item 7. A player who cannot see a turn coming cannot lead the body, and
+     * leading it is the skill. The head banks for a full `TURN_TELEGRAPH`
+     * before the heading changes at all.
+     */
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    h.hunt.force(ship);
+
+    let banked = -1;
+    let moved = -1;
+    let last = h.hunt.state.shadows[0].forward.clone();
+    for (let i = 0; i < 60 * 40; i++) {
+      h.hunt.update(1 / 60, parkOnMark(h, SHADOW_RANGE), false);
+      if (h.hunt.state.phase !== 'drifting') break;
+      const head = h.hunt.state.shadows[0];
+      if (banked < 0 && Math.abs(head.bank) > 0.05) banked = i;
+      /*
+       * "Moved" means turned, not merely carried.
+       *
+       * Parallel transport rewrites `forward` every single frame, but by the
+       * step over the radius — about 0.0003 rad at cruise — where a turn at
+       * `HEAD_TURN_RATE` is 0.017 rad a frame. The threshold sits between the
+       * two, so this cannot mistake the animal swimming for the animal
+       * turning.
+       */
+      if (banked >= 0 && moved < 0 && head.forward.angleTo(last) > 0.008) moved = i;
+      last = head.forward.clone();
+    }
+
+    expect(banked).toBeGreaterThanOrEqual(0);
+    expect(moved).toBeGreaterThan(banked);
+  });
+
+  it('flees a hull that comes inside the minimum range', () => {
+    /*
+     * Item 2, and the visible reason `HARPOON_MIN_RANGE` exists. Ramming now
+     * fails because the thing moves, not because a rule says so.
+     */
+    const h = open();
+    const ship = shipAt(latLonToDir(0, 0));
+    h.hunt.force(ship);
+
+    const onTop = parkOnMark(h, FLEE_RADIUS * 0.5);
+    const before = h.hunt.state.shadows[0].forward.clone();
+    for (let i = 0; i < 60; i++) h.hunt.update(1 / 60, onTop, false);
+
+    const after = h.hunt.state.shadows[0].forward;
+    expect(after.angleTo(before)).toBeGreaterThan(0.1);
+    expect(h.hunt.state.bolt).toBeGreaterThan(0);
   });
 });
 
@@ -547,18 +788,72 @@ describe('the gate, which is the whole design', () => {
 });
 
 describe('the dial', () => {
-  it('starts at the centre and sweeps to an end in a quarter period', () => {
+  it('starts at the RED EDGE and sweeps to the centre, not the other way', () => {
+    /*
+     * This case is the MVP's inverted, and the inversion is the point.
+     *
+     * It used to assert that the frame after arming was worth 100 damage,
+     * which is exactly the exploit phase 2 exists to remove: `sin(0)` is the
+     * middle of the bar, so tapping Space as the gate opened beat reading the
+     * needle. `cos(0)` is the edge, worth nothing, and the first perfect
+     * moment is a quarter period of held steering away.
+     */
     const h = open();
     h.hunt.force(shipAt(latLonToDir(0, 0)));
     const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
 
     h.hunt.update(ARM_DT, ship, false);
     expect(h.hunt.state.armed).toBe(true);
-    expect(damageAt(h.hunt.state.dial)).toBe(100);
-
-    sail(h, ship, DIAL_PERIOD / 4 - ARM_DT, 1 / 240);
     expect(Math.abs(h.hunt.state.dial)).toBeCloseTo(1, 2);
-    expect(damageAt(h.hunt.state.dial)).toBeLessThan(2);
+    expect(damageAt(h.hunt.state.dial)).toBe(0);
+
+    // A quarter period of SWEPT time, which at `centring` 0 and level 0 runs
+    // at `SWEEP_SLOW`: the needle is deliberately slowest when the mark is
+    // held dead ahead, which is the whole of item 4.
+    holdOnMark(h, HARPOON_RANGE * 0.5, DIAL_PERIOD / 4 / SWEEP_SLOW);
+    expect(damageAt(h.hunt.state.dial)).toBeGreaterThan(98);
+  });
+
+  it('refuses a press during the arm-up, and costs nothing for it', () => {
+    /*
+     * The other half of item 5's fix. Starting at the edge makes the free shot
+     * worthless; the arm-up makes it impossible, so a mash cannot even spend a
+     * harpoon on the frame the gate opens.
+     */
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
+
+    h.hunt.update(ARM_DT, ship, false);
+    expect(h.hunt.state.armed).toBe(true);
+    expect(h.hunt.state.ready).toBe(false);
+    expect(h.hunt.fire()).toBe(-1);
+    expect(h.spares.taken).toBe(0);
+    expect(h.hunt.state.target).toBe(0);
+
+    holdOnMark(h, HARPOON_RANGE * 0.5, ARM_UP * 1.5);
+    expect(h.hunt.state.ready).toBe(true);
+  });
+
+  it('beats a mash: pressing the instant the gate opens is worth nothing', () => {
+    /*
+     * The exploit case, stated as the sim rather than as the sweep. Under the
+     * MVP this press returned very nearly 100 and this test could not have
+     * been written.
+     */
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
+
+    h.hunt.update(ARM_DT, ship, false);
+    expect(h.hunt.fire()).toBe(-1);
+
+    // And the first press it WILL honour, still taken as early as possible,
+    // is worth a contemptible amount rather than a perfect one.
+    holdOnMark(h, HARPOON_RANGE * 0.5, ARM_UP * 1.05);
+    const early = h.hunt.fire();
+    expect(early).toBeGreaterThanOrEqual(0);
+    expect(early).toBeLessThan(50);
   });
 
   it('restarts its sweep every time it arms', () => {
@@ -566,21 +861,99 @@ describe('the dial', () => {
      * A player who loses the target and comes round again must get the dial
      * from a known start. Half a period out of the arc and back would
      * otherwise hand them the far end of the sweep on the frame they arrive.
+     *
+     * Unchanged in intent from the MVP; only the known start moved, from the
+     * middle of the bar to the edge of it.
      */
     const h = open();
     h.hunt.force(shipAt(latLonToDir(0, 0)));
-    const on = parkOnMark(h, HARPOON_RANGE * 0.5);
     const off = parkOnMark(h, HARPOON_RANGE * 0.5, BOW_ARC * 2);
 
-    sail(h, on, DIAL_PERIOD / 4, 1 / 240);
-    expect(Math.abs(h.hunt.state.dial)).toBeGreaterThan(0.9);
+    holdOnMark(h, HARPOON_RANGE * 0.5, DIAL_PERIOD / 4 / SWEEP_SLOW);
+    expect(damageAt(h.hunt.state.dial)).toBeGreaterThan(98);
 
     h.hunt.update(ARM_DT, off, false);
     expect(h.hunt.state.armed).toBe(false);
 
+    const on = parkOnMark(h, HARPOON_RANGE * 0.5);
     h.hunt.update(ARM_DT, on, false);
     expect(h.hunt.state.armed).toBe(true);
-    expect(damageAt(h.hunt.state.dial)).toBe(100);
+    expect(Math.abs(h.hunt.state.dial)).toBeCloseTo(1, 2);
+    expect(h.hunt.state.ready).toBe(false);
+  });
+
+  it('runs the needle faster when the mark is off the bow', () => {
+    /*
+     * Item 4, and the claim the whole activity rests on: steering and timing
+     * are one skill. A mark held dead ahead slows the sweep and makes the
+     * press easy; one taken at the edge of the arc runs it fast.
+     */
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+
+    const centred = parkOnMark(h, HARPOON_RANGE * 0.5);
+    h.hunt.update(ARM_DT, centred, false);
+    const slow = h.hunt.state.sweepRate;
+
+    const edged = parkOnMark(h, HARPOON_RANGE * 0.5, BOW_ARC * 0.95);
+    h.hunt.update(ARM_DT, edged, false);
+    const fast = h.hunt.state.sweepRate;
+
+    expect(h.hunt.state.armed).toBe(true);
+    expect(fast).toBeGreaterThan(slow);
+    expect(slow).toBeCloseTo(SWEEP_SLOW, 2);
+  });
+});
+
+describe('the gate, and why the bar is dark', () => {
+  /*
+   * `gate` is phase 2's single biggest onboarding fix: the MVP could only say
+   * that the dial was dark, and this says which one of five things is making
+   * it dark. The order below is the teaching progression — sail closer, then
+   * point the bow, then back off if you have overshot — and `HuntGate` in
+   * `types.ts` carries the argument for it.
+   */
+  it('names the one condition that is failing', () => {
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+
+    h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_RANGE + 6), false);
+    expect(h.hunt.state.gate).toBe('far');
+
+    h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_RANGE * 0.5, BOW_ARC * 2), false);
+    expect(h.hunt.state.gate).toBe('arc');
+
+    h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_MIN_RANGE * 0.5), false);
+    expect(h.hunt.state.gate).toBe('close');
+
+    h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_RANGE * 0.5), false);
+    expect(h.hunt.state.gate).toBe('ok');
+  });
+
+  it('says dry only when the locker is the last thing in the way', () => {
+    const h = open(0);
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+
+    // Out of range with an empty locker still reports the RANGE: a player who
+    // is nowhere near the shoal does not need to be told to buy harpoons.
+    h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_RANGE + 6), false);
+    expect(h.hunt.state.gate).toBe('far');
+
+    h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_RANGE * 0.5), false);
+    expect(h.hunt.state.gate).toBe('dry');
+    expect(h.hunt.state.armed).toBe(false);
+  });
+
+  it('reports suppressed, and disarms, whatever the geometry says', () => {
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
+
+    h.hunt.update(ARM_DT, ship, false);
+    expect(h.hunt.state.gate).toBe('ok');
+
+    h.hunt.update(ARM_DT, ship, true);
+    expect(h.hunt.state.armed).toBe(false);
   });
 });
 
@@ -602,36 +975,51 @@ describe('the press', () => {
     h.hunt.force(shipAt(latLonToDir(0, 0)));
 
     for (let i = 0; i < HUNT_TARGETS; i++) {
-      // Re-aimed at the mark each time: the mark moves on every hit, which is
-      // the whole reason the helm stays in play between targets.
-      const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
-      h.hunt.update(ARM_DT, ship, false);
-      expect(h.hunt.state.armed).toBe(true);
-      expect(h.hunt.fire()).toBe(100);
+      // Held on the mark each time: the mark moves on every hit, which is the
+      // whole reason the helm stays in play between targets, and the needle
+      // now has to be WAITED for rather than caught on the arming frame.
+      expect(strikeAtCentre(h, HARPOON_RANGE * 0.5)).toBe(100);
     }
 
-    expect(h.hunt.state.banked).toBe(100 * HUNT_TARGETS);
+    /*
+     * 610, not 500. Each press is worth its face value of 100 and the BANK is
+     * what escalates, so the bar the player reads never lies about what a
+     * press was worth while the purse still rewards getting to the fifth
+     * target. See `LEVEL_MULTIPLIER`.
+     */
+    expect(h.hunt.state.banked).toBe(Math.round(PERFECT_BANK));
     expect(h.spares.taken).toBe(HUNT_TARGETS);
 
     const settled = h.events.filter((e) => e.kind === 'settled');
     expect(settled).toHaveLength(1);
-    expect(settled[0].damage).toBe(100 * HUNT_TARGETS);
-    expect(settled[0].gold).toBe(huntGold(100 * HUNT_TARGETS));
+    expect(settled[0].damage).toBe(Math.round(PERFECT_BANK));
+    expect(settled[0].gold).toBe(huntGoldFor(PERFECT_BANK));
+    expect(settled[0].ending).toBe('settled');
     expect(h.events.filter((e) => e.kind === 'hit')).toHaveLength(HUNT_TARGETS);
   });
 
-  it('moves the mark off the shadow it just hit', () => {
-    const h = open();
+  it('walks the mark from the tail to the head across the five targets', () => {
+    /*
+     * Item 6, which reverses the MVP's seeded pick. A player who has just
+     * struck the hindmost segment knows where the next one will be, so the
+     * fifth target is a shot they have been steering toward for the whole
+     * hunt rather than a fresh search. The first target is the tail and the
+     * last is the head, and the walk never goes backwards.
+     */
+    const h = open(20);
     h.hunt.force(shipAt(latLonToDir(0, 0)));
-    const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
-    h.hunt.update(ARM_DT, ship, false);
 
-    const before = h.hunt.state.shadows.findIndex((s) => s.marked);
-    h.hunt.fire();
-    const after = h.hunt.state.shadows.findIndex((s) => s.marked);
+    const ranks: number[] = [h.hunt.state.mark];
+    expect(ranks[0]).toBe(SHOAL_COUNT - 1);
 
-    expect(after).not.toBe(before);
-    expect(h.hunt.state.shadows.filter((s) => s.marked)).toHaveLength(1);
+    for (let i = 0; i < HUNT_TARGETS - 1; i++) {
+      expect(strikeAtCentre(h, HARPOON_RANGE * 0.5)).toBe(100);
+      expect(h.hunt.state.shadows.filter((s) => s.marked)).toHaveLength(1);
+      ranks.push(h.hunt.state.mark);
+    }
+
+    expect(ranks[ranks.length - 1]).toBe(0);
+    for (let i = 1; i < ranks.length; i++) expect(ranks[i]).toBeLessThan(ranks[i - 1]);
   });
 
   it('scatters on a press under the sound threshold, paying what was banked', () => {
@@ -639,24 +1027,27 @@ describe('the press', () => {
     h.hunt.force(shipAt(latLonToDir(0, 0)));
 
     // One good target, then one bad one.
-    const first = parkOnMark(h, HARPOON_RANGE * 0.5);
-    h.hunt.update(ARM_DT, first, false);
-    expect(h.hunt.fire()).toBe(100);
+    expect(strikeAtCentre(h, HARPOON_RANGE * 0.5)).toBe(100);
 
-    const second = parkOnMark(h, HARPOON_RANGE * 0.5);
-    // A quarter period lands the needle at an end of the bar, which is inside
-    // the red beyond the notch.
-    sail(h, second, DIAL_PERIOD / 4, 1 / 240);
-    const damage = h.hunt.fire();
+    const damage = strikeBelowThreshold(h, HARPOON_RANGE * 0.5);
+    expect(damage).toBeGreaterThan(0);
     expect(damage).toBeLessThan(SOUND_BELOW);
 
     expect(h.hunt.state.phase).toBe('settling');
     expect(h.hunt.state.target).toBe(2);
 
+    /*
+     * The first press banked at level 0 (factor 1.0) and the second at level 1
+     * (factor 1.1), so the total is not the sum of the two face values. The
+     * damage the EVENT carries is the bank, rounded, which is what the strip
+     * prints and what the purse is taken from.
+     */
+    const banked = Math.round(100 * LEVEL_MULTIPLIER[0] + damage * LEVEL_MULTIPLIER[1]);
     const sounded = h.events.filter((e) => e.kind === 'sounded');
     expect(sounded).toHaveLength(1);
-    expect(sounded[0].damage).toBe(100 + damage);
-    expect(sounded[0].gold).toBe(huntGold(100 + damage));
+    expect(sounded[0].damage).toBe(banked);
+    expect(sounded[0].gold).toBe(huntGoldFor(banked));
+    expect(sounded[0].ending).toBe('sounded');
     // The WORD, not the rule: this ending is the player's own press and the
     // strip names the animal for it, where a coast or a maelstrom does not.
     expect(sounded[0].reason).toBe('pinprick');
@@ -674,35 +1065,36 @@ describe('the press', () => {
     const h = open(20);
     h.hunt.force(shipAt(latLonToDir(0, 0)));
 
+    let banked = 0;
     for (let i = 0; i < HUNT_TARGETS - 1; i++) {
-      const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
-      h.hunt.update(ARM_DT, ship, false);
-      expect(h.hunt.fire()).toBe(100);
+      expect(strikeAtCentre(h, HARPOON_RANGE * 0.5)).toBe(100);
+      banked += 100 * LEVEL_MULTIPLIER[i];
     }
 
-    // A deliberately contemptible fifth: a quarter period puts the needle at
-    // an end of the bar, well under SOUND_BELOW.
-    const last = parkOnMark(h, HARPOON_RANGE * 0.5);
-    sail(h, last, DIAL_PERIOD / 4, 1 / 240);
-    const damage = h.hunt.fire();
+    // A deliberately contemptible fifth.
+    const damage = strikeBelowThreshold(h, HARPOON_RANGE * 0.5);
+    expect(damage).toBeGreaterThan(0);
     expect(damage).toBeLessThan(SOUND_BELOW);
+    banked += damage * LEVEL_MULTIPLIER[HUNT_TARGETS - 1];
 
     // Settled, not sounded, and paid for everything banked.
     const settled = h.events.filter((e) => e.kind === 'settled');
     expect(settled).toHaveLength(1);
-    expect(settled[0].damage).toBe(400 + damage);
+    expect(settled[0].damage).toBe(Math.round(banked));
+    expect(settled[0].ending).toBe('settled');
     expect(h.events.filter((e) => e.kind === 'sounded')).toHaveLength(0);
   });
 
   it('pays once, whatever the fade does afterwards', () => {
     const h = open(20);
     h.hunt.force(shipAt(latLonToDir(0, 0)));
-    const ship = parkOnMark(h, HARPOON_RANGE * 0.5);
-    sail(h, ship, DIAL_PERIOD / 4, 1 / 240);
-    h.hunt.fire();
+    const ship = strikeToEnding(h, HARPOON_RANGE * 0.5);
 
     const paid = h.events.filter((e) => e.gold > 0).length;
-    sail(h, ship, FADE_OUT * 3);
+    // Long enough for the LONGEST of the three endings: they no longer share
+    // one `FADE_OUT`, and a fade budget taken from the shortest would leave a
+    // settled hunt still on the water when this asserted it had gone.
+    sail(h, ship, Math.max(...Object.values(ENDING_FADE)) * 1.5);
     expect(h.hunt.state.phase).toBe('idle');
     expect(h.hunt.state.shadows).toHaveLength(0);
     expect(h.events.filter((e) => e.gold > 0)).toHaveLength(paid);
@@ -713,9 +1105,7 @@ describe('the three ways a hunt ends without a press', () => {
   it('ends when the player sails out of range, paying what was banked', () => {
     const h = open(20);
     h.hunt.force(shipAt(latLonToDir(0, 0)));
-    const near = parkOnMark(h, HARPOON_RANGE * 0.5);
-    h.hunt.update(ARM_DT, near, false);
-    h.hunt.fire();
+    expect(strikeAtCentre(h, HARPOON_RANGE * 0.5)).toBe(100);
 
     const far = parkOnMark(h, DESPAWN_RANGE + 10);
     h.hunt.update(1 / 60, far, false);
@@ -723,7 +1113,9 @@ describe('the three ways a hunt ends without a press', () => {
     expect(h.hunt.state.phase).toBe('settling');
     const ended = h.events.filter((e) => e.kind === 'sounded');
     expect(ended).toHaveLength(1);
-    expect(ended[0].gold).toBe(huntGold(100));
+    // One press at level 0, so the multiplier is 1.0 and the bank is its face
+    // value. The ESCALATION is what the perfect-run case covers.
+    expect(ended[0].gold).toBe(huntGoldFor(100));
     // Sailing away is the player's own choice, so it must NOT be reported as
     // the animal losing interest in them.
     expect(ended[0].reason).toBe('lost');
