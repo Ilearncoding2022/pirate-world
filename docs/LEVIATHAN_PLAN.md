@@ -9,6 +9,11 @@ dev query and a `window.__pirateWorld.hunt` hook. 32 unit cases in
 built; this file is kept as the brief it was, plus the list of departures at
 the end.
 
+**A phase 2 is briefed and not built:** `docs/LEVIATHAN_PHASE2_PLAN.md`, which
+addresses the MVP's feel and its picture, and which re-decides four things this
+document settles. Read it before changing anything named here, because the
+decision you are reading may already have been reversed there.
+
 This document is the complete brief for the MVP. An implementing agent should
 not need the conversation it came from. Read `docs/ARCHITECTURE.md` first,
 especially **Conventions**, **Units, pinned**, **World scale**, **Frame loop**,

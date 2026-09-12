@@ -485,7 +485,11 @@ marked one is inside harpoon range and inside the bow's arc, so it is the first
 activity in the project played with the actual helm and the first that spends
 distance as a great-circle arc rather than as flat metres. It costs no asset:
 the shadows are procedurally textured quads, and the animal the feature is named
-for is still Phase 2.
+for is still Phase 2. What it shipped is the rule rather than the experience: a
+press produces no harpoon and no splash, the range-and-arc gate is drawn
+nowhere, and the sweep resets to `sin(0)` so a tap the frame it arms beats
+reading the needle. `docs/LEVIATHAN_PHASE2_PLAN.md` is the brief for fixing
+that, and it is planned rather than built.
 
 What is still missing is everything that is not *floating*: no landmarks, no
 ruins, no NPCs, nothing on the land at all. The sea now has three reasons to be
