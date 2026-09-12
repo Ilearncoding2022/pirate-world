@@ -961,6 +961,18 @@
             <li><kbd>T</kbd><span>Cast off a tow, wherever it is</span></li>
             <li><kbd>Esc</kbd><span>This menu, and closes any panel</span></li>
           </ul>
+          <!-- AUDIO -->
+          <!-- The mute row, and nothing else. It sits inside the controls pane
+               because that is where a player looks for a setting, and it is
+               part of the audio deliverable rather than a follow-up: cues with
+               no foundation leave nowhere to put a mute. -->
+          <div class="menu__row menu__row--audio">
+            <label class="menu__toggle" for="menu-mute">
+              <input type="checkbox" id="menu-mute" />
+              <span>Mute sound</span>
+            </label>
+          </div>
+          <!-- /AUDIO -->
           <div class="menu__actions">
             <button class="fbtn menu__btn" id="menu-back" type="button">Back</button>
           </div>

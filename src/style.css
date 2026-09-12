@@ -5856,3 +5856,32 @@ body.in-battle .dbtn--right {
   }
 }
 /* /HUNT FX */
+
+/* ===================== AUDIO ===================== */
+/* AUDIO */
+/*
+ * The mute row inside the menu's controls pane, and nothing else.
+ */
+.menu__row--audio {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(120, 170, 200, 0.22);
+}
+
+.menu__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font: 600 14px/1.2 'Courier New', monospace;
+  letter-spacing: 0.06em;
+  color: #cfe6f2;
+}
+
+.menu__toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: #3fe0ff;
+  cursor: pointer;
+}
+/* /AUDIO */

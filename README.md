@@ -38,6 +38,7 @@ the first frame you are handed does not stutter.
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. Up to three a second, and the locker never runs out |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
 | `Esc` | Open the menu — and the controls guide inside it. Also ends a fishing session or closes any panel; it will not get you out of a battle |
+| `Mute sound` (menu → Controls) | Silences everything. The hunt is the only activity that makes a sound today, and the setting survives a reload |
 
 The ship cannot sail onto land. Running at a coastline stops the ship; turn away to get free.
 
@@ -588,6 +589,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   one bundle aboard, so the first hunt is free. A maelstrom, a fight, or simply
   sailing seventy units away all end a hunt, paying what it had earned — and
   the three endings look like three different things.
+  It is also **the only thing in the game that makes a sound**: a groan when it
+  surfaces, a tick that quickens as the needle nears green, a thud and a splash
+  on the throw. There is a mute in the menu's controls pane.
 - **Instruments.** A bow-up radar plots the coastline, open sea and lakes for
   50 units in every direction, drawn on the CPU from the same height field the
   world is built from. Under it, a dial shows where the ship stands in its own

@@ -55,6 +55,8 @@ import { createHuntTells } from './hunttells';
 import { createHuntPointer } from './huntpointer';
 import { createHuntNumbers } from './huntnumbers';
 import { createScreenFx } from './screenfx';
+import { createAudio } from './audio';
+import { createHuntAudio } from './huntaudio';
 import { createBattleScene } from './battlescene';
 import { createBattleSim } from './battle';
 import { CALM, LIVE, ROUGH, SWAY_MAX, SWAY_MIN } from './battlesea';
@@ -749,6 +751,7 @@ async function startGame(): Promise<void> {
     huntTells.cue(cue);
     screenFx.cue(cue);
     huntNumbers.cue(cue, view.camera, leviathan.state.streak);
+    huntAudio.cue(cue);
     // The reticle takes only the one cue it has a use for. It reads `gate`
     // every frame for its colour, so an `armed` pulse is the single thing it
     // cannot get from the state alone.
@@ -1114,6 +1117,40 @@ async function startGame(): Promise<void> {
   const huntPointer = createHuntPointer();
   const huntNumbers = createHuntNumbers();
   const screenFx = createScreenFx(view);
+  const audio = createAudio();
+  const huntAudio = createHuntAudio(audio);
+
+  /*
+   * The unlock gesture.
+   *
+   * Browsers hand back an `AudioContext` stuck in `suspended` until a user
+   * gesture has happened, and one created eagerly never recovers. So the
+   * context is built lazily and this is what tells it a gesture occurred. Both
+   * events, because a player may reach the game with either, and `once` on
+   * each because after the first one there is nothing left to unlock.
+   *
+   * Deliberately NOT inside `controls.ts`: that module owns what the keys
+   * MEAN, and this cares only that one was pressed.
+   */
+  const unlockAudio = (): void => audio.unlock();
+  window.addEventListener('keydown', unlockAudio, { once: true });
+  window.addEventListener('pointerdown', unlockAudio, { once: true });
+
+  /*
+   * The mute row. Reflects the persisted flag on load and writes it on change,
+   * so the setting survives a reload — which is the whole reason a mute is
+   * part of this deliverable rather than a follow-up.
+   */
+  const muteToggle = document.getElementById('menu-mute') as HTMLInputElement | null;
+  if (muteToggle !== null) {
+    muteToggle.checked = audio.muted;
+    muteToggle.addEventListener('change', () => {
+      audio.muted = muteToggle.checked;
+      // Unmuting IS a gesture, so it is also a chance to start the context for
+      // a player who muted before ever pressing a key.
+      if (!audio.muted) audio.unlock();
+    });
+  }
 
   /**
    * A Space press from the hunt's bar, guarded.
@@ -3269,6 +3306,7 @@ async function startGame(): Promise<void> {
     huntPointer.update(leviathan.state, view.camera, ship.state);
     huntNumbers.update(dt);
     screenFx.update(dt, leviathan.state);
+    huntAudio.update(dt, leviathan.state);
     globe.update(
       dt,
       env,

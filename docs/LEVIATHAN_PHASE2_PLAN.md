@@ -1,48 +1,30 @@
 # Leviathan hunt phase 2, feel and picture: implementation plan
 
-Status: **Built, except stream F.** Eight of the nine streams have landed and
-`npm test` is green at 693 unit cases across 60 files. **Audio is not in yet**
-— `audio.ts`, `huntaudio.ts` and the mute row land in their own commit, since
-the plan itself notes stream F has no dependency on the hunt at all and can run
-at any time. What is still open is at the end of this block, under **What was
-not done as briefed**.
+Status: **Built.** All nine streams have landed. `npm run test:all` is green:
+693 unit cases across 60 files, 13 browser cases. What is still open is at the
+end of this block, under **What was not done as briefed**.
 
 This is the brief,
 written to the convention at the top of `docs/HAZARDS_PLAN.md`: an implementing
 agent should not need the conversation it came from.
 
-What has landed, and what a stream can therefore rely on:
+Every stream landed. Where the work actually sits:
 
-- **The whole type contract.** `Shadow`'s five new fields, `HuntState`'s
-  fourteen, `HuntCue`, `HuntGate`, `HuntEnding`, `HuntBand`, and `ending` on
-  `HuntEvent`. Nothing below writes these after Step 0.
-- **`huntsweep.ts`, real rather than stubbed.** The needle starts at the red
-  edge, `ARM_UP` refuses a press while it charges, `rateFor` ties the rate to
-  `centring` and the level, and the purse and `LEVEL_MULTIPLIER` live beside
-  each other. Items 3, 4 and the purse half of 5 are therefore DONE, because
-  they are what the MVP's existing tests contradicted and the contradiction had
-  to be resolved before any stream could be green.
-- **`anchor.ts`, real rather than stubbed**, with its own tests. Stream D
-  inherits a working projection rather than building one.
-- **The sim's side of the reversals.** `gate`, `centring`, `ready`, `level`,
-  `multiplier`, `streak`, `bolt`, `burst`, `bank`, `rank`, `wobble`, `mark`,
-  the tail-to-head walk, per-ending fades and the `onCue` callback are all
-  written and published. What stream A1 still owes is the MOTION: the chain,
-  the telegraphed turn, the flee, and the three endings as movement.
-- **`camera.kick`**, as a decaying field-of-view offset. **`quality.huntShadows`**,
-  with `createShadowField` standing down on the shader tier.
-- **Nine stubs with final signatures**, and `main.ts` wired to all of them:
-  the cue fan-out, the plugin built beside `waterHazard` and bound after, and
-  the update calls in their stated places.
-- **The marked blocks**, `<!-- HUNT FX -->` and `<!-- AUDIO -->`, in
-  `index.html` and `src/style.css`.
-- **The debug hook**, carrying `gate`, `ready`, `level`, `multiplier`,
-  `ending`, `mark`, `shadowPath` and `effects`.
+| Stream | Module | State |
+|---|---|---|
+| A1 Body | `leviathan.ts` | The chain, the telegraphed turn, the flee, the tail-to-head walk, the three endings as motion, spouts |
+| A2 Sweep | `huntsweep.ts` | Red-edge start, `ARM_UP`, `rateFor`, `LEVEL_MULTIPLIER`, the purse |
+| B1 Water term | `leviathanwater.ts` | The teardrop and the mark's foam ring, in the water's own fragment shader, on medium and high |
+| B2 Sprites | `leviathanshadows.ts` | Teardrop texture, taper, swim wiggle, bank tilt, surfacing, arrival from depth. The low tier |
+| C1 Effects | `huntfx.ts` | Line, splash rings, spray plume, ink, dive swell |
+| C2 Reticle and tells | `huntreticle.ts`, `hunttells.ts` | The gate drawn on the water; birds and spouts |
+| D HUD and screen | `anchor.ts`, `huntnumbers.ts`, `huntpointer.ts`, `screenfx.ts`, `leviathandial.ts`, `camera.ts` | Numbers, streak, pointer, vignette, kick, the gate-driven hint |
+| E Loop and docs | `main.ts`, `radar.ts`, `quality.ts`, docs | The cue fan-out, the scope's chain and arc, the tier row, four dev queries, the debug hook |
+| F Audio | `audio.ts`, `huntaudio.ts`, `menu` | The foundation, the voices, the mute row |
 
-Still open, and owned by the streams named in the work split: every picture and
-every sound. Nothing in `huntfx.ts`, `huntreticle.ts`, `hunttells.ts`,
-`huntpointer.ts`, `huntnumbers.ts`, `screenfx.ts`, `audio.ts`, `huntaudio.ts`
-or `leviathanwater.ts` draws or sounds anything yet.
+The whole type contract is in `types.ts`: `Shadow`'s five new fields,
+`HuntState`'s fourteen, `HuntCue`, `HuntGate`, `HuntEnding`, `HuntBand`, and
+`ending` on `HuntEvent`.
 
 ### What was not done as briefed
 

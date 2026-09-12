@@ -331,6 +331,8 @@ shader.
 | `huntnumbers.ts` | `createHuntNumbers()`, `HuntNumbers` | floating damage numbers in the cue's band colour, and the green streak from the second onward. Pooled elements, `dt` lifetimes, CSS transitions for the float |
 | `huntpointer.ts` | `createHuntPointer()`, `HuntPointer` | an edge arrow toward a mark the camera cannot see, hidden while armed. The chase camera looks forward, so a shoal astern is otherwise invisible |
 | `screenfx.ts` | `createScreenFx(camera?)`, `ScreenFx` | the viewport vignette and the camera kick. Obeys `prefers-reduced-motion` by disabling both outright |
+| `audio.ts` | `createAudio()`, `Audio`, `ToneSpec`, `NoiseSpec`, `MUTE_STORAGE_KEY` | the sound foundation, and the first audio in this project: a lazily unlocked `AudioContext`, a master gain, a persisted mute, suspend on a hidden tab, and two primitives — an enveloped tone and a filtered noise burst. Silent and inert where there is no context |
+| `huntaudio.ts` | `createHuntAudio(audio)`, `HuntAudio` | the hunt's voices: a groan on spawn, a band-edge tick that quickens toward green, thud-splash-chime on a strike, a bass drop on a dive, a rising figure on a settle |
 | `leviathandial.ts` | `createHuntDial(deps)`, `HuntDial`, `HuntDialDeps` | the hunt's bar: the bands, the needle, the targets-left and damage strip, and the Space binding — which is LIVE, acting only while `HuntState.armed` is true |
 | `rimglow.ts` | `installRimGlow(root, color, strength?)`, `RimGlow`, `RIM_STRENGTH` | the Fresnel `onBeforeCompile` patch that lights a whole silhouette in one colour. Installed BEFORE `postFx.adopt` chains its own hook; see **Post-processing** |
 | `battle.ts` | `createBattleSim(rng?)`, `BattleSim`, `HITS_TO_LOSE`, the arena constants | the whole cannon fight in flat arena units: the shrinking circle, W/S, the gun's cadence, the balls, the hits, the AI gunner and the outcome. No DOM and no Three, exactly as `fishsim.ts` is; one sim is built per fight and thrown away with it |
@@ -3861,6 +3863,7 @@ Two modules own every rule and eight draw or sound what they are told.
 | `huntfx.ts` | The throw: line, splash, spray, ink, the dive swell |
 | `huntnumbers.ts`, `huntpointer.ts`, `screenfx.ts` | The screen layer |
 | `leviathandial.ts` | The bar, and the only place `Space` is bound |
+| `huntaudio.ts` | Cues to voices, on `audio.ts` |
 
 **The rule: one sim, many views, one fan-out.** The sim emits a `HuntCue`,
 `main.ts` hands it to everyone who cares, and no view knows another view

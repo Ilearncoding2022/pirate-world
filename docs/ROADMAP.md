@@ -373,14 +373,21 @@ distinctiveness above:
 
 Ordered by how much each would change the experience per unit of effort.
 
-### 1. Audio — the largest single gap
+### 1. Audio — the foundation exists; almost everything is still silent
 
-There is none. Not a sound, not a tone, not a music bed. Verified by grepping
-`src/`, `index.html` and `public/` for `AudioContext`, `new Audio`, `<audio>`,
-`.mp3`, `.ogg`, `.wav`, `GainNode` and `createOscillator`: the only hits are
-the substring `audio` inside unrelated words. Every plan document in `docs/`
-lists sound as out of scope, which is how it has stayed absent through
-nineteen releases.
+**No longer total.** The leviathan hunt's phase 2 built `src/audio.ts` — one
+lazily created `AudioContext`, a master gain, a mute flag persisted under
+`pirate-world/mute` with a row in the menu's controls pane, suspend on a hidden
+tab, and two primitives: a tone with an envelope and a filtered noise burst. It
+is silent and inert where there is no context, which is the unit tier and the
+headless browser tier. `src/huntaudio.ts` maps the hunt's cues onto it.
+
+That is the whole of the sound in the game. **The hunt is the only activity
+that makes any**, and it was built there first because a mute setting needs
+somewhere to live and cues need a foundation — not because the hunt deserved
+sound more than the wind does.
+
+What remains is everything else, and the argument below is unchanged.
 
 Wind that rises with the gale, a hull working in a swell, the thruster, the
 harpoon, a broadside, thunder tied to the existing `flash` envelope, and a
@@ -485,7 +492,11 @@ marked one is inside harpoon range and inside the bow's arc, so it is the first
 activity in the project played with the actual helm and the first that spends
 distance as a great-circle arc rather than as flat metres. It costs no asset:
 the shadows are procedurally textured quads, and the animal the feature is named
-for is still Phase 2.
+for is still Phase 2. What it shipped is the rule rather than the experience: a
+press produces no harpoon and no splash, the range-and-arc gate is drawn
+nowhere, and the sweep resets to `sin(0)` so a tap the frame it arms beats
+reading the needle. `docs/LEVIATHAN_PHASE2_PLAN.md` is the brief for fixing
+that, and it is planned rather than built.
 
 What is still missing is everything that is not *floating*: no landmarks, no
 ruins, no NPCs, nothing on the land at all. The sea now has three reasons to be
