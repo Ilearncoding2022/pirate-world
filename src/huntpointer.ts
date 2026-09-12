@@ -44,10 +44,10 @@ export function createHuntPointer(): HuntPointer {
   function hide(): void {
     if (!shown || root === null) return;
     shown = false;
-    // `display` beats the UA's `[hidden]`, so the attribute alone is not
-    // enough to be sure this is gone. Both, and the style is what decides.
+    // `style.css` carries `.huntfx__pointer[hidden]`, so the attribute is the
+    // one switch. It is also what the markup boots with, which is why an
+    // early return while `shown` is false is safe.
     root.hidden = true;
-    root.style.display = 'none';
   }
 
   return {
@@ -105,7 +105,6 @@ export function createHuntPointer(): HuntPointer {
       if (!shown) {
         shown = true;
         root.hidden = false;
-        root.style.display = 'flex';
       }
     },
 

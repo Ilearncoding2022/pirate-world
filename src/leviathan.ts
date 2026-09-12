@@ -463,6 +463,8 @@ const _offset = new Vector3();
 const _toShadow = new Vector3();
 const _prevPosition = new Vector3();
 const _candidateEdge = new Vector3();
+/** A spawn's heading, drawn before the fit test that probes along it. */
+const _heading = new Vector3();
 const _starboardMark = new Vector3();
 
 function clamp01(x: number): number {
@@ -481,6 +483,17 @@ function stepAlong(out: Vector3, from: Vector3, dir: Vector3, angle: number): bo
   _axis.normalize();
   out.copy(from).applyAxisAngle(_axis, angle).normalize();
   return true;
+}
+
+/**
+ * The rank the mark sits on for target `target`, on a body whose tail is
+ * `last`. Evenly spaced from the tail at the first target to the head at the
+ * last; the rounding is what lands fourteen segments and five targets on the
+ * head exactly. One formula, read by the walk in `fire` and by the spawn's
+ * fit test, so the ranks the spawn checks are the ranks the hunt visits.
+ */
+function markRankFor(target: number, last: number): number {
+  return Math.round(last * (1 - target / (HUNT_TARGETS - 1)));
 }
 
 /** Great-circle distance between two unit directions, world units. */
@@ -731,47 +744,34 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
   }
 
   /**
-   * True if a shoal laid about `centre` would be entirely on water.
+   * True if a body laid with its head at `centre`, swimming `forward`, would
+   * start on water everywhere the hunt will ask it to be.
    *
-   * The centre alone is not enough, and this is not a nicety. A shadow sits up
-   * to `SHOAL_RADIUS` (nine units) from the centre, and `update` ends a hunt
-   * the moment the MARKED shadow is aground. Testing only the middle therefore
-   * puts shoals on coasts that scatter on the frame after they are laid, which
-   * reaches the player as a notice about a shoal they never saw.
+   * The centre alone is not enough, and this is not a nicety: `update` ends a
+   * hunt the moment the MARKED segment is aground, and the mark starts at the
+   * tail and walks to the head. So the probes go where the body actually is,
+   * ALONG the heading, rather than at the four cardinal points the MVP's
+   * nine-unit disc needed. A cardinal cross never looks astern of a heading
+   * that is not itself cardinal, which laid tails on beaches: the player
+   * heard a groan and a dive and never saw an animal.
    *
-   * Four cardinal points at the full radius rather than a dense sample: the
-   * shoal is a disc, the coastline it has to clear is far coarser than nine
-   * units, and four map reads on a spawn attempt that already costs two is the
-   * right price for closing this.
+   * One read per rank the mark will visit (the head among them), plus one a
+   * body's length AHEAD, because the chain follows its head's path and a nose
+   * already on a beach puts every later mark there too. Six reads where the
+   * cross took five, and a narrow strait now fits a body laid down its length
+   * where a 45-unit cross never could.
    */
-  function shoalFits(centre: Vector3): boolean {
+  function shoalFits(centre: Vector3, forward: Vector3): boolean {
     if (!sailable(centre)) return false;
-    /*
-     * Four cardinal points at `BODY_LENGTH` rather than at `SHOAL_RADIUS`.
-     *
-     * The MVP tested a nine-unit disc because that is what a shoal was. A
-     * chained body is `SHOAL_COUNT * BODY_SPACING` — about twenty-two units —
-     * from nose to tail, and it is laid ASTERN of the point passed here, so a
-     * centre nine units off a headland can still put the tail on the beach.
-     * The reason the original test existed is unchanged and now applies over
-     * a longer reach: `update` ends a hunt the moment the MARKED segment is
-     * aground, and after item 6 the mark spends the first target at the tail.
-     *
-     * Still four points and not a dense sample, for the MVP's reason: the
-     * coastline is far coarser than this and four map reads on a spawn attempt
-     * that already costs two is the right price for closing it.
-     */
-    tangentFrame(centre, _north, _east);
-    for (let i = 0; i < 4; i++) {
-      const bearing = (i * Math.PI) / 2;
-      _offset
-        .copy(_north)
-        .multiplyScalar(Math.cos(bearing))
-        .addScaledVector(_east, Math.sin(bearing));
-      if (!stepAlong(_candidateEdge, centre, _offset, BODY_LENGTH * ARC)) return false;
+    const last = SHOAL_COUNT - 1;
+    for (let t = 0; t < HUNT_TARGETS; t++) {
+      const rank = markRankFor(t, last);
+      if (rank === 0) continue;
+      if (!stepAlong(_candidateEdge, centre, forward, -rank * BODY_SPACING * ARC)) return false;
       if (!sailable(_candidateEdge)) return false;
     }
-    return true;
+    if (!stepAlong(_candidateEdge, centre, forward, BODY_LENGTH * ARC)) return false;
+    return sailable(_candidateEdge);
   }
 
   /** True if any berth's centre is within `clearance` world units of `dir`. */
@@ -1002,16 +1002,18 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
         .addScaledVector(_east, Math.sin(bearing));
       if (!stepAlong(_candidate, ship.position, _bearingDir, d * ARC)) continue;
 
-      // The cheapest test first, and the one that rejects most.
-      if (!shoalFits(_candidate)) continue;
-      if (nearBerth(_candidate, largestBerthRadius() + BERTH_MARGIN)) continue;
-
+      // The heading first, because the fit test probes along it.
       tangentFrame(_candidate, _north, _east);
-      _offset
+      _heading
         .copy(_north)
         .multiplyScalar(Math.cos(heading))
         .addScaledVector(_east, Math.sin(heading));
-      build(_candidate, _offset);
+
+      // The cheapest test first, and the one that rejects most.
+      if (!shoalFits(_candidate, _heading)) continue;
+      if (nearBerth(_candidate, largestBerthRadius() + BERTH_MARGIN)) continue;
+
+      build(_candidate, _heading);
       return true;
     }
     return false;
@@ -1251,7 +1253,14 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     state.ending = ending;
     settleClock = ENDING_FADE[ending];
     onEvent({ kind, damage: banked, gold: huntGoldFor(banked), reason, ending });
-    emit(ending === 'settled' ? { kind: 'settled' } : { kind: 'dive' });
+    // The dive carries WHERE, because `huntfx.ts` centres the swell on it and
+    // draws nothing without one. The mark, being the segment the player was
+    // working; the head if a lost hunt somehow has none.
+    emit(
+      ending === 'settled'
+        ? { kind: 'settled' }
+        : { kind: 'dive', position: marked()?.position ?? state.shadows[0]?.position },
+    );
   }
 
   /* ---- The frame ----------------------------------------------------- */
@@ -1586,7 +1595,15 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     state.level = Math.min(HUNT_TARGETS - 1, state.target);
     state.multiplier = multiplierFor(state.level);
     state.streak = band === 'green' ? state.streak + 1 : 0;
-    state.armed = false;
+    /*
+     * `armed` is deliberately LEFT as it was. A press restarts the sweep (the
+     * `armSweep` at the foot of this function) but does not close the gate,
+     * and clearing the flag here made the next frame read as a fresh rising
+     * edge: an `armed` cue after every strike with no `disarmed` before it,
+     * and the reticle and vignette pulsing "the gate just opened" five times
+     * a hunt. If the handoff has taken the mark out of the gate, `update`'s
+     * falling edge says so on the next frame, which is the cue's contract.
+     */
     state.ready = false;
     state.dial = 0;
 
@@ -1635,7 +1652,7 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     // Evenly spaced from the tail at target 1 to the head at target 5. The
     // rounding is what makes fourteen segments and five targets land on the
     // head exactly, rather than a segment short of it.
-    const to = Math.round(last * (1 - state.target / (HUNT_TARGETS - 1)));
+    const to = markRankFor(state.target, last);
     state.handoff = state.handoff > 0 && state.handoff < 1 ? state.handoff : 0.0001;
     state.handoffFrom = from;
     state.handoffTo = to;
@@ -1755,16 +1772,16 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
      * to do nothing at all, which is the failure most likely to be read as a
      * broken feature rather than as a bad spot.
      */
-    if (
-      stepAlong(_candidate, ship.position, ship.forward, SHOAL_SPAWN_MIN * ARC) &&
-      shoalFits(_candidate)
-    ) {
-      // Heading back down the bow, so the shoal closes rather than runs: a dev
-      // query that needed a two-minute chase before it showed anything would
-      // not be used.
+    // Heading back down the bow, so the shoal closes rather than runs: a dev
+    // query that needed a two-minute chase before it showed anything would
+    // not be used. Drawn before the fit test, which probes along it.
+    const ahead = stepAlong(_candidate, ship.position, ship.forward, SHOAL_SPAWN_MIN * ARC);
+    if (ahead) {
       tangentFrame(_candidate, _north, _east);
-      if (!pointAt(_offset, _candidate, ship.position)) _offset.copy(_north);
-      build(_candidate, _offset);
+      if (!pointAt(_heading, _candidate, ship.position)) _heading.copy(_north);
+    }
+    if (ahead && shoalFits(_candidate, _heading)) {
+      build(_candidate, _heading);
       if (arm) armMarkAt(ship);
       restoreProgress();
       return true;

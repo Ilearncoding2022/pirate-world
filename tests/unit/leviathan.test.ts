@@ -26,6 +26,7 @@ import {
   huntGoldFor,
 } from '../../src/leviathan';
 import type { HuntEvent, HuntLocker, Leviathan } from '../../src/leviathan';
+import type { HuntCue } from '../../src/types';
 import { createTerrain, DEFAULT_SEED, SPAWN_LAT_DEG, SPAWN_LON_DEG } from '../../src/terrain';
 import { createHeightMap } from '../../src/heightmap';
 import { createWaterBodies } from '../../src/waterbodies';
@@ -1196,5 +1197,51 @@ describe('the frame', () => {
       expect(a.hunt.state.shadows[i].position.x).toBeCloseTo(b.hunt.state.shadows[i].position.x, 12);
       expect(a.hunt.state.shadows[i].marked).toBe(b.hunt.state.shadows[i].marked);
     }
+  });
+});
+
+describe('the cues the views are handed', () => {
+  function openWithCues(): Harness & { cues: HuntCue[] } {
+    const events: HuntEvent[] = [];
+    const cues: HuntCue[] = [];
+    const store = locker(20);
+    const hunt = createLeviathan({
+      ...OPEN_OCEAN,
+      harpoons: store,
+      seed: 7,
+      onEvent: (event) => events.push(event),
+      onCue: (cue) => cues.push(cue),
+    });
+    return { hunt, events, spares: store, cues };
+  }
+
+  it('says armed once per gate opening, not once per press', () => {
+    // A strike restarts the sweep without closing the gate. Clearing `armed`
+    // in `fire` made the next frame a false rising edge, and the reticle and
+    // vignette pulsed "the gate just opened" after every strike.
+    const h = openWithCues();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    expect(strikeAtCentre(h, HARPOON_RANGE * 0.5)).toBe(100);
+    // The frames after the press are where the false edge used to appear.
+    // Held on the walked mark, so the gate is still open throughout.
+    for (let i = 0; i < 30; i++) h.hunt.update(ARM_DT, parkOnMark(h, HARPOON_RANGE * 0.5), false);
+    expect(h.hunt.state.armed).toBe(true);
+
+    const kinds = h.cues.map((c) => c.kind).filter((k) => k === 'armed' || k === 'disarmed');
+    // Whatever the walk did to the gate afterwards, the two must alternate.
+    for (let i = 1; i < kinds.length; i++) expect(kinds[i]).not.toBe(kinds[i - 1]);
+    expect(kinds[0]).toBe('armed');
+  });
+
+  it('puts the dive where the animal was', () => {
+    // `huntfx.ts` centres the dive swell on the cue's position and draws
+    // nothing without one.
+    const h = openWithCues();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    strikeBelowThreshold(h, HARPOON_RANGE * 0.5);
+
+    const dive = h.cues.find((c) => c.kind === 'dive');
+    expect(dive).toBeDefined();
+    expect(dive!.position).toBeDefined();
   });
 });

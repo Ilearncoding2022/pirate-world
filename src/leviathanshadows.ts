@@ -438,8 +438,11 @@ export function createShadowField(
      */
     const swim = Math.sin(elapsed * SWIM_RATE + phase) * SWIM_SWAY;
     if (shadow.bank !== 0) {
+      // `_back` is a WORLD axis, so the roll is premultiplied. `multiply`
+      // would apply it in the mesh's local frame, where that same vector is
+      // some other axis entirely and the roll reads as a yaw.
       _tilt.setFromAxisAngle(_back, -shadow.bank * BANK_TILT);
-      mesh.quaternion.multiply(_tilt);
+      mesh.quaternion.premultiply(_tilt);
     }
 
     /*

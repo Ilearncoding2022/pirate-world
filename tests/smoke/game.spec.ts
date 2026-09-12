@@ -184,6 +184,11 @@ test.describe('game smoke', () => {
     expect(idle.colours, 'idle: distinct colours in the centre 60%').toBeGreaterThan(64);
     await screenshot(page, 'idle');
 
+    // No hunt is live, so the off-screen pointer must not be drawn. Asserted
+    // through layout, not the attribute: the markup always said `hidden`, and
+    // `display: flex` drew it in the corner anyway.
+    await expect(page.locator('#hunt-pointer')).toBeHidden();
+
     // Sail. Holding thrust until the HUD actually reads way on is what forces
     // the wake and spray materials to compile; see waitUntilMakingWay.
     await page.keyboard.down('KeyW');

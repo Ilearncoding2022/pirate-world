@@ -5810,6 +5810,12 @@ body.in-battle .dbtn--right {
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
 }
 
+/* The UA's [hidden] is display:none, which the display:flex above beats. Say
+   it here or the arrow ships visible in the corner from boot. */
+.huntfx__pointer[hidden] {
+  display: none;
+}
+
 .huntfx__arrow {
   display: block;
   font-size: 20px;
