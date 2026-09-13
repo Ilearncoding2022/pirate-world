@@ -21,6 +21,7 @@ import { createRain } from './rain';
 import { createLightning } from './lightning';
 import { createChart } from './chart';
 import { createDocks } from './docks';
+import { createShipBeam } from './shipbeam';
 import { createPostFx } from './postfx';
 import { createRecords, loadChart, writeChart } from './save';
 import { createFishing } from './fishing';
@@ -1006,6 +1007,10 @@ async function startGame(): Promise<void> {
 
   const view = createFollowCamera(window.innerWidth / window.innerHeight);
   const controls = createControls();
+
+  // The magenta pillar on the hull, which fades in as the camera pulls back.
+  const shipBeam = createShipBeam();
+  scene.add(shipBeam.object);
 
   // The hull is still coming down the wire. Waited on here rather than left to
   // land mid-game so the first frame the player sees has a ship in it: the
@@ -2617,6 +2622,9 @@ async function startGame(): Promise<void> {
      * `battleUi.isOpen` is a live getter for that reason.
      */
     if (battleUi.isOpen) {
+      // No pillar over a fight: the arena's own camera is close on the hull,
+      // and the sailing branch stands it back up on the first frame after.
+      shipBeam.object.visible = false;
       // The plant keeps running on a resting hull, for the fishing card's
       // reasons: the sun is still up, the ship may be at a berth, and a fight
       // is long enough that a tank frozen through one would be a lie about
@@ -3280,6 +3288,9 @@ async function startGame(): Promise<void> {
       propulsion,
     );
     view.update(dt, ship.state, controls.input);
+    // After the camera, whose zoom it fades on, and on the hull the ship has
+    // just moved.
+    shipBeam.update(dt, ship.state, view.zoom, view.camera, window.innerHeight);
     // After the ship and before `globe.update`: this only places and lights
     // meshes from the state the sim wrote above, and nothing reads them until
     // the render at the foot of the frame.

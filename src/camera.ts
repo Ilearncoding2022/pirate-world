@@ -109,6 +109,13 @@ function lerp(a: number, b: number, t: number): number {
 
 export interface FollowCamera {
   camera: PerspectiveCamera;
+  /**
+   * The smoothed zoom, 0 = closest framing and 1 = furthest. Read-only, for
+   * things that change with how far out the player has pulled -- the ship's
+   * beam fades in on it -- rather than with raw camera distance, which the
+   * kick and the damping both move.
+   */
+  readonly zoom: number;
   update(dt: number, ship: ShipState, input: InputState): void;
   /**
    * Puts the camera at this frame's destination immediately, with no damping.
@@ -277,5 +284,14 @@ export function createFollowCamera(aspect: number): FollowCamera {
     camera.updateProjectionMatrix();
   }
 
-  return { camera, update, snap, resize, kick };
+  return {
+    camera,
+    get zoom(): number {
+      return zoom;
+    },
+    update,
+    snap,
+    resize,
+    kick,
+  };
 }
