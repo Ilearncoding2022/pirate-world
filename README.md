@@ -37,6 +37,7 @@ the first frame you are handed does not stutter.
 | `Space` | Loose a harpoon at a shoal, while the hunt's bar is lit. The bar lights only when the marked shadow is between two and four hull lengths ahead AND within 30 degrees of the bow, so holding a target is steering. Sail over it and the bar goes out |
 | `Space` / on-screen `[FIRE]` | Fire a broadside, in a battle. Up to three a second, and the locker never runs out |
 | `W` / `S` (in a battle) | Speed up or drop back on the circle. There is no helm in a fight |
+| Double-click / double-tap a harbour | Set a course for it — a harbour you have moored at, in this world or an earlier one. Its beacon or its name will do. Do it again to clear the course, or pick another harbour to switch. `Esc` → HARBOURS → `SET COURSE` does the same from any range |
 | `Esc` | Open the menu — and the controls guide inside it. Also ends a fishing session or closes any panel; it will not get you out of a battle |
 | `Mute sound` (menu → Controls) | Silences everything. The hunt is the only activity that makes a sound today, and the setting survives a reload |
 
@@ -454,6 +455,19 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   because it charted a coastline that no longer exists. A world that cannot
   fit thirty-six harbours, or that opens on land, is thrown away and another
   is drawn before you ever see it.
+- **Uncharted harbours stand short and dim.** A harbour you have never moored
+  at has a beacon a quarter of the usual height with its lamp at a tenth, so
+  from a distance it is a stub rather than a light. The first time you make
+  fast there it rises and lights up over a second, and it stays that way in
+  every later world, because it is remembered by name.
+- **A beam over the ship, and a line to where you are going.** Pull the camera
+  back and a magenta pillar rises out of the hull, breathing slowly, so you can
+  find the ship on a whole planet — it fades in from halfway out and is gone
+  on the deck. Double-click a harbour you know and a dim dotted line runs along
+  the sea to it, the shortest way round the planet, at every zoom. It is a
+  heading rather than a route: it crosses whatever land is in the way, and the
+  land hides it there. The course survives a reload and a new world, and it
+  clears itself the moment you make fast at the harbour.
 - **The bars tell you they are moving.** The tank, the bought cell and the
   hull each blink their topmost lit notch once every three seconds while they
   are draining — and the hull blinks it **twice a second** when weather is

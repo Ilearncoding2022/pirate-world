@@ -1573,6 +1573,7 @@ constant over the patch of water reflecting them, and a bank is metres away.
 energy.update(dt, shipState, env, ..., weather.state)   // burn / solar / dock, on last frame's speed and last frame's sky
 hull.update(dt, energy.mode === 'docked', weathered)    // straight after the plant: a second reserve, on this frame's docked verdict. THIS BRANCH ONLY -- that is the whole of "the hull does not wear in a fight, a session, the shop or the menu"
 known.add(towns.dockAt(ship.position).town.name)        // while docked. Idempotent; the frame loop is the caller
+course.set(null)                                        // on the frame the ship comes alongside its own destination, not every frame it sits there
 weatherCells.update(dt, shipState, energyState)         // BEFORE the wind: a storm cell floors the wind, so the wind needs this frame's sample
 wind.update(dt, shipState, energyState, cells.stormAtShip)  // needs this frame's docked verdict
 weather.update(dt, wind.state, cells.state)             // after the wind (this frame's phase), before the hazards (this frame's odds)
@@ -1580,6 +1581,8 @@ hazards.update(dt, shipState, energyState, wind.state, stormOdds) // rolls, tran
 aiBoats.update(dt, shipState, energyState, hazards.state, suppressed(), stormOdds)  // after hazards: needs this frame's phase. Before the ship: a contact halts the hull this frame
 ship.update(dt, input, energyState, windState, globe.waveOffsets, hazards.state)  // thrust cut to LIMP_SPEED (1 kn) when energy.canThrust is false; waveOffsets is the CPU twin of the sea the patch draws; hazards.state is the push it spends and the drive it obeys
 camera.update(dt, shipState, input)
+shipBeam.update(dt, shipState, view.zoom, view.camera, innerHeight)  // after the camera: it fades on this frame's zoom
+courseLine.update(shipState, courseTarget(), view.camera, innerHeight)  // re-lays the arc only once the hull has moved a unit
 aiHulls.update(dt, aiBoats.state)          // places and lights the clones; nothing reads them until the render
 shadowField.update(dt, leviathan.state)    // the hunt's body, sprite tier; hides itself entirely when quality.huntShadows is 'shader'
 huntReticle.update(dt, leviathan.state, shipState)  // beside the shadows: both only PLACE things, and the camera has already moved
@@ -1594,7 +1597,7 @@ globe.update(dt, env, wind.state, weather.state, cells.state, shipState, camera)
 rain.update(dt, shipState, wind.state, weather.state, view.camera)  // after globe: the box hangs on the hull the camera has just been framed against, and is SIZED off that camera
 lightning.update(dt, shipState, weather.state)  // alongside the rain, for the same reason; rebuilds its geometry only when flashSeed changes
 reflection.update(dt, shipState.position, renderer, scene)  // this frame's share of reflection-cube faces; must land before postFx.render
-docks.update(dt, env, shipState, energyState, view.camera)  // the camera is what the harbour labels fade against; omit it and NONE is ever drawn, because they ship `visible = false`
+docks.update(dt, env, shipState, energyState, view.camera)  // the camera is what the harbour labels fade against; omit it and NONE is ever drawn, because they ship `visible = false`. Also eases each berth's charted level toward `known`
 wake.update(dt, shipState, env, renderer)  // fills the wake map render target last, after every rib/spray value this frame is final
 hud.update(shipState, energyState, windState, weather.state)
 radar.update(dt, shipState, windState, hazards.state, aiBoats.state, weather.state, cells.state, chart)
@@ -1626,6 +1629,7 @@ weatherCells.update(dt, shipState, energyState)   // THE CLOCK. Same four calls,
 wind.update(dt, shipState, energyState, cells.stormAtShip)   //   branch: cells before wind, wind before weather,
 weather.update(dt, wind.state, cells.state)                  //   weather before hazards. A squall can arrive mid-duel
 hazards.update(dt, shipState, energyState, wind.state, stormOdds)  // maelstroms barred near the ring; crests are not
+shipBeam.object.visible = courseLine.object.visible = false   // the arena camera is close on the hull; the sailing branch stands both back up
 battleSim.update(dt, battleUi.input(controls.input))   // only while inArena: the fire edge plus W/S
 crestShoves(playerHull) / crestShoves(aiHull)      // a real crest crossing a hull shoves it, through battlesea's own pulse
 settleOutcome(...)                         // once, the frame `outcome` first becomes non-null
@@ -3611,6 +3615,91 @@ Two traps, both paid for once:
 The 3 units/s charging limit lives in `energy.ts` and reaches the rings only as
 `EnergyState.mode`, so an amber ring can never disagree with the power plant
 about whether it is paying out.
+
+## Charted harbours, the ship's beam, and the course
+
+Three navigation aids, one rule under all of them: **a harbour is known by
+NAME, and only a known harbour is a place you can aim for.** `knownharbours.ts`
+was already that list and already persisted; nothing here adds a second one.
+
+**Uncharted beacons.** `createDocks(towns, known)` reads the set live. A berth
+whose name is not in it draws its mast at `UNCHARTED_HEIGHT` (a quarter) and its
+lamp at `UNCHARTED_LAMP` (a tenth), which is under the bloom threshold, so the
+beacon stops being a point of light. The beacons are one merged mesh, so the
+state is a `uCharted[DOCK_COUNT]` uniform array indexed by the `aDock` attribute
+already there, and a new mooring costs a uniform write. Two things had to be
+right for that to work:
+
+- **A uniform array needs a compile-time length.** `DOCK_COUNT` arrives as a
+  `define`, floored at 1 so a world with no berths still compiles.
+- **Lower along the berth's own axis, never along `normalize(position)`.** The
+  lamp's six vertices sit a lamp-radius off the mast either side, so each one's
+  normalised position points a slightly different way, and lowering along those
+  shears the octahedron. The berth's `dir` goes in as an `aAxis` attribute.
+
+The level eases linearly over `CHART_EASE` (1.2 s) and starts at its target, so
+a boot does not raise every remembered beacon out of the sea at once. The name
+label rides the same level down, so an uncharted harbour's name does not hang
+six units over a stub.
+
+**The beam.** `shipbeam.ts` is one quad turned about the local up in the vertex
+shader to face the lens, fading on `FollowCamera.zoom` between 0.45 and 0.85 and
+breathing between 35% and full on a 2.6 s period. Two numbers were measured
+rather than chosen:
+
+- **A world width alone was a two-pixel thread from the far framing** and was
+  lost against a lit sea, so the half width has a floor of 7 SCREEN pixels,
+  computed per vertex from the distance to the lens and
+  `2 tan(fov/2) / viewHeight`.
+- **45 units read as a stub.** The far framing looks down on the hull, so the
+  column is heavily foreshortened in exactly the view it exists for; it is 80.
+
+It is drawn after the cloud deck (`renderOrder` 50) and additive, because the
+point is to find the ship from above the weather, and it is excluded from the
+reflection cube so the sea under the hull does not double it.
+
+**Picking.** `harbourpick.ts` does not raycast. A beacon is a three-sided stick
+and a sprite, and a player aiming at one from orbit is aiming at a few pixels,
+so each beacon is projected as a SEGMENT from its mast foot to the top of its
+label (`Docks.markers()`, at this frame's charted height) and the click takes
+the nearest within 28 px. A beacon is skipped only when both ends are over the
+horizon — the segment from the lens passes through a sphere shrunk to 0.995 of
+the radius, so a point ON the surface is not hidden by the surface it stands on.
+Presses are paired by `createDoubleTap` (350 ms, 30 px) on raw `pointerdown`
+rather than on `dblclick`, which a touch screen does not reliably send. It
+listens on the canvas alone, so a press on a HUD key never counts, and it refuses
+while anything else owns the screen, on the [FISH] key's list.
+
+`course.ts`'s `pickCourse` is the whole rule, shared by the double-click and the
+HARBOURS page's `SET COURSE`: an unknown name is refused with a toast, the
+current course toggles off, anything else replaces it. The course is saved as
+`destination`, a name or null; a save without the field repairs to null, so
+`SAVE_VERSION` did not move. A name this world cannot place is KEPT, on the
+`knownHarbours` terms, and simply draws no line.
+
+**Arrival clears the course on the TRANSITION.** `main.ts` keeps
+`lastMooredAt` and clears only on the frame the ship comes alongside its
+destination. Clearing on every docked frame would clear a course set for the
+harbour the ship is already moored at on the frame after it was set; and the
+field is seeded with wherever the ship boots, so a save moored at its own
+destination does not announce an arrival nobody made.
+
+**The line.** `courseline.ts` samples 256 points of the great circle
+(`sampleArc`, which handles identical and antipodal ends) at `LINE_LIFT` 0.5
+over the sea, and builds a ribbon rather than a GL line, which is one device
+pixel wide on every browser that matters. Width is held at 1.6 px a side the
+same way the beam's is. The dots are phased by distance **from the berth**:
+phased from the ship they travel with the hull and crawl over the water; phased
+from the berth, a dot stays over the same patch of sea and the ship sails past
+it. The spacing tracks the lens's distance from the hull, clamped to 1.2..9
+units, so the rhythm reads the same on the deck and from orbit — at the cost of
+the dots sliding while the player zooms. The arc is re-laid only once the hull
+has moved one world unit, which is well inside the 4-unit fade at the ship end.
+
+It is depth-tested against the terrain, so land hides it where the great circle
+crosses, and like the beam it is drawn after the cloud deck. The fragment shader
+names its mark `mark`: `dot` is a GLSL built-in, and shadowing it is the kind of
+thing `tsc` cannot see and a browser refuses to compile.
 
 ## Fishing
 `docs/FISHING_PLAN.md` is the approved brief and the record of what was
