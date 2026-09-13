@@ -62,6 +62,8 @@ export interface HarbourEntry {
   readonly bearing: number;
   /** Great-circle distance from the ship, world units. */
   readonly distance: number;
+  /** Is this the harbour the ship has a course set for? Absent means no. */
+  readonly course?: boolean;
 }
 
 export interface MenuDeps {
@@ -92,6 +94,13 @@ export interface MenuDeps {
    * be the wrong failure entirely.
    */
   readonly harbours?: () => readonly HarbourEntry[];
+  /**
+   * SET COURSE / CLEAR COURSE on a known row. `main.ts` decides what the press
+   * does -- it is the same rule a double-click on the world goes through -- and
+   * the page is refilled after, so the row reads back the result. Absent, and
+   * the rows carry no button at all.
+   */
+  readonly onCourse?: (name: string) => void;
   /**
    * Contracts in hand, as of the instant the page is opened.
    *
@@ -304,6 +313,27 @@ export function createMenu(deps: MenuDeps): Menu {
         fix.textContent = UNCHARTED;
       }
       row.appendChild(fix);
+
+      // Only a known harbour can be a course, so only a known row has the key.
+      if (entry.known && deps.onCourse !== undefined) {
+        const onCourse = deps.onCourse;
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = entry.course ? 'harbours__course harbours__course--on' : 'harbours__course';
+        button.textContent = entry.course ? 'Clear course' : 'Set course';
+        button.dataset.harbour = entry.name;
+        button.addEventListener('click', () => {
+          onCourse(entry.name);
+          fillHarbours();
+          // The row was rebuilt under the press; put focus back on its key so a
+          // keyboard player is not dropped to the top of the page.
+          if (harboursList === null) return;
+          for (const key of harboursList.querySelectorAll<HTMLButtonElement>('.harbours__course')) {
+            if (key.dataset.harbour === entry.name) key.focus();
+          }
+        });
+        row.appendChild(button);
+      }
 
       harboursList.appendChild(row);
     }

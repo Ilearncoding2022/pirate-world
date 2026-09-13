@@ -22,6 +22,7 @@ import { createLightning } from './lightning';
 import { createChart } from './chart';
 import { createDocks } from './docks';
 import { createShipBeam } from './shipbeam';
+import { createCourseLine } from './courseline';
 import { pickCourse } from './course';
 import { createDoubleTap, pickHarbour } from './harbourpick';
 import { createPostFx } from './postfx';
@@ -1014,6 +1015,19 @@ async function startGame(): Promise<void> {
   const shipBeam = createShipBeam();
   scene.add(shipBeam.object);
 
+  /*
+   * The dotted line to the course, and the lookup that turns the course's NAME
+   * into this world's berth. Built once: the berths do not move within a world.
+   * A name this world cannot place resolves to null and draws no line.
+   */
+  const courseLine = createCourseLine();
+  scene.add(courseLine.object);
+  const berthByName = new Map(globe.towns.docks.map((dock) => [dock.town.name, dock.dir]));
+  const courseTarget = (): THREE.Vector3 | null => {
+    const name = records.course.destination;
+    return name === null ? null : (berthByName.get(name) ?? null);
+  };
+
   // The hull is still coming down the wire. Waited on here rather than left to
   // land mid-game so the first frame the player sees has a ship in it: the
   // stand-in was only ever cover for a load that nothing was hiding.
@@ -1243,6 +1257,7 @@ async function startGame(): Promise<void> {
         return {
           name,
           known: true,
+          course: records.course.destination === name,
           bearing: bearingTo(ship.state, town.dir),
           distance: Math.acos(Math.min(1, ship.state.position.dot(town.dir))) * GLOBE_RADIUS,
         };
@@ -1279,6 +1294,8 @@ async function startGame(): Promise<void> {
         };
       }),
     reputation: () => records.reputation.points,
+    // The same rule as a double-click on the beacon; see `applyCoursePick`.
+    onCourse: (name) => applyCoursePick(name),
   });
 
   /**
@@ -2678,6 +2695,7 @@ async function startGame(): Promise<void> {
       // No pillar over a fight: the arena's own camera is close on the hull,
       // and the sailing branch stands it back up on the first frame after.
       shipBeam.object.visible = false;
+      courseLine.object.visible = false;
       // The plant keeps running on a resting hull, for the fishing card's
       // reasons: the sun is still up, the ship may be at a berth, and a fight
       // is long enough that a tank frozen through one would be a lie about
@@ -3358,6 +3376,7 @@ async function startGame(): Promise<void> {
     // After the camera, whose zoom it fades on, and on the hull the ship has
     // just moved.
     shipBeam.update(dt, ship.state, view.zoom, view.camera, window.innerHeight);
+    courseLine.update(ship.state, courseTarget(), view.camera, window.innerHeight);
     // After the ship and before `globe.update`: this only places and lights
     // meshes from the state the sim wrote above, and nothing reads them until
     // the render at the foot of the frame.

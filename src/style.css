@@ -4827,6 +4827,43 @@ body.in-battle .dbtn--right {
   letter-spacing: 0.14em;
 }
 
+/* SET COURSE on a known row. The name takes the slack, so the fix and the key
+   sit together at the right edge of every row that has one. */
+.harbours__name {
+  flex: 1 1 auto;
+}
+
+.harbours__course {
+  flex: none;
+  padding: 2px 7px;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--cyan);
+  background: rgba(63, 224, 255, 0.06);
+  border: 1px solid rgba(63, 224, 255, 0.3);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.harbours__course:hover {
+  background: rgba(63, 224, 255, 0.16);
+}
+
+.harbours__course:focus-visible {
+  outline: 1px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* The course in hand, in the berth mint the guide line is drawn in. */
+.harbours__course--on {
+  color: #8affc4;
+  border-color: rgba(138, 255, 196, 0.55);
+  background: rgba(138, 255, 196, 0.08);
+}
+
 /* ---------------------------------------------------------------------
    Small viewports, and reduced motion — the same two exceptions the
    POWER block above makes, for the same two reasons.
