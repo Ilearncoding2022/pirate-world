@@ -275,24 +275,25 @@ body {
 /*
  * How much of their authored size the two instrument panels are drawn at.
  *
- * 0.7 -- 30% off. Both are scaled rather than re-typed at smaller numbers,
- * and that is the whole reason this is one property instead of forty. A
- * telemetry panel is roughly a dozen font sizes, a ten-notch bar, a five-notch
- * bar and two canvases; a radar panel is a scope, a dial and three coordinate
- * blocks. Retyping all of it at 70% would be forty chances to round one figure
- * the wrong way, and every one of them would have to be found again the next
- * time the panels are resized.
+ * 0.805 -- the 0.7 they were cut to, grown back by 15% (0.7 x 1.15). Both are
+ * scaled rather than re-typed at other numbers, and that is the whole reason
+ * this is one property instead of forty. A telemetry panel is roughly a dozen
+ * font sizes, a ten-notch bar, a five-notch bar and two canvases; a radar
+ * panel is a scope, a dial and three coordinate blocks. Retyping all of it at
+ * a new size would be forty chances to round one figure the wrong way, and
+ * every one of them would have to be found again the next time the panels are
+ * resized.
  *
  * Scaling instead keeps every proportion the panels were designed with exactly
  * as it was, and makes the next resize a single number. The cost is that the
  * two canvases -- the radar scope and the time dial -- keep sizing their
  * backing stores off `clientWidth`, which a transform does not change, so they
- * are now drawn at about 1.4x the pixels they strictly need. That is
+ * are now drawn at about 1.25x the pixels they strictly need. That is
  * supersampling rather than waste: they come out crisper, and neither is a
  * measurable cost beside the globe.
  */
 :root {
-  --panel-scale: 0.7;
+  --panel-scale: 0.805;
 }
 
 .panel {
@@ -1052,11 +1053,9 @@ body {
   padding: 11px 12px 12px;
   display: flex;
   flex-direction: column;
-  /* `stretch`, not `center`. The panel is wider than the scope now that the
-     weather sits beside the dial, and a centred column would have put the
-     scope in the middle of the panel while the dial started at the left of the
-     row under it -- which is precisely the misalignment this change is here to
-     remove. The title keeps its old centring explicitly, below. */
+  /* `stretch`, not `center`, so the weather row under the plot runs the full
+     width of the panel and splits it evenly. The title keeps its old centring
+     explicitly, below. */
   align-items: stretch;
   gap: 8px;
 }
@@ -1068,31 +1067,23 @@ body {
   align-self: center;
 }
 
-/*
- * The scope's column beside the weather's block.
- *
- * `flex-end` is what puts the two rows of weather level with the DIAL rather
- * than with the plot above it: the column is much the taller of the two, and
- * bottom-aligning the shorter one is what "to the right of the dial" means in
- * a row that also contains a 158px circle.
- */
+/* The plot beside the column that holds the fix and the dial. */
 .radar__body {
   display: flex;
-  /* `stretch`, so the side column runs the full height of the plot and the
-     dial. What sits where inside it is `.radar__side`'s business: the fix at
-     the top, level with the plot, and the weather at the bottom, level with
-     the dial. */
+  /* `stretch`, so the side column runs the full height of the plot. What sits
+     where inside it is `.radar__side`'s business: the fix at the top, the dial
+     at the bottom. */
   align-items: stretch;
   gap: 12px;
 }
 
 /*
- * Everything that is not the plot: the fix at the top, the weather at the
- * bottom, and the panel's own height between them.
+ * Beside the plot: the fix at the top, the dial at the bottom, and whatever of
+ * the plot's height is left over between them.
  *
- * `space-between` rather than a gap, so the weather stays pinned to the dial's
- * bottom edge however tall the plot happens to be at this viewport -- both are
- * on the same clamp, and a fixed gap would have drifted off it.
+ * `space-between` rather than a gap, so the dial's bottom edge stays level
+ * with the scope's however tall the plot happens to be at this viewport -- the
+ * plot is on a clamp, and a fixed gap would have drifted off it.
  */
 .radar__side {
   display: flex;
@@ -1116,17 +1107,11 @@ body {
 }
 
 /*
- * The plot and the dial, at one width.
+ * The plot's column, and the one place its width is set.
  *
- * This is the whole mechanism behind the dial lining up with the plot: both
- * are `width: 100%` of this column, so their left borders are the same border.
- * Neither is positioned against the panel any more, so the panel may grow to
- * the right without moving either of them.
- *
- * The fix row is deliberately NOT in here. It reads across the panel and wants
- * every pixel of it -- LAT, HDG and LON met in the middle at 118px once
- * already, which is why they were taken out of the disc in the first place.
- * Inside this column they would have been squeezed back to exactly that width.
+ * The fix is deliberately NOT in here. It wants a width of its own -- LAT, HDG
+ * and LON met in the middle at 118px once already, which is why they were
+ * taken out of the disc in the first place.
  */
 .radar__col {
   display: flex;
@@ -1137,31 +1122,30 @@ body {
 }
 
 /*
- * WIND and SKY, moved off the telemetry panel.
+ * WIND and SKY, one row across the foot of the panel: wind left, sky right.
  *
- * They read against the dial, which is the point of putting them here: that
- * ring is what the sky is doing to the light, and these two are what it is
- * doing to the wind and the water. The telemetry panel keeps the ship's own
- * instruments and is 15% wider for having handed these over.
- *
- * `min-width` rather than a fixed one so the pair can grow if a weather word
- * ever runs longer than CLEAR; the panel is shrink-to-fit and follows.
+ * Two equal columns, so the pair splits the panel down the middle rather than
+ * drifting with the width of the words. `1fr` keeps its content's minimum, so
+ * OVERCAST -- the longest sky there is -- widens the panel instead of spilling;
+ * the panel is shrink-to-fit and follows.
  */
 .radar__wx {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 6px;
-  min-width: 104px;
-  /* Level with the dial's own bottom edge rather than the row's, so the two
-     read as one line of instruments. */
-  padding-bottom: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 18px;
 }
 
 /* The rows are the telemetry panel's, and keep its spacing; only the width
    they are laid out in has changed. */
 .radar__wx .readout {
   padding: 0;
+}
+
+/* SKY's key only, nudged off the column's left edge so it does not read as
+   hanging off the end of the wind figure beside it. A margin rather than a
+   transform, so the row's minimum width counts it and OVERCAST still clears. */
+.radar__wx .readout:last-child .readout__key {
+  margin-left: 20px;
 }
 
 .radar {
@@ -1198,9 +1182,9 @@ body {
 /* ---------------------------------------------------------------------
    Time dial — where the ship stands in its own solar day
 
-   Sits under the scope and shares its width, so the radar panel reads as one
-   instrument stack rather than two. Deliberately smaller than the scope: the
-   plot is what the player steers by, and this is a glance.
+   Sits beside the scope, under the fix, in the space the side column would
+   otherwise leave empty. Deliberately smaller than the scope: the plot is
+   what the player steers by, and this is a glance.
 
    Not a disc like the scope. The scope is a lit tube and earns its housing;
    giving this one too would make the panel read as two eyes.
@@ -1208,12 +1192,21 @@ body {
 .timedial {
   position: relative;
   margin-top: 8px;
-  /* Its column's width, which is `.radar`'s too: that is what makes the two
-     share a left border at every step of the clamp. */
+  /* The side column's width, so the ring sits under the fix and lines up with
+     its left edge. */
   width: 100%;
   /* Wider than tall: the dial is a ring with a readout in it, and a square
      box would leave a band of dead panel under it. */
   aspect-ratio: 1 / 0.62;
+  /* 15% over the column's width, twice over (1.15 x 1.15), grown out to both
+     sides and upward with the bottom edge held level with the scope's. A
+     transform rather than a wider box, so the dial takes the spare height
+     between it and the fix instead of widening the whole panel. The canvas box
+     now pokes a few pixels past the panel's right padding, but the ring is
+     sized off the box's HEIGHT and sits well inside it. timedial.ts sizes off
+     clientWidth, which a transform does not change, so the ring stays round. */
+  transform: scale(1.3225);
+  transform-origin: bottom center;
 }
 
 /* timedial.ts sizes the backing store from clientWidth; this owns the CSS size. */
@@ -1839,10 +1832,7 @@ kbd {
   .panel--telemetry {
     min-width: 0;
   }
-  /* The COLUMN, not the two things in it. Both are `width: 100%` of this and
-     that is what keeps their left borders one border; capping them separately
-     -- which is what this rule used to do -- would have left them agreeing
-     here by coincidence and free to stop agreeing at the next retune. */
+  /* The column, not the plot in it: the column is where the width lives. */
   .radar__col {
     width: 104px;
   }
@@ -1963,7 +1953,7 @@ kbd {
  */
 .dock {
   position: absolute;
-  top: calc(var(--hud-pad) + var(--telemetry-h, 162px) + 10px);
+  top: calc(var(--hud-pad) + var(--telemetry-h, 186px) + 10px);
   left: var(--hud-pad);
   /* 15% off, keys and gaps together, anchored at the corner the panel above
      it is anchored to. Scaled rather than re-typed for the same reason the

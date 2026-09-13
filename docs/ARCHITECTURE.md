@@ -368,7 +368,7 @@ shader.
 | `radar.ts` | `createRadar(heightMap, waterBodies, seaLevel, towns)`, `RADAR_RANGE` | 2D canvas scope, no draw calls; `update(dt, ship, wind, hazards, boats?, weather?, cells?, chart?)`. The scope's GEOMETRY never changes with the weather — `RADAR_RANGE`, the projection tables and the range rings are fixed — what changes is how much of it has anything in it: beyond `WeatherState.visibility` a pixel is `SCOPE_FOG` if uncharted and the coast dimmed toward it if charted. Cells draw as discs of `radius * strength`, culled on `visibility + radius` so a bank whose centre is off the scope still shows. It is also where the chart is STAMPED, because this is the one place that knows both the visibility and when it last looked; hazards and raiders alike are drawn from the LIVE frame, like the wind arrow and for the same reason: hazards in `--magenta`, raiders as own ship's own arrowhead turned to their relative heading, in `--red` or `--orange` at `envelope` alpha |
 | `horizon.ts` | `limbSin(cameraRadius)`, `sunAppearsSin(cameraRadius)`, `SUN_APPEARS_SIN` | where the DRAWN horizon is, and the elevation the sun's disc clears it at; derived from `GLOBE_RADIUS`, the chase camera's opening framing and `SUN_DISC_RADIANS`, so nothing downstream writes the number down |
 | `solartime.ts` | `solarPhase(up, sunDirection)`, `phaseName`, `SolarPhase` | where the ship stands in its own day or night, and how far through it; DOM-free, so the geometry is testable without a canvas |
-| `timedial.ts` | `createTimeDial(canvas)` | draws that phase under the scope; 2D canvas, no draw calls |
+| `timedial.ts` | `createTimeDial(canvas)` | draws that phase beside the scope, under the fix; 2D canvas, no draw calls |
 | `species.ts` | `SPECIES`, `TIERS`, `ROW_ODDS`, `speciesById(id)`, `rollSpecies(row, rng)` | data only; twenty species in five tiers, and the per-row tier odds |
 | `fishsim.ts` | `createFishingSim(rng?, extraShots?)` | the whole ruleset in card units; no DOM, no canvas, no pixels |
 | `fishrender.ts` | `createFishRenderer(canvas)` | 2D canvas, like `radar.ts`; the only reader of `SpeciesArt` |
@@ -2530,8 +2530,15 @@ subtracted between two compass readings, per **Frames, and where they stop
 working**; both the crests and the raiders project through one captured live
 frame rather than each building its own.
 
-The panel's head row carries **LAT, heading and LON** above the glass. The
-range readout is gone — it never varied, so it was a constant printed every
+The panel's fix — **heading, LAT and LON** — stands in a column beside the
+glass, and the time dial sits in that column under it, bottom-aligned with the
+scope. The dial is scaled up by a `transform` (1.3225, anchored bottom-centre)
+rather than widened, so it takes the spare height under the fix instead of
+widening the whole panel; `timedial.ts` sizes its backing store off
+`clientWidth`, which a transform does not change, so the ring stays round. WIND
+and SKY share one two-column row across the foot of the panel. Both instrument
+panels are drawn at `--panel-scale` 0.805, the 0.7 they were cut to grown back
+by 15%. The range readout is gone — it never varied, so it was a constant printed every
 frame. The wind arrow rides the rim on the true bearing from the **live** frame,
 not the raster's: it is attached to nothing on the picture, so projecting it
 through a frame up to a tenth of a second old would simply lag the bow through

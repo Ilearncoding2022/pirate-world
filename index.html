@@ -313,44 +313,24 @@
              disc is where the plot is, and at 118px the two coordinate blocks
              met in the middle of it. Out here they get the panel's full width
              and the plot gets its own back. -->
-        <!-- Everything the scope owns, in one column: the fix, the plot and
-             the dial under it. They share a width, which is the whole reason
-             the column exists -- the dial's left border lines up with the
-             scope's because neither is centred against the panel any more,
-             and the panel is now wider than both. -->
+        <!-- The plot on the left; the fix and the dial stacked in the column
+             beside it. The dial used to sit under the plot, sharing its width,
+             which left the side column's lower half as dead panel between the
+             fix and the weather. Beside the plot it fills that space, and the
+             scope gets the whole left edge to itself. -->
         <div class="radar__body">
         <div class="radar__col">
         <div class="radar">
           <canvas class="radar__scope" id="hud-radar" aria-hidden="true"></canvas>
         </div>
-
-        <!-- timedial.ts repaints this every frame. One lap is one LOCAL solar
-             day, which is not a fixed length of real time: the ship outruns
-             the terminator, so running east drives the marker round and
-             running west can stall it. Noon is at the top, the lit arc is
-             daylight, and the readout is how far through the CURRENT phase the
-             ship is rather than an hour -- see solartime.ts for why there is
-             no clock on it. -->
-        <div class="timedial">
-          <canvas class="timedial__face" id="hud-timedial" aria-hidden="true"></canvas>
-        </div>
         </div>
 
-        <!-- The weather, moved off the telemetry panel and onto the scope.
-             It belongs here: the dial beside it is what the sky is doing to
-             the light, these two are what it is doing to the wind and the
-             water, and the telemetry panel is the SHIP's instruments. It sits
-             at the foot of the column so it reads against the dial rather
-             than against the plot.
-
-             Both rows keep their ids, so hud.ts is untouched by the move. -->
         <div class="radar__side">
-        <!-- The fix, moved down out of a row above the plot and into the
-             column beside it. HEADING leads and is the big figure: it is the
-             one number here a player steers by, and the other two are where
-             that steering has got them so far.
+        <!-- The fix, in the column beside the plot. HEADING leads and is the
+             big figure: it is the one number here a player steers by, and the
+             other two are where that steering has got them so far.
 
-             They read key-then-value across a row now, like every other
+             They read key-then-value across a row, like every other
              instrument on this HUD, rather than value-under-label. The stacked
              form existed because three blocks had to share one narrow row over
              the disc; in a column of their own there is no such squeeze. -->
@@ -369,6 +349,25 @@
           </div>
         </div>
 
+        <!-- timedial.ts repaints this every frame. One lap is one LOCAL solar
+             day, which is not a fixed length of real time: the ship outruns
+             the terminator, so running east drives the marker round and
+             running west can stall it. Noon is at the top, the lit arc is
+             daylight, and the readout is how far through the CURRENT phase the
+             ship is rather than an hour -- see solartime.ts for why there is
+             no clock on it. -->
+        <div class="timedial">
+          <canvas class="timedial__face" id="hud-timedial" aria-hidden="true"></canvas>
+        </div>
+        </div>
+        </div>
+
+        <!-- The weather, one row across the foot of the panel: WIND on the
+             left, SKY on the right. The two are one system read two ways --
+             the wind is what the weather is doing to the hull, the sky is what
+             it is doing to everything else -- so they sit abreast rather than
+             one under the other. Both rows keep their ids, so hud.ts is
+             untouched by the move. -->
         <div class="radar__wx">
           <!-- True wind. The arrow is bow-relative, matching the bow-up scope
                rather than the north-up compass, so it points where the wind is
@@ -389,15 +388,11 @@
 
           <!-- The sky. One word, off `WeatherState.kind`, which is a label
                derived from the envelopes and the only thing in the game
-               allowed to branch on it. Directly under WIND because the two are
-               one system read two ways: the wind is what the weather is doing
-               to the hull, this is what it is doing to everything else. -->
+               allowed to branch on it. -->
           <div class="readout">
             <span class="readout__key">SKY</span>
             <span class="readout__val" id="hud-wx">CLEAR</span>
           </div>
-        </div>
-        </div>
         </div>
       </section>
 

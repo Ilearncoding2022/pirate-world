@@ -624,9 +624,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   is to starboard; north keeps a blue arrow and a letter twice the size of its
   neighbours. Heading, latitude and longitude stand in a column beside the
   glass, heading first and largest — it is the one number you steer by. The
-  day/night dial sits under the plot and shares its left edge, with the wind and
-  the sky beside it: that ring is what the sky is doing to the light, and those
-  two are what it is doing to the water. The
+  day/night dial sits beside the plot, under those three, and the wind and the
+  sky share one row across the foot of the panel — wind on the left, sky on the
+  right. Both instrument panels are drawn 15% larger than they were. The
   wind rides the rim as a warm arrow, signed on its tail with the same gust
   glyph the speed readout uses, so the two marks are legibly one subject.
   Speeds are whole knots — the tenth only ever flickered, and every readout on
