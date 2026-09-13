@@ -260,6 +260,33 @@ declare global {
        */
       hazards?: { kind: string; envelope: number }[];
       /**
+       * How many shader programs the renderer is currently holding.
+       *
+       * `WebGLRenderer.info.programs.length`, refreshed every frame on the
+       * same terms as `hazards` above. It exists for one assertion the
+       * browser tier can make and nothing else can: that a fight's props are
+       * compiled BEFORE the player shoots.
+       *
+       * Every prop in the arena ships `visible = false`, and three never
+       * builds a program for something it does not draw, so the first
+       * cannonball, the first splash and the first crest used to link their
+       * shaders on the frame each first appeared -- which is the frame the
+       * player pressed FIRE. `main.ts`'s `warmScene` now pays that behind the
+       * blackout. The difference between the two is invisible to a
+       * screenshot and lost in the noise of a software rasteriser's frame
+       * times, but it is exactly this count going up, and a count is a fact a
+       * test can hold. See `battle=1 compiles the arena before the first
+       * shot` in the smoke suite.
+       *
+       * It has already earned its place: the first spelling of that warm-up
+       * used `renderer.compile`, which keys its programs for the canvas
+       * rather than for the composer's render target, so every one of them
+       * was discarded and the fight went on compiling on the first shot. The
+       * screenshots were identical and the frame times said nothing. This
+       * count is what caught it.
+       */
+      programs?: number;
+      /**
        * The live hunt: its phase, how many shadows are on the water, the
        * marked one's distance and bearing off the bow, and the dial.
        * Refreshed every frame, on the same terms as `hazards` above and for

@@ -1375,12 +1375,62 @@ body {
     inset 0 -8px 16px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(8px) saturate(1.2);
   -webkit-backdrop-filter: blur(8px) saturate(1.2);
+  /*
+   * Only the two properties a compositor can animate on its own.
+   *
+   * This list used to carry `box-shadow`, `background` and `border-color` as
+   * well, and every one of those is painted on the main thread: a press was
+   * 130 ms of re-rastering a 60px glow and a gradient over a key that is
+   * sitting on a WebGL canvas which is itself redrawing every frame -- and
+   * then the same again on release. Two of those per key press, on the one
+   * input the player spams hardest in a fight. The lit face moved to the
+   * `::after` below, which fades on `opacity` instead and never touches
+   * layout or paint. `color` stays because it repaints two short glyphs and
+   * nothing else.
+   */
   transition:
     transform 90ms ease,
-    box-shadow 130ms ease,
-    border-color 130ms ease,
-    background 130ms ease,
     color 130ms ease;
+  /* The lit face hangs off this box. */
+  position: relative;
+}
+
+/*
+ * The pressed key's face, as a layer that is faded in rather than a paint
+ * that is animated.
+ *
+ * Everything `.dbtn.active` used to change -- the cyan gradient, the two
+ * outer glows, the inner shade and the border -- is authored here ONCE, at
+ * full strength, and simply switched on with `opacity`. The pixels are
+ * rasterised the first time the key is pressed and reused for every press
+ * after it, which is the entire point: an opacity fade is a compositor job,
+ * and the main thread is busy drawing a sea.
+ *
+ * `inset: -1px` with a radius one pixel larger covers the key's own border,
+ * so the lit state does not need a `border-color` of its own -- which is the
+ * last main-thread property that would otherwise have had to animate.
+ */
+.dbtn::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #7ef0ff, var(--cyan) 55%, #12b5da);
+  box-shadow:
+    0 0 26px rgba(63, 224, 255, 0.75),
+    0 0 60px rgba(63, 224, 255, 0.3),
+    inset 0 2px 8px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 130ms ease;
+  /* The key under it is the hit target, and the glyph over it is the label. */
+  pointer-events: none;
+}
+
+/* Over the lit face, never under it. */
+.dbtn__glyph,
+.dbtn__label {
+  position: relative;
+  z-index: 1;
 }
 
 .dbtn:focus {
@@ -1443,24 +1493,39 @@ body {
   transition: color 130ms ease;
 }
 
-.dbtn:hover {
-  border-color: rgba(63, 224, 255, 0.65);
-  box-shadow:
-    0 0 20px rgba(63, 224, 255, 0.3),
-    inset 0 1px 0 rgba(63, 224, 255, 0.28),
-    inset 0 -8px 16px rgba(0, 0, 0, 0.45);
+/*
+ * Behind `hover: hover`, which is about touch rather than about taste.
+ *
+ * A phone reports no hover, but it does leave a tapped button in `:hover`
+ * until something else is tapped -- "sticky hover". Unguarded, that made
+ * every tap of the helm repaint this glow and then leave it lit under the
+ * player's thumb for the rest of the fight. The guard removes the rule from
+ * the devices that cannot use it and that pay the most for it.
+ */
+@media (hover: hover) {
+  .dbtn:hover {
+    border-color: rgba(63, 224, 255, 0.65);
+    box-shadow:
+      0 0 20px rgba(63, 224, 255, 0.3),
+      inset 0 1px 0 rgba(63, 224, 255, 0.28),
+      inset 0 -8px 16px rgba(0, 0, 0, 0.45);
+  }
 }
 
-/* pressed / lit — toggled by controls.ts for BOTH pointer and keyboard */
+/*
+ * pressed / lit — toggled by controls.ts for BOTH pointer and keyboard.
+ *
+ * The look itself is on `.dbtn::after`; all this rule does is raise it. The
+ * two properties left here are the cheap ones: a transform the compositor
+ * owns outright, and a text colour over two glyphs.
+ */
 .dbtn.active {
   transform: translateY(2px) scale(0.965);
   color: #061018;
-  border-color: var(--cyan);
-  background: linear-gradient(180deg, #7ef0ff, var(--cyan) 55%, #12b5da);
-  box-shadow:
-    0 0 26px rgba(63, 224, 255, 0.75),
-    0 0 60px rgba(63, 224, 255, 0.3),
-    inset 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.dbtn.active::after {
+  opacity: 1;
 }
 
 .dbtn.active .dbtn__glyph {
@@ -4189,18 +4254,21 @@ kbd {
     inset 0 -8px 16px rgba(0, 0, 0, 0.5);
   backdrop-filter: blur(8px) saturate(1.2);
   -webkit-backdrop-filter: blur(8px) saturate(1.2);
-  transition:
-    transform 90ms ease,
-    box-shadow 130ms ease,
-    border-color 130ms ease;
+  /* The helm keys' rule, for the helm keys' reason: this is the one control
+     pressed once a second for the length of a fight, and an animated
+     `box-shadow` on it is a main-thread repaint over a live scene every time.
+     Only the transform is left, which the compositor owns. */
+  transition: transform 90ms ease;
 }
 
-.battle__fire:hover {
-  border-color: var(--foe);
-  box-shadow:
-    0 0 24px color-mix(in srgb, var(--foe) 42%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--foe) 34%, transparent),
-    inset 0 -8px 16px rgba(0, 0, 0, 0.45);
+@media (hover: hover) {
+  .battle__fire:hover {
+    border-color: var(--foe);
+    box-shadow:
+      0 0 24px color-mix(in srgb, var(--foe) 42%, transparent),
+      inset 0 1px 0 color-mix(in srgb, var(--foe) 34%, transparent),
+      inset 0 -8px 16px rgba(0, 0, 0, 0.45);
+  }
 }
 
 .battle__fire:active {
@@ -4361,6 +4429,28 @@ body.in-battle .dbtn--left,
 body.in-battle .dbtn--right {
   opacity: 0.22;
   pointer-events: none;
+}
+
+/*
+ * No backdrop blur while the fight is up.
+ *
+ * `backdrop-filter` re-blurs whatever is behind the element, and what is
+ * behind every one of these is a WebGL canvas that has just drawn a new
+ * frame. So the blur cannot be cached the way it can over static page
+ * content: it is recomputed every single frame, for each of the seven
+ * elements listed here, on top of the heaviest frame the game draws. It buys
+ * a softness nobody is looking at during a cannon fight, and it is the one
+ * HUD cost that scales with how much of the screen the HUD covers rather
+ * than with anything the player is doing.
+ *
+ * Only in a fight. The sailing HUD keeps its glass, which is where the look
+ * was designed and where the frame has the headroom for it.
+ */
+body.in-battle .dbtn,
+body.in-battle .bside,
+body.in-battle .battle__fire {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* END BATTLE */

@@ -1,6 +1,10 @@
 # Ship battle performance: review and plan
 
-Status: review only. Nothing in this document has been implemented yet.
+Status: steps 1 to 5 implemented. Step 6 (measuring on the machine that
+shows the stutter) is the owner's, and is the one thing here that cannot be
+done from a container. **What was actually built, and where it departed from
+the plan below, is recorded in `Outcome` at the foot of this file.** Read
+that first; the body is kept as the reasoning that led to it.
 
 The complaint: the game stutters in a cannon fight, and it stutters most
 when the player presses the D-pad or the FIRE key. This is a read of the
@@ -266,3 +270,111 @@ the trace decides how far into step 5 to go.
   drag in `ship.ts` already makes the physics rate-independent.
 - Touch-event latency work in `controls.ts`. The pad already captures the
   pointer and calls `preventDefault`; nothing there adds a frame.
+
+
+## Outcome
+
+What shipped, what changed shape on contact with the code, and what is left.
+
+### Step 1, the arena's compiles: done, but not the way it is written above
+
+The plan said `renderer.compile(battleScene.props, view.camera, scene)`
+inside the blackout. That was written, and it did nothing at all.
+
+A program's cache key carries the output colour space and the tone mapping,
+and three reads both off whatever render target is bound at the time
+(`WebGLPrograms.getParameters`: a bound target keys `LinearSRGBColorSpace`,
+an unbound one keys `renderer.outputColorSpace`). `renderer.compile` binds
+nothing, so it keyed every program `srgb`. This game draws through the
+composer, into a target, which keys `srgb-linear`. So every program the
+warm-up built was discarded unused and the fight still linked its shaders on
+the first shot.
+
+Nothing visible said so. The screenshots were identical and a software
+rasteriser's frame times are noise. What caught it was a program count, which
+is why one is now published on the debug hook and asserted in the smoke
+suite.
+
+What shipped instead is a real composed frame, drawn behind the same opaque
+blackout, with the whole prop pool made visible for exactly that one frame:
+`battleScene.precompile(() => postFx.render(0, scene, battleScene.camera))`.
+A real frame cannot disagree with the frames after it, because it is one of
+them. That is also the trick the loading screen already used for the world,
+so the fight now warms up the same way the game does.
+
+Pros: the first shot, the first splash and the first crest of every fight are
+free; it cannot silently key the wrong variant, because there is no second
+spelling of the render state to get wrong; it reuses an established pattern.
+Cons: the blackout's opaque hold carries one extra frame, and that frame
+draws the whole prop pool stacked at the ring's centre, so on a slow GPU the
+black lasts marginally longer.
+
+### Step 2, the light-count churn: deliberately NOT done as written
+
+The plan recommended 2a, keeping the four arena PointLights in the world
+scene permanently at intensity 0, and revisiting 2b if the fragment cost
+showed.
+
+That recommendation was wrong, and the thing that settles it is one line:
+`land.ts:746` builds a `MeshStandardMaterial`. Land is the largest lit fill
+in the game, up to 289k triangles across a large part of the frame. Three
+counts every visible light in the program key whatever its intensity, so 2a
+would have put four extra point lights into the per-fragment loop of the
+biggest surface in the game, permanently, in every sailing frame -- to save
+two stalls that the plan itself establishes are already hidden behind an
+opaque screen and that the player never sees.
+
+So the churn stays, and what changed is only that it is now paid
+deterministically inside the black rather than on the first frame after it:
+`warmScene` runs on entry and on exit. 2b, replacing the lights with unlit
+additive sprites, remains the real fix and remains an art decision.
+
+### Steps 3, 4 and 5: done as written
+
+- **Step 3.** The hit vignette and the fuse pulse replay through a cached
+  `Animation` handle (`createFlash` in `battleui.ts`). The two
+  `void el.offsetWidth` reads are gone, and with them a forced synchronous
+  layout of the whole HUD on every enemy aim and every hit taken. The
+  keyframes stay in `style.css`, so the reduced-motion block still governs
+  both cues; the handle is taken off the element rather than authored in JS
+  for exactly that reason.
+- **Step 4.** The pressed key's lit face moved to a `.dbtn::after` layer
+  faded with `opacity`, so a press animates only `transform`, `opacity` and a
+  two-glyph `color` -- all compositor or trivial -- instead of a 60px
+  `box-shadow`, a gradient `background` and a `border-color`. `.battle__fire`
+  got the same trim. Both `:hover` rules moved behind `@media (hover: hover)`,
+  which also stops a phone's sticky hover repainting the glow on every tap.
+  `backdrop-filter` is switched off on the helm keys, the strip and the FIRE
+  key while `body.in-battle` is set: a backdrop blur over a canvas that
+  redraws every frame is recomputed every frame and cannot be cached.
+- **Step 5.** The battle branch spends half the tier's reflection budget
+  (`BATTLE_REFLECTION_FACES`), which is a whole pass over the world scene
+  saved per frame on `high`. `scheduleFaces` keeps its tested pure shape and
+  delegates to an in-place variant, so the scheduler stops allocating.
+  `battleWeather` writes into a scratch object instead of spreading a fresh
+  `WeatherState` every frame of every wet fight. `battleui.input` returns a
+  scratch. `timedial.ts` compares the picture's inputs -- angles quantized to
+  half a pixel along its own drawn ring, plus the two values it prints -- and
+  draws nothing when none has moved, which takes a full 2D-canvas repaint,
+  a gradient allocation and two CSS font re-parses off most frames.
+
+Tier auto-detection, from the same step, was NOT done. It is the biggest
+single lever on phones and it is also a behaviour change to every existing
+player's session, which makes it its own piece of work rather than a rider on
+a performance pass.
+
+### What is verified, and what is not
+
+Verified: 716 unit tests and the smoke suite pass; the arena boots clean; and
+`battle=1 compiles the arena before the first shot` asserts that firing links
+no new shader program, which is the headline claim and the one that had
+already been wrong once.
+
+Not verified: any timing. `docs/TESTING.md` forbids this tier from asserting
+on frame rate, and it is right to -- the browser tier software-renders about
+a hundred times slower than a player's machine, so a millisecond measured
+here means nothing. Every claim above is a claim about work removed, not
+about a frame rate achieved. Step 6 stands: the owner should take a baseline
+on the machine that stutters, with the Backquote overlay and a Chrome trace
+across ten presses of FIRE and ten of W, before deciding how much further
+into the step 5 list to go.

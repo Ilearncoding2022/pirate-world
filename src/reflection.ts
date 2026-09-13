@@ -51,12 +51,28 @@ const REFLECTION_FAR = GLOBE_RADIUS * 3;
  * `tests/unit/reflection.test.ts`.
  */
 export function scheduleFaces(counter: number, facesPerFrame: number): number[] {
-  if (facesPerFrame <= 0) return [];
   const faces: number[] = [];
-  for (let i = 0; i < facesPerFrame; i++) {
-    faces.push((counter + i) % 6);
-  }
+  scheduleFacesInto(counter, facesPerFrame, faces);
   return faces;
+}
+
+/**
+ * `scheduleFaces`, writing into a caller-owned array instead of a fresh one.
+ *
+ * The scheduler runs every frame for the life of the process, and the array
+ * it produced was three numbers long and thrown away immediately. That is not
+ * a large allocation, but it is an unconditional one on the render path, and
+ * the loop below is identical either way. `scheduleFaces` stays the exported
+ * shape because it is what the unit tier asserts against -- a pure function
+ * returning a value is a far better thing to test than an out-parameter -- and
+ * it now simply delegates here.
+ */
+function scheduleFacesInto(counter: number, facesPerFrame: number, out: number[]): void {
+  out.length = 0;
+  if (facesPerFrame <= 0) return;
+  for (let i = 0; i < facesPerFrame; i++) {
+    out.push((counter + i) % 6);
+  }
 }
 
 export interface Reflection {
@@ -76,8 +92,25 @@ export interface Reflection {
    * water plugin's own `update(dt, env, ship, camera)`: that signature has no
    * `renderer` or top-level `scene`, both of which a render-to-cubemap pass
    * needs and the water shader itself never does.
+   *
+   * `facesPerFrame` overrides the tier's own budget for THIS CALL, and
+   * defaults to it. Each face is a full render of the world scene from the
+   * ship, so it is one of the largest steady costs in the frame, and the
+   * battle branch spends less of it: the ring does not move, the camera does
+   * not move, and what the cube actually holds is sky and distant lights. A
+   * fight halves the budget and picks the cycle back up where it left off,
+   * because the counter is advanced by what was scheduled rather than by a
+   * frame count. It is a ceiling on work, never on correctness -- a tier that
+   * has no reflection at all is still absent rather than idle, and this
+   * argument cannot bring one back.
    */
-  update(dt: number, shipPosition: THREE.Vector3, renderer: THREE.WebGLRenderer, scene: THREE.Scene): void;
+  update(
+    dt: number,
+    shipPosition: THREE.Vector3,
+    renderer: THREE.WebGLRenderer,
+    scene: THREE.Scene,
+    facesPerFrame?: number,
+  ): void;
 }
 
 export function createReflection(quality: Quality): Reflection {
@@ -120,10 +153,18 @@ export function createReflection(quality: Quality): Reflection {
   let primed = false;
   // A running total of faces rendered, mod 6 -- see `scheduleFaces`.
   let faceCounter = 0;
+  /** This frame's faces. Owned here and refilled in place, never rebuilt. */
+  const faces: number[] = [];
 
   return {
     texture: target.texture,
-    update(_dt: number, shipPosition: THREE.Vector3, renderer: THREE.WebGLRenderer, scene: THREE.Scene): void {
+    update(
+      _dt: number,
+      shipPosition: THREE.Vector3,
+      renderer: THREE.WebGLRenderer,
+      scene: THREE.Scene,
+      facesPerFrame: number = quality.reflectionFacesPerFrame,
+    ): void {
       cubeCamera.position.set(
         shipPosition.x * GLOBE_RADIUS,
         shipPosition.y * GLOBE_RADIUS,
@@ -144,7 +185,12 @@ export function createReflection(quality: Quality): Reflection {
         return;
       }
 
-      const faces = scheduleFaces(faceCounter, quality.reflectionFacesPerFrame);
+      // Into the module's own array rather than a fresh one per frame, and
+      // on the budget the CALLER asked for: see `facesPerFrame`. The counter
+      // advances by however many were actually scheduled, so a frame that
+      // takes one face and a frame that takes two still walk the cube in
+      // order and never repeat within a cycle.
+      scheduleFacesInto(faceCounter, facesPerFrame, faces);
       faceCounter = (faceCounter + faces.length) % 6;
       if (faces.length === 0) return;
 

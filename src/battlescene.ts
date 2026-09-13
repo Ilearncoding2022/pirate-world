@@ -447,6 +447,35 @@ export interface BattleScene {
   placeCamera(origin: Vector3, east: Vector3, up: Vector3, north: Vector3): void;
   /** Takes both hulls in. `sunElevation` is `dot(ship.up, env.sunDirection)` at contact. */
   enter(playerHull: Object3D, aiHull: Object3D | null, sunElevation: number): void;
+  /**
+   * Shows every pooled prop, runs `draw`, and hides them all again.
+   *
+   * The one call that exists purely to pay a cost early. Everything this
+   * module pools -- the balls, the splash rings, the crests, the rafts --
+   * ships hidden, and three builds no shader program for an object it does
+   * not draw. So each of them used to compile on the first frame it became
+   * visible, and the thing that makes a cannonball visible is the player
+   * pressing FIRE: the first shot of a fight linked a full PBR program in the
+   * middle of a frame, the first splash linked another a second later. That
+   * is the stutter.
+   *
+   * `draw` is handed in rather than done here because the only draw that
+   * compiles the RIGHT programs is the game's own. A program's cache key
+   * carries the output colour space and the tone mapping, and both of those
+   * are read off whatever render target happens to be bound -- so a frame
+   * drawn straight to the canvas builds different programs from one drawn
+   * through the composer, and this game draws through the composer.
+   * `renderer.compile` was tried here first and was silently useless for
+   * exactly that reason: every program it built was keyed `srgb` and thrown
+   * away, and the real ones were still linked on the first shot. A real
+   * composed frame cannot be wrong about the state it is drawn in, because
+   * it IS that state.
+   *
+   * The caller is responsible for the frame being unseen. `main.ts` calls
+   * this inside `blackout.run`'s opaque moment, which is the same place it
+   * rearranges the world.
+   */
+  precompile(draw: () => void): void;
   update(dt: number, state: BattleState): void;
   /** Clears the balls and the flashes. The hulls are `main.ts`'s to move back. */
   exit(): void;
@@ -1115,6 +1144,26 @@ export function createBattleScene(quality: Quality, postFx?: Pick<PostFx, 'adopt
         // 'aim' needs nothing here: the fuse light above already reads
         // `state.fuse` directly. 'foul' needs nothing beyond the raft
         // vanishing, which its slot dropping out of `state.flotsam` shows.
+      }
+    },
+
+    precompile(draw: () => void): void {
+      // Everything at once, wherever it happens to be sitting. They are all
+      // at the ring's own origin until `update` places them, which is inside
+      // the arena camera's frustum -- so they are genuinely drawn rather than
+      // culled, which is the whole point. The crests already opt out of
+      // culling entirely.
+      for (const ball of balls) ball.visible = true;
+      for (const splash of splashes) splash.mesh.visible = true;
+      for (const slot of crestSlots) slot.mesh.visible = true;
+      for (const raft of raftSlots) raft.visible = true;
+      try {
+        draw();
+      } finally {
+        // Always, even if the draw threw: a fight that opened with twelve
+        // cannonballs stacked at the centre of the ring would be a far worse
+        // failure than the hitch this is here to prevent.
+        resetTransient();
       }
     },
 

@@ -347,6 +347,75 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
   /** The colour class on the root, so it can be taken off again on close. */
   let kindClass = '';
 
+  /**
+   * A one-shot CSS flash that can be re-fired without touching the DOM.
+   *
+   * Both cues on this overlay -- the screen-edge vignette on a hit, and the
+   * glow pulse the fuse bar takes on a commit -- have to be able to run twice
+   * inside their own 260-420 ms, and a CSS animation whose name is already in
+   * force does not restart. The old spelling was to take the class off, read
+   * `offsetWidth` to make the removal stick, and put it back. That read is a
+   * FORCED SYNCHRONOUS LAYOUT: it flushes style and layout for the entire
+   * document, and the document here is the whole HUD under a four-thousand
+   * line stylesheet. It ran on every hit the player took and on every shot
+   * the enemy aimed, in the middle of the most expensive frame the game
+   * draws, which is precisely where a stutter is least affordable.
+   *
+   * The animation object the class creates is the same thing the class is,
+   * and it carries a clock that can simply be wound back. So the class goes
+   * on ONCE, its `Animation` is kept, and every later flash is
+   * `currentTime = 0` plus `play()` -- no class change, so no style
+   * invalidation, and nothing that could make the browser measure anything.
+   *
+   * The keyframes stay in `style.css` where the rest of this overlay's look
+   * lives. That is the whole reason the handle is taken off the element
+   * rather than built here with `el.animate()`: the reduced-motion block at
+   * the foot of the BATTLE section swaps `battle-hit` for `battle-hit-soft`
+   * and switches `bfuse--lit` off entirely, and a copy of the keyframes in
+   * this file would quietly stop honouring either.
+   *
+   * `getAnimations()` does need up-to-date style, so the first flash of a
+   * fight pays a style recalc -- not a layout -- and no flash after it pays
+   * anything at all. When the probe comes back empty the rule in force has
+   * `animation: none`, which is the reduced-motion fuse: there is nothing to
+   * replay and nothing to keep asking about.
+   */
+  interface Flash {
+    /** Fire it, from the top, however recently it last ran. */
+    play(): void;
+    /** Forget the handle and take the class off. For `close` and `open`. */
+    reset(): void;
+  }
+
+  function createFlash(el: HTMLElement, className: string): Flash {
+    let animation: Animation | null = null;
+    let probed = false;
+    return {
+      play(): void {
+        if (animation !== null) {
+          animation.currentTime = 0;
+          animation.play();
+          return;
+        }
+        if (probed) return;
+        probed = true;
+        el.classList.add(className);
+        animation = el.getAnimations()[0] ?? null;
+      },
+      reset(): void {
+        // The class goes too, so a fight that ended mid-flash does not leave
+        // the vignette lit, and so the next `play` probes a clean element.
+        animation?.cancel();
+        animation = null;
+        probed = false;
+        el.classList.remove(className);
+      },
+    };
+  }
+
+  const hitCue = createFlash(hitFlash, 'battle__hit--on');
+  const fuseCue = createFlash(fuse, 'bfuse--lit');
+
   function paintSide(side: Side, hits: number): void {
     if (hits !== side.hits) {
       side.hits = hits;
@@ -483,8 +552,21 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     if (kindClass) overlay.classList.remove(kindClass);
     kindClass = '';
     card.hidden = true;
-    hitFlash.classList.remove('battle__hit--on');
+    hitCue.reset();
+    fuseCue.reset();
   }
+
+  /**
+   * This tick's intent, written in place.
+   *
+   * The same argument this file already makes about the strip's two `Side`
+   * caches, applied to the one object it hands the sim: `update` and `input`
+   * both run at 60fps for as long as a fight lasts, and a fresh object per
+   * frame is garbage made in the middle of an aiming problem. `battle.ts`
+   * reads all three fields inside its own `update` and keeps none of them, so
+   * there is nothing that could see a stale one.
+   */
+  const intent = { fire: false, faster: false, slower: false };
 
   function input(raw: InputState): BattleInput {
     const fired = pressed;
@@ -494,7 +576,10 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     // D-pad's up and down keys work in the arena without this file knowing
     // the pad exists. There is no helm here, so `left` and `right` are simply
     // not read.
-    return { fire: fired, faster: raw.forward, slower: raw.backward };
+    intent.fire = fired;
+    intent.faster = raw.forward;
+    intent.slower = raw.backward;
+    return intent;
   }
 
   function update(state: BattleState): void {
@@ -560,10 +645,10 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
      * lighting, felt on the fuse bar.
      *
      * `owner` is who FIRED, so the AI's hits are the player's and the AI's own
-     * `aim` is what lights its fuse. Both flashes are a CSS animation
-     * restarted by taking the class off, forcing a reflow and putting it back:
-     * that is the whole timer, and it means this file holds no clock of its
-     * own for an effect that has to be able to fire twice in a second.
+     * `aim` is what lights its fuse. Both flashes are a CSS animation whose
+     * clock is wound back to zero -- see `createFlash` -- which is the whole
+     * timer, and means this file holds no clock of its own for an effect that
+     * has to be able to fire twice in a second.
      * `state.events` is THIS TICK's only, rebuilt by `battle.ts` every update,
      * so there is nothing here to remember or to clear. The two flags let one
      * pass over the list catch both events without either one's `break`
@@ -574,18 +659,10 @@ export function createBattleUi(deps: BattleUiDeps): BattleUi {
     for (const event of state.events) {
       if (!hitSeen && event.kind === 'hit' && event.owner === 'ai') {
         hitSeen = true;
-        hitFlash.classList.remove('battle__hit--on');
-        // Reading a layout property is what commits the removal, so the class
-        // going back on starts a new animation instead of continuing the old
-        // one. Deleting this line makes a second hit inside one animation do
-        // nothing at all, silently.
-        void hitFlash.offsetWidth;
-        hitFlash.classList.add('battle__hit--on');
+        hitCue.play();
       } else if (!aimSeen && event.kind === 'aim' && event.owner === 'ai') {
         aimSeen = true;
-        fuse.classList.remove('bfuse--lit');
-        void fuse.offsetWidth;
-        fuse.classList.add('bfuse--lit');
+        fuseCue.play();
       }
       if (hitSeen && aimSeen) break;
     }

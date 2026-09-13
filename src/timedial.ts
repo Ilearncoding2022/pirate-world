@@ -100,6 +100,36 @@ export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
     return true;
   }
 
+  /**
+   * Everything the last painted picture was made of, quantized to what the
+   * canvas can actually show. `-1`/`null` mean "never painted".
+   *
+   * The dial is repainted from the frame loop sixty times a second, and what
+   * it is drawing moves about once a second: a ten-minute day turns the
+   * marker through a fifth of a degree per frame, which is a fraction of a
+   * pixel. Every one of those frames was clearing the canvas, stroking four
+   * arcs, a chord and four ticks, building a radial gradient, re-parsing two
+   * CSS font shorthands and laying out two runs of text -- to arrive at the
+   * same pixels it already had.
+   *
+   * So the picture's inputs are compared first, and an unchanged frame draws
+   * nothing at all. The angular ones are compared in units of half a pixel
+   * ALONG THE RING rather than as raw fractions, which is the only honest
+   * threshold here: it is tied to the dial's drawn radius, so a bigger dial
+   * redraws sooner and a small one less often, and neither can ever skip a
+   * frame the player could see.
+   */
+  let lastSolarTime = -1;
+  let lastDayStart = -1;
+  let lastDayEnd = -1;
+  let lastDayFraction = -1;
+  let lastIsDay: boolean | null = null;
+  let lastPolar: boolean | null = null;
+  let lastPercent = -1;
+  let lastName: string | null = null;
+  let lastWidth = -1;
+  let lastHeight = -1;
+
   function update(ship: ShipState, env: WorldEnv): void {
     if (!resizeToCss()) return;
 
@@ -112,6 +142,54 @@ export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
     const half = Math.min(w, h) / 2;
     const r = half * RING_RADIUS;
     const lineWidth = half * RING_WIDTH;
+
+    /*
+     * Has anything moved far enough to be worth a repaint?
+     *
+     * `steps` is how many half-pixel steps there are around the ring, so
+     * dividing a [0, 1) lap fraction by it and rounding gives a figure that
+     * changes exactly when the thing it describes would land on a different
+     * half pixel. The two text lines are compared as the values they print --
+     * a whole percent and an interned phase name -- so neither builds a
+     * string on a frame that is about to be thrown away.
+     *
+     * The canvas size is in the comparison because `resizeToCss` reallocates
+     * the backing store on a resize, and a reallocated canvas is blank: it
+     * has to be repainted even though nothing about the sun has changed.
+     */
+    const steps = Math.max(1, Math.round(Math.PI * 4 * r));
+    const solarTimeQ = Math.round(phase.solarTime * steps);
+    const dayStartQ = Math.round(phase.dayStart * steps);
+    const dayEndQ = Math.round(phase.dayEnd * steps);
+    const dayFractionQ = Math.round(phase.dayFraction * steps);
+    const percent = phase.polar ? -1 : Math.min(99, Math.floor(phase.progress * 100));
+    const name = phaseName(phase);
+
+    if (
+      solarTimeQ === lastSolarTime &&
+      dayStartQ === lastDayStart &&
+      dayEndQ === lastDayEnd &&
+      dayFractionQ === lastDayFraction &&
+      phase.isDay === lastIsDay &&
+      phase.polar === lastPolar &&
+      percent === lastPercent &&
+      name === lastName &&
+      w === lastWidth &&
+      h === lastHeight
+    ) {
+      return;
+    }
+
+    lastSolarTime = solarTimeQ;
+    lastDayStart = dayStartQ;
+    lastDayEnd = dayEndQ;
+    lastDayFraction = dayFractionQ;
+    lastIsDay = phase.isDay;
+    lastPolar = phase.polar;
+    lastPercent = percent;
+    lastName = name;
+    lastWidth = w;
+    lastHeight = h;
 
     ctx.clearRect(0, 0, w, h);
 
@@ -209,18 +287,14 @@ export function createTimeDial(canvas: HTMLCanvasElement): TimeDial {
      */
     ctx.fillStyle = PROGRESS_TEXT;
     ctx.font = `600 ${Math.round(half * 0.42)}px "Segoe UI Mono", "Consolas", monospace`;
-    const readout = phase.polar
-      ? '--'
-      : `${Math.min(99, Math.floor(phase.progress * 100))}%`;
+    // `percent` is the figure the diff above already read off the phase, and
+    // -1 is how it spells a polar day: there is no fraction to be through.
+    const readout = percent < 0 ? '--' : `${percent}%`;
     ctx.fillText(readout, cx, cy + half * 0.06);
 
     ctx.fillStyle = PHASE_TEXT;
     ctx.font = `600 ${Math.round(half * 0.21)}px "Segoe UI Mono", "Consolas", monospace`;
-    const label = phase.polar
-      ? phase.isDay
-        ? 'NO SUNSET'
-        : 'NO SUNRISE'
-      : phaseName(phase);
+    const label = phase.polar ? (phase.isDay ? 'NO SUNSET' : 'NO SUNRISE') : name;
     ctx.fillText(label, cx, cy + half * 0.34);
   }
 

@@ -1619,6 +1619,53 @@ async function startGame(): Promise<void> {
   }
 
   /**
+   * Draw one frame nobody sees, so the next one nobody waits for.
+   *
+   * Two separate hitches are paid off here, and both of them are shader
+   * compiles. Materials in this engine are handed to the driver on first
+   * DRAW, which is the same rule the loading screen's own warm frame exists
+   * for -- this is that trick, applied to the two moments a fight changes
+   * what the scene is made of.
+   *
+   * **The arena's own props.** `battlescene.ts` pools its balls, splash
+   * rings, crests and rafts at construction precisely so a fight allocates
+   * nothing -- but every one of them ships `visible = false`, and nothing
+   * invisible is ever drawn, so their programs were never built. They were
+   * linked instead on the first frame each became visible, and what makes a
+   * cannonball visible is the player pressing FIRE. That is the stutter the
+   * fight was reported for. `battleScene.precompile` makes the whole pool
+   * visible for the single frame drawn below and hides it again afterwards.
+   *
+   * **The world's own materials.** Adding the arena puts four PointLights
+   * (three muzzle flashes and the fuse) into the scene. The light count is
+   * part of every lit material's program key, so the hull, the raiders and
+   * the land all need new programs -- and need them AGAIN on the way out,
+   * when the four go away. Those used to be linked on the first frame drawn
+   * after each blackout, which is the frame the picture comes back.
+   *
+   * It has to be `postFx.render` and not `renderer.compile`, and that is not
+   * a preference. A program's cache key carries the output colour space and
+   * the tone mapping, and three reads both off whatever render target is
+   * bound: a frame drawn straight to the canvas keys `srgb`, and a frame
+   * drawn through the composer's own target keys `srgb-linear`. This game
+   * draws through the composer. `renderer.compile` binds nothing, so every
+   * program it built here was keyed for a canvas that is never drawn to and
+   * was quietly discarded -- the fight still linked its shaders on the first
+   * shot, and the only trace was the program count going up. A real composed
+   * frame cannot disagree with the frames after it, because it is one of
+   * them.
+   *
+   * `dt` is 0, so nothing moves: this is the frozen branch's own spelling of
+   * a draw that must not advance the world. `camera` is the one the scene is
+   * about to be drawn through, and it is a parameter rather than a reading of
+   * `inArena` because the two call sites straddle that flag -- entry warms
+   * before it is set, exit before it is cleared.
+   */
+  function warmScene(camera: THREE.Camera): void {
+    postFx.render(0, scene, camera);
+  }
+
+  /**
    * The count has run out. The fight the ram declared actually begins.
    *
    * This is the old `onContact` from `battleSim` down, unchanged, and the
@@ -1663,6 +1710,11 @@ async function startGame(): Promise<void> {
       // water the boats are about to be driven through either.
       hazards.barMaelstroms(ringCentre, RING_CLEARANCE);
       scene.add(battleScene.props);
+      // The fight is drawn through the arena's camera from the very next
+      // frame, so that is the camera the programs are built against -- with
+      // the whole pool of props visible for that one frame, which is what
+      // `precompile` is for.
+      battleScene.precompile(() => warmScene(battleScene.camera));
       inArena = true;
       // With the arena. The world's instruments are hidden from here rather
       // than from `open()` so the change happens on a screen that is already
@@ -1748,13 +1800,46 @@ async function startGame(): Promise<void> {
   const BATTLE_FOG_CAP = 0.35;
   const BATTLE_RAIN_CAP = 0.5;
 
+  /**
+   * Cube faces a fight is allowed to spend per frame, against the tier's own.
+   *
+   * Half, rounded up, so `high` drops from two to one and `medium` stays at
+   * the one it already had. `low` has no reflection at all and this cannot
+   * give it one -- `reflection.ts` returns a no-op there before any budget is
+   * read.
+   *
+   * Unlike the two caps above this one is invisible rather than merely
+   * capped, and that is the argument for it: the reflected sky is sampled by
+   * water the arena camera sees at a shallow angle across a ring that does
+   * not move, so halving how often it refreshes changes nothing a player
+   * could point at, and it takes a whole pass over the world scene off the
+   * most expensive frame the game draws.
+   */
+  const BATTLE_REFLECTION_FACES = Math.ceil(quality.reflectionFacesPerFrame / 2);
+
+  /**
+   * The capped copy, written into one object for the length of the run.
+   *
+   * Spelling this as a spread allocated a fresh `WeatherState` on every frame
+   * of every foggy or rainy fight -- sixty a second, for as long as the
+   * weather stayed over the cap -- and handed it straight to `globe.update`
+   * and `rain.update`. Nothing keeps it past the frame it was made for, which
+   * is exactly what makes a scratch object safe here and what made the
+   * garbage pointless. Same move, and the same reason, as `restingSnapshot`.
+   *
+   * Still returns `wx` UNTOUCHED under the caps, so clear weather costs
+   * nothing and the object below stays cold in the common case.
+   */
+  const cappedWeather: { -readonly [K in keyof WeatherState]: WeatherState[K] } = {
+    ...weather.state,
+  };
+
   function battleWeather(wx: WeatherState): WeatherState {
     if (wx.fog <= BATTLE_FOG_CAP && wx.rain <= BATTLE_RAIN_CAP) return wx;
-    return {
-      ...wx,
-      fog: Math.min(wx.fog, BATTLE_FOG_CAP),
-      rain: Math.min(wx.rain, BATTLE_RAIN_CAP),
-    };
+    Object.assign(cappedWeather, wx);
+    cappedWeather.fog = Math.min(wx.fog, BATTLE_FOG_CAP);
+    cappedWeather.rain = Math.min(wx.rain, BATTLE_RAIN_CAP);
+    return cappedWeather;
   }
 
   const _shoveDir = new THREE.Vector3();
@@ -1872,6 +1957,11 @@ async function startGame(): Promise<void> {
       if (playerHullHome) playerHullHome.add(ship.object);
       if (contactHull && contactHullHome) contactHullHome.add(contactHull);
       scene.remove(battleScene.props);
+      // The four arena lights have just gone, so every lit material in the
+      // world needs a program again. No `precompile` here: the props are out
+      // of the scene and it is the WORLD's own materials that are stale. See
+      // `warmScene`.
+      warmScene(view.camera);
       hazards.barMaelstroms(null, 0);
       battleScene.exit();
       if (contactBoat) aiBoats.remove(contactBoat);
@@ -2667,6 +2757,15 @@ async function startGame(): Promise<void> {
     records.seaAnchor.tick(dt);
     records.overdrive.tick(dt);
 
+    // Published from the TOP of the loop rather than from the sailing branch
+    // where the rest of the debug hook is written, because the one thing it
+    // is for happens on the battle branch -- which returns long before that
+    // block. One property read, and only when the hook exists at all; see
+    // `programs` in `quality.ts`.
+    if (window.__pirateWorld) {
+      window.__pirateWorld.programs = renderer.info.programs?.length ?? 0;
+    }
+
     // Read once and threaded into every `energy.update` call below, battle
     // and frozen branches included: a Moonglass Array charges a hull at
     // anchor exactly as readily under an open shop as at sea, and an
@@ -2778,7 +2877,12 @@ async function startGame(): Promise<void> {
       lightning.update(dt, ship.state, weather.state);
       // Before postFx.render, for the sailing branch's reason: it renders
       // into its own cube target and has to give the renderer back.
-      reflection.update(dt, ship.state.position, renderer, scene);
+      // Half the tier's cube budget, rounded up so a tier that renders one
+      // face a frame still renders one. The ring is anchored and the arena
+      // camera is fixed, so what the cube is holding barely changes for the
+      // length of a fight -- and a face is a whole extra pass over the world
+      // scene, on the frame that can least afford one. See `facesPerFrame`.
+      reflection.update(dt, ship.state.position, renderer, scene, BATTLE_REFLECTION_FACES);
       docks.update(dt, env, ship.state, energy.state, battleScene.camera);
       /*
        * The wake, which the sailing branch runs and this one used to skip.

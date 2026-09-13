@@ -656,4 +656,97 @@ test.describe('game smoke', () => {
 
     expect(problems, problems.join('\n')).toEqual([]);
   });
+
+  test('battle=1 compiles the arena before the first shot', async ({ page }) => {
+    /*
+     * The stutter this case exists for.
+     *
+     * Every prop in the arena -- the twelve cannonballs, the six splash
+     * rings, the crests, the rafts -- is pooled at construction and ships
+     * `visible = false`. Three never builds a program for an object it does
+     * not draw, so each of those used to link its shader on the first frame
+     * it became visible, and what makes a cannonball visible is the player
+     * pressing FIRE. The first shot of every fight linked a full PBR program
+     * mid-frame; the first splash linked another a second later.
+     *
+     * `main.ts`'s `warmScene` pays all of it inside the blackout instead, by
+     * calling `renderer.compile` once the props are in the scene -- `compile`
+     * gathers lights with `traverseVisible` but walks MATERIALS with a plain
+     * `traverse`, which is the whole reason hidden props can be reached at
+     * all.
+     *
+     * What is asserted is the program count either side of a shot, because
+     * that is the only part of this a test can hold onto. The cost itself is
+     * a few hundred milliseconds on a real GPU and is buried entirely in the
+     * noise of a software rasteriser, and docs/TESTING.md forbids this tier
+     * from asserting on timing for exactly that reason. A count does not care
+     * how fast the renderer is.
+     */
+    test.setTimeout(300_000);
+
+    const problems = collectConsoleProblems(page);
+
+    // `debug` is what publishes `window.__pirateWorld`; `calm` switches the
+    // arena's own sea off, so the only things that can newly appear across
+    // the shot are the ball and its splash rather than a crest or a raft
+    // that happened to launch in the same window.
+    await boot(page, `/?battle=1&calm=1&debug&${SEED}`);
+
+    /*
+     * Straight to the fight, on one long budget rather than the case above's
+     * two.
+     *
+     * That case waits on the cover and then on the arena because the beat
+     * between them is part of what it is checking. This one only needs
+     * something to shoot at, and the total is what matters: the ram happens
+     * three SIMULATED seconds in, the sim advances at the frame loop's capped
+     * dt, and this tier draws the world at about 4 fps -- so the cover lands
+     * around a minute in on the wall clock and the arena about fifteen
+     * seconds after it. Measured, not guessed; the budget is roughly double
+     * so a slower agent does not flake.
+     *
+     * No `waitForLiveFrame` before it, deliberately. It samples a full page
+     * screenshot in a loop, and every one of those is a GPU stall on a
+     * software rasteriser -- it would be spending the very frames the ram is
+     * waiting on.
+     */
+    await page
+      .locator('#battle')
+      .waitFor({ state: 'visible', timeout: 180_000 })
+      .catch(() => undefined);
+
+    // The fight has to be genuinely up, or there is nothing to shoot and the
+    // assertion below would pass by being vacuous.
+    await expect(page.locator('#battle')).toBeVisible();
+    // Settled: a few frames of the arena drawn, so everything the fight shows
+    // WITHOUT being shot at is already linked and cannot be counted as the
+    // shot's doing.
+    await waitForLiveFrame(page);
+    await page.waitForTimeout(2000);
+
+    const programs = async (): Promise<number> =>
+      page.evaluate(() => window.__pirateWorld?.programs ?? -1);
+
+    const before = await programs();
+    // Not an assertion about the fight -- an assertion about the hook. A -1
+    // here means `?debug` did not publish, and every comparison after it
+    // would be two equal nonsense numbers agreeing with each other.
+    expect(before, 'the debug hook publishes a program count').toBeGreaterThan(0);
+
+    /*
+     * Fire, several times, over a window wide enough for the ball to fly and
+     * the splash to land. `battleui.ts` edge-triggers on keydown and
+     * FIRE_COOLDOWN caps the rate, so extra presses are free.
+     */
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press('Space');
+      await page.waitForTimeout(1200);
+    }
+
+    const after = await programs();
+    expect(after, 'firing links no new shader program').toBe(before);
+
+    await screenshot(page, 'battle-fired');
+    expect(problems, problems.join('\n')).toEqual([]);
+  });
 });
