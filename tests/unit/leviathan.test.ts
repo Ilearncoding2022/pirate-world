@@ -8,6 +8,7 @@ import {
   HARPOON_MIN_RANGE,
   HARPOON_RANGE,
   ARM_UP,
+  AGROUND_SECONDS,
   BODY_LENGTH,
   BODY_SPACING,
   ENDING_FADE,
@@ -1243,5 +1244,139 @@ describe('the cues the views are handed', () => {
     const dive = h.cues.find((c) => c.kind === 'dive');
     expect(dive).toBeDefined();
     expect(dive!.position).toBeDefined();
+  });
+});
+
+describe('the coast', () => {
+  /*
+   * A hunt followed along a coast used to be lost to it nearly every time:
+   * the head swam straight at land, and a turn swung the body, pivoting on
+   * its head, across whatever lay beside it. These are the three things that
+   * fixed it, each asked on its own.
+   */
+
+  it('keeps a followed hunt off a real coast', () => {
+    /*
+     * Water points with land inside thirty-five units, a shoal forced at
+     * each, and a hull held forty units off the mark for two minutes: inside
+     * `DESPAWN_RANGE` and outside `FLEE_RADIUS`, so the only way one of these
+     * hunts can end is the mark going aground. On the committed code before
+     * this case existed, every one of them did.
+     */
+    const spots: Vector3[] = [];
+    for (let lat = -60; lat <= 60 && spots.length < 30; lat += 7) {
+      for (let lon = -180; lon < 180 && spots.length < 30; lon += 11) {
+        const d = latLonToDir(lat, lon);
+        if (heightMap.sample(d) >= terrain.seaLevel || waterBodies.sample(d) >= 0.5) continue;
+        const north = new Vector3();
+        const east = new Vector3();
+        tangentFrame(d, north, east);
+        for (let b = 0; b < 8; b++) {
+          const a = (b * Math.PI) / 4;
+          const dir = north.clone().multiplyScalar(Math.cos(a)).addScaledVector(east, Math.sin(a));
+          const probe = step(d, dir, 35);
+          if (heightMap.sample(probe) >= terrain.seaLevel) {
+            spots.push(d);
+            break;
+          }
+        }
+      }
+    }
+
+    let hunts = 0;
+    const lost: string[] = [];
+    spots.forEach((spot, i) => {
+      const h: Harness = {
+        hunt: createLeviathan({
+          terrain,
+          heightMap,
+          waterBodies,
+          towns,
+          harpoons: locker(0),
+          seed: 100 + i,
+          onEvent: () => {},
+        }),
+        events: [],
+        spares: locker(0),
+      };
+      if (!h.hunt.force(shipAt(spot.clone(), 0))) return;
+      hunts++;
+      for (let f = 0; f < 1200; f++) {
+        h.hunt.update(0.1, parkOnMark(h, 40), false);
+        if (h.hunt.state.phase !== 'drifting') {
+          lost.push(`spot ${i} at ${(f * 0.1).toFixed(1)} s`);
+          break;
+        }
+      }
+    });
+
+    expect(hunts).toBeGreaterThan(20);
+    expect(lost, lost.join('\n')).toEqual([]);
+  });
+
+  it('lays every segment on the path the head swam', () => {
+    /*
+     * The body rides the head's recorded path. Astern along the head's
+     * heading made it a rod that swung through every turn; drawn after the
+     * segment in front, it cut inside tight ones. Either way a segment left
+     * water the head had crossed.
+     */
+    const h = open();
+    h.hunt.force(shipAt(latLonToDir(0, 0)));
+    const dt = 1 / 60;
+    const path: Vector3[] = [];
+    const startForward = h.hunt.state.shadows[0].forward.clone();
+    let turned = 0;
+    for (let f = 0; f < 60 * 30; f++) {
+      h.hunt.update(dt, parkOnMark(h, 40), false);
+      const head = h.hunt.state.shadows[0];
+      path.push(head.position.clone());
+      turned = Math.max(turned, Math.acos(Math.min(1, Math.abs(head.forward.dot(startForward)))));
+    }
+    // The head has to have actually turned, or a rod would pass too.
+    expect(turned).toBeGreaterThan((20 * Math.PI) / 180);
+
+    const recent = path.slice(-60 * 10);
+    for (const shadow of h.hunt.state.shadows) {
+      let nearest = Infinity;
+      for (const point of recent) nearest = Math.min(nearest, arc(point, shadow.position));
+      expect(nearest, `rank ${shadow.rank} off the head's path`).toBeLessThan(0.15);
+    }
+  });
+
+  it('forgives a mark brushing land for under a second, and not a mark aground', () => {
+    /*
+     * The world's map carries sandbars a fraction of a unit wide. A hunt ends
+     * once the mark has been over land for `AGROUND_SECONDS`, not on the
+     * first frame it touches any.
+     */
+    const flood = { land: false };
+    const hunt = createLeviathan({
+      ...OPEN_OCEAN,
+      heightMap: {
+        ...OPEN_OCEAN.heightMap,
+        sample: (d: Vector3) => (flood.land ? 1e6 : OPEN_OCEAN.heightMap.sample(d)),
+      },
+      harpoons: locker(20),
+      seed: 7,
+      onEvent: () => {},
+    });
+    const h: Harness = { hunt, events: [], spares: locker(20) };
+    hunt.force(shipAt(latLonToDir(0, 0)));
+    hunt.update(0.1, parkOnMark(h, 40), false);
+
+    flood.land = true;
+    for (let t = 0; t < (AGROUND_SECONDS * 0.8) / 0.1; t++) hunt.update(0.1, parkOnMark(h, 40), false);
+    expect(hunt.state.phase).toBe('drifting');
+
+    // Back on water resets the count, so the next brush starts from nothing.
+    flood.land = false;
+    hunt.update(0.1, parkOnMark(h, 40), false);
+    flood.land = true;
+    for (let t = 0; t < (AGROUND_SECONDS * 0.8) / 0.1; t++) hunt.update(0.1, parkOnMark(h, 40), false);
+    expect(hunt.state.phase).toBe('drifting');
+
+    for (let t = 0; t < (AGROUND_SECONDS * 0.5) / 0.1; t++) hunt.update(0.1, parkOnMark(h, 40), false);
+    expect(hunt.state.phase).toBe('settling');
   });
 });

@@ -4130,12 +4130,23 @@ taken it away again before anything gets to look at it. The smoke case caught
 exactly that, by failing.
 
 If the point off the bow is not sailable the force falls back to the ordinary
-compass search rather than laying one on a beach. A shoal is also cleared to its
-FULL radius at spawn (the centre plus four cardinal points at `SHOAL_RADIUS`),
-not just at its centre: a shadow sits up to nine units off the middle and
-`update` ends a hunt the moment the marked one is aground, so a centre-only test
-put shoals on coasts that scattered on the next frame and reached the player as
-a notice about a shoal they never saw.
+compass search rather than laying one on a beach. A shoal is also cleared along
+its WHOLE body at spawn (one read per segment down the heading it is laid on,
+and open water a body's length ahead), not just at its head: `update` ends a
+hunt once the marked segment has been aground for `AGROUND_SECONDS`, and the
+mark starts at the tail, so a centre-only test put shoals on coasts that
+scattered straight away and reached the player as a notice about a shoal they
+never saw.
+
+Once laid, the body is kept off land by construction rather than by checks on
+it. Every segment rides the head's own recorded path, so the only thing that
+must stay on water is the head. The head watches `COAST_LOOKAHEAD` ahead, and
+on seeing land turns away through the usual telegraph. It weighs each
+candidate turn along the arc it would actually swim, not by its end heading.
+A drawn turn or a flee that would point it at land is refused, and in an inlet
+narrower than its turning circle it slows and wheels about in place. Followed
+along real coasts at game resolution, hunts lost to land went from every one
+to none.
 
 **`?hunt=armed`** is the same query with the shoal laid INSIDE the gate and the
 marked shadow moved onto the bow at the middle of the band, so the dial is live

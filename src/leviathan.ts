@@ -116,6 +116,20 @@ export const SHOAL_SPAWN_MAX = 45;
 export const DESPAWN_RANGE = 70;
 
 /**
+ * How long the marked segment may be over land before the hunt is lost,
+ * seconds.
+ *
+ * The world's map is sampled finely enough to carry sandbars a fraction of a
+ * unit wide that break the surface by a hair, narrower than anything the
+ * steering reads for. Ending a hunt on the first frame the mark touched one
+ * ended hunts the player could see nothing wrong with. A second is several
+ * units of travel at any speed the animal swims, which carries it across a
+ * sandbar and not across a coast, and coasts are what the steering keeps it
+ * off in the first place.
+ */
+export const AGROUND_SECONDS = 1;
+
+/**
  * Clearance a spawn keeps from a berth, on top of that berth's own radius,
  * world units.
  *
@@ -243,6 +257,60 @@ export const SURFACE_BODY = 0.18;
 export const SURFACE_MARK = 0.5;
 export const SURFACE_STRUCK = 1;
 export const SURFACE_RATE = 3;
+
+/**
+ * How far ahead of the head the animal looks for a coast, world units.
+ *
+ * The body trails its head's own path, so the only NEW water it swims into is
+ * ahead, and a coast has to be seen early enough to telegraph a turn and then
+ * spend it. At `BOLT_SPEED` that is `TURN_TELEGRAPH` of travel (nine units)
+ * plus the turning radius `BOLT_SPEED / HEAD_TURN_RATE` (under nine more). A
+ * body's length clears both, and it is the same reach the spawn's fit test
+ * probes ahead.
+ */
+export const COAST_LOOKAHEAD = BODY_LENGTH;
+
+/**
+ * The turns an animal facing a coast weighs, smallest first, radians: every
+ * fifteen degrees out to a reversal. Each is weighed toward the side it was
+ * already rolling before the other side.
+ */
+const ESCAPE_ANGLES: readonly number[] = Array.from(
+  { length: 12 },
+  (_, i) => ((i + 1) * 15 * Math.PI) / 180,
+);
+
+/**
+ * Reads along `COAST_LOOKAHEAD` when a heading is weighed once rather than
+ * watched frame by frame: one per `BODY_SPACING`, the same density as the body.
+ */
+const COAST_PROBES = SHOAL_COUNT;
+
+/** Seconds before an animal that found no clear heading looks again. */
+const ESCAPE_RETRY = 0.5;
+
+/** The step a turn's arc is walked at when it is weighed, radians. */
+const ARC_STEP = (15 * Math.PI) / 180;
+
+/**
+ * How far the head swims between the points of its recorded path, world
+ * units, and how many points are kept: enough for a whole body and a margin.
+ */
+const TRAIL_STEP = 0.25;
+const TRAIL_POINTS = Math.ceil(BODY_LENGTH / TRAIL_STEP) + 8;
+
+/**
+ * A cornered animal's wheel about: its speed as a fraction of cruise, and its
+ * turn rate as a multiple of `HEAD_TURN_RATE`.
+ *
+ * An inlet narrower than the turning circle (eight units across at cruise)
+ * has no way out at full speed, and holding course runs the head aground. So
+ * when no turn at speed beats the heading held, the animal slows and pivots
+ * nearly in place, on a radius of a third of a unit. Its body lies on the path
+ * it swam in, so it folds back along water it has already crossed.
+ */
+const TIGHT_SPEED = 0.25;
+const TIGHT_TURN = 3;
 
 /** How hard the head turns away from a hull inside the radius, radians/s. */
 export const FLEE_TURN = (90 * Math.PI) / 180;
@@ -462,7 +530,14 @@ const _candidate = new Vector3();
 const _offset = new Vector3();
 const _toShadow = new Vector3();
 const _prevPosition = new Vector3();
-const _candidateEdge = new Vector3();
+/** A coast probe, and the rotated heading a turn is checked along. */
+const _probe = new Vector3();
+const _probeHeading = new Vector3();
+/** A turn being weighed: where its arc starts and ends, and the arc's frame. */
+const _turnStart = new Vector3();
+const _turnEnd = new Vector3();
+const _turnLeft = new Vector3();
+const _turnChord = new Vector3();
 /** A spawn's heading, drawn before the fit test that probes along it. */
 const _heading = new Vector3();
 const _starboardMark = new Vector3();
@@ -731,6 +806,48 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
   let settleClock = 0;
   /** Whether the player has been told the locker is empty, once per shoal. */
   let toldDry = false;
+  /** Seconds until a cornered animal looks for a clear turn again. */
+  let escapeClock = 0;
+  /** Seconds the marked segment has been over land without a break. */
+  let agroundClock = 0;
+  /**
+   * The head's recorded path, newest point first, as a fixed ring. Every
+   * segment behind the head is placed ON it, at its rank's distance back.
+   */
+  const trail: Vector3[] = Array.from({ length: TRAIL_POINTS }, () => new Vector3());
+  let trailNewest = 0;
+  let trailCount = 0;
+
+  function trailPush(point: Vector3): void {
+    trailNewest = (trailNewest + 1) % TRAIL_POINTS;
+    trail[trailNewest].copy(point);
+    trailCount = Math.min(TRAIL_POINTS, trailCount + 1);
+  }
+
+  /** The `i`th recorded point back from the newest. */
+  function trailAt(i: number): Vector3 {
+    return trail[(trailNewest - i + TRAIL_POINTS * 2) % TRAIL_POINTS];
+  }
+
+  /** A fresh path: a straight line astern of `head` along `forward`. */
+  function seedTrail(head: Vector3, forward: Vector3): void {
+    trailCount = 0;
+    for (let k = TRAIL_POINTS - 1; k >= 0; k--) {
+      if (!stepAlong(_probe, head, forward, -k * TRAIL_STEP * ARC)) _probe.copy(head);
+      trailPush(_probe);
+    }
+  }
+
+  /**
+   * Whether the turn pending or being spent was chosen by the coast rather
+   * than drawn. An escape is not second-guessed while it is spent; a drawn
+   * turn is, and a coast ahead replaces it outright.
+   */
+  let escaping = false;
+  /** Whether that escape is a cornered wheel about: slow, and turned hard. */
+  let tight = false;
+  /** Set by `escapeTurn`: whether the turn it returned is a wheel about. */
+  let escapeTight = false;
 
   /* ---- The world's opinion of a point -------------------------------- */
 
@@ -745,33 +862,182 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
 
   /**
    * True if a body laid with its head at `centre`, swimming `forward`, would
-   * start on water everywhere the hunt will ask it to be.
+   * start on water from tail to head and have open water ahead.
    *
    * The centre alone is not enough, and this is not a nicety: `update` ends a
-   * hunt the moment the MARKED segment is aground, and the mark starts at the
-   * tail and walks to the head. So the probes go where the body actually is,
-   * ALONG the heading, rather than at the four cardinal points the MVP's
-   * nine-unit disc needed. A cardinal cross never looks astern of a heading
-   * that is not itself cardinal, which laid tails on beaches: the player
-   * heard a groan and a dive and never saw an animal.
+   * hunt once the MARKED segment is aground, and the mark starts at the tail.
+   * So the probes go where the body actually is, ALONG the heading, rather
+   * than at the four cardinal points the MVP's nine-unit disc needed. A
+   * cardinal cross never looks astern of a heading that is not itself
+   * cardinal, which laid tails on beaches: the player heard a groan and a
+   * dive and never saw an animal.
    *
-   * One read per rank the mark will visit (the head among them), plus one a
-   * body's length AHEAD, because the chain follows its head's path and a nose
-   * already on a beach puts every later mark there too. Six reads where the
-   * cross took five, and a narrow strait now fits a body laid down its length
-   * where a 45-unit cross never could.
+   * One read per segment, and `COAST_PROBES` ahead, because the body follows
+   * its head's path and a nose already facing a beach steers from its first
+   * frame. A narrow strait fits a body laid down its length where a 45-unit
+   * cross never could.
    */
   function shoalFits(centre: Vector3, forward: Vector3): boolean {
     if (!sailable(centre)) return false;
-    const last = SHOAL_COUNT - 1;
-    for (let t = 0; t < HUNT_TARGETS; t++) {
-      const rank = markRankFor(t, last);
-      if (rank === 0) continue;
-      if (!stepAlong(_candidateEdge, centre, forward, -rank * BODY_SPACING * ARC)) return false;
-      if (!sailable(_candidateEdge)) return false;
+    // Laid as a straight line astern, so every rank is on that line.
+    for (let rank = 1; rank < SHOAL_COUNT; rank++) {
+      if (!stepAlong(_probe, centre, forward, -rank * BODY_SPACING * ARC)) return false;
+      if (!sailable(_probe)) return false;
     }
-    if (!stepAlong(_candidateEdge, centre, forward, BODY_LENGTH * ARC)) return false;
-    return sailable(_candidateEdge);
+    return waterAhead(centre, forward, COAST_PROBES);
+  }
+
+  /**
+   * True if there is water for `COAST_LOOKAHEAD` ahead of `head`, read at
+   * `reads` even steps.
+   *
+   * The frame loop asks with three: its probes slide forward with the head
+   * every frame, so over a few frames they cover every point ahead anyway. A
+   * heading being weighed is asked once and has no later frames to fill the
+   * gaps, so it is asked with `COAST_PROBES`.
+   */
+  function waterAhead(head: Vector3, forward: Vector3, reads = 3): boolean {
+    for (let i = 1; i <= reads; i++) {
+      if (!stepAlong(_probe, head, forward, (COAST_LOOKAHEAD * i * ARC) / reads)) return false;
+      if (!sailable(_probe)) return false;
+    }
+    return true;
+  }
+
+  /** The head's forward turned by `angle`, still tangent, in `_probeHeading`. */
+  function headingTurned(head: MutableShadow, angle: number): Vector3 {
+    _probeHeading.copy(head.forward).applyAxisAngle(head.position, angle);
+    _probeHeading.addScaledVector(head.position, -_probeHeading.dot(head.position));
+    if (_probeHeading.lengthSq() > 1e-12) _probeHeading.normalize();
+    else _probeHeading.copy(head.forward);
+    return _probeHeading;
+  }
+
+  /**
+   * How far the head could swim along a heading `angle` off its own before
+   * the first land, world units, read at `COAST_PROBES` steps and capped at
+   * `COAST_LOOKAHEAD`.
+   */
+  function openWater(head: MutableShadow, angle: number): number {
+    const forward = headingTurned(head, angle);
+    // One read at two trail steps first: the flee weighs a few degrees a
+    // frame, and the land that turns it aground is right off the head.
+    if (!stepAlong(_probe, head.position, forward, 2 * TRAIL_STEP * ARC)) return 0;
+    if (!sailable(_probe)) return 0;
+    for (let i = 1; i <= COAST_PROBES; i++) {
+      const reach = (COAST_LOOKAHEAD * i) / COAST_PROBES;
+      if (!stepAlong(_probe, head.position, forward, reach * ARC)) return 0;
+      if (!sailable(_probe)) return reach - COAST_LOOKAHEAD / COAST_PROBES;
+    }
+    return COAST_LOOKAHEAD;
+  }
+
+  /**
+   * How much open water a turn of `angle` leaves the head, world units: 0 if
+   * the head would cross land on the way, and otherwise the straight room from
+   * where the turn ends, along the heading it ends on.
+   *
+   * Weighed along the path the head actually swims. It runs straight for
+   * `leadIn` units first (a telegraph spends that much), then round an arc of
+   * radius `speedNow() / HEAD_TURN_RATE`. Judging a turn by its end heading
+   * alone is what sent a head round a reversal on the wrong side of a bay,
+   * through land four units off its beam, toward water that was open.
+   */
+  function turnRoom(head: MutableShadow, angle: number, leadIn: number, radius: number): number {
+    if (leadIn > 0) {
+      if (!stepAlong(_turnStart, head.position, head.forward, leadIn * ARC)) return 0;
+      if (!sailable(_turnStart)) return 0;
+    } else {
+      _turnStart.copy(head.position);
+    }
+    _turnEnd.copy(_turnStart);
+
+    const sweep = Math.abs(angle);
+    const side = Math.sign(angle);
+    // A positive `rotateTangent` turns the heading toward up x forward.
+    _turnLeft.crossVectors(head.position, head.forward).normalize();
+    const steps = Math.ceil(sweep / ARC_STEP);
+    for (let k = 1; k <= steps; k++) {
+      const phi = (sweep * k) / steps;
+      _turnChord
+        .copy(head.forward)
+        .multiplyScalar(radius * Math.sin(phi))
+        .addScaledVector(_turnLeft, side * radius * (1 - Math.cos(phi)));
+      const chord = _turnChord.length();
+      if (chord < 1e-9) continue;
+      _turnChord.addScaledVector(_turnStart, -_turnChord.dot(_turnStart));
+      if (_turnChord.lengthSq() < 1e-12) continue;
+      _turnChord.normalize();
+      if (!stepAlong(_turnEnd, _turnStart, _turnChord, chord * ARC)) return 0;
+      if (!sailable(_turnEnd)) return 0;
+    }
+
+    headingTurned(head, angle);
+    _probeHeading.addScaledVector(_turnEnd, -_probeHeading.dot(_turnEnd));
+    if (_probeHeading.lengthSq() < 1e-12) return 0;
+    _probeHeading.normalize();
+    for (let i = 1; i <= COAST_PROBES; i++) {
+      const reach = (COAST_LOOKAHEAD * i) / COAST_PROBES;
+      if (!stepAlong(_probe, _turnEnd, _probeHeading, reach * ARC)) return 0;
+      if (!sailable(_probe)) return reach - COAST_LOOKAHEAD / COAST_PROBES;
+    }
+    return COAST_LOOKAHEAD;
+  }
+
+  /**
+   * The turn a head facing land should take, radians, where 0 means hold.
+   *
+   * The smallest turn with open water for the whole `COAST_LOOKAHEAD`, and
+   * failing that the turn toward the MOST open water, if it beats the heading
+   * already held. A yes-or-no "clear for twenty-two units" found nothing in a
+   * bay or a strait narrower than that, so the animal held its course into
+   * the shore; steering toward the most room does not corner itself. Both
+   * sides are weighed at every size, because a reversal to port and one to
+   * starboard end on the same heading and swim different water.
+   *
+   * When no turn at speed beats holding on, a wheel about is weighed instead
+   * (`TIGHT_SPEED`, `TIGHT_TURN`), and `escapeTight` says that is what came
+   * back.
+   *
+   * Only the head's path is weighed, because the body trails that path and a
+   * head kept on water keeps every segment behind it on water too. Draws
+   * nothing from the seeded stream, so the coast decides where the animal goes
+   * without reordering the draws behind it.
+   */
+  function escapeTurn(head: MutableShadow, prefer: number, leadIn: number): number {
+    const first = prefer < 0 ? -1 : 1;
+    let best = 0;
+    let bestRoom = openWater(head, 0);
+    escapeTight = false;
+    const wide = speedNow() / HEAD_TURN_RATE;
+    for (const angle of ESCAPE_ANGLES) {
+      for (const side of [first, -first]) {
+        const room = turnRoom(head, side * angle, leadIn, wide);
+        if (room >= COAST_LOOKAHEAD) return side * angle;
+        if (room > bestRoom) {
+          best = side * angle;
+          bestRoom = room;
+        }
+      }
+    }
+    if (best !== 0) return best;
+
+    // Nothing at speed beats holding on. Cornered: weigh a wheel about, which
+    // starts at once and turns on a radius of a fraction of a unit.
+    const narrow = (speedNow() * TIGHT_SPEED) / (HEAD_TURN_RATE * TIGHT_TURN);
+    for (const angle of ESCAPE_ANGLES) {
+      for (const side of [first, -first]) {
+        const room = turnRoom(head, side * angle, 0, narrow);
+        if (room > bestRoom) {
+          best = side * angle;
+          bestRoom = room;
+          if (room >= COAST_LOOKAHEAD) break;
+        }
+      }
+      if (bestRoom >= COAST_LOOKAHEAD) break;
+    }
+    escapeTight = best !== 0;
+    return best;
   }
 
   /** True if any berth's centre is within `clearance` world units of `dir`. */
@@ -841,7 +1107,8 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
   function speedNow(): number {
     const row = Math.max(0, Math.min(LEVEL_SPEED.length - 1, state.level));
     const cruise = LEVEL_SPEED[row];
-    return state.bolt > 0 ? cruise + (BOLT_SPEED - cruise) * state.bolt : cruise;
+    const speed = state.bolt > 0 ? cruise + (BOLT_SPEED - cruise) * state.bolt : cruise;
+    return tight ? speed * TIGHT_SPEED : speed;
   }
 
   function holdForLevel(level: number): number {
@@ -954,6 +1221,7 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
      * was, so what happens to be on the water cannot reorder the draws behind
      * it and every existing seeded expectation downstream is undisturbed.
      */
+    seedTrail(c, f);
     rng();
     markRank(state.shadows.length - 1);
 
@@ -981,6 +1249,10 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     pendingTurn = 0;
     turnRemaining = 0;
     toldDry = false;
+    escapeClock = 0;
+    agroundClock = 0;
+    escaping = false;
+    tight = false;
     emit({ kind: 'spawn', position: state.shadows[0]?.position });
   }
 
@@ -1352,12 +1624,68 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     headingClock -= dt;
     state.turnIn = headingClock;
 
+    const lead = state.shadows[0] ?? null;
+
+    /*
+     * The coast, which the animal steers around rather than onto.
+     *
+     * `update` ends a hunt once the mark is aground, and nothing used to keep
+     * it off a beach: the head swam straight at coasts, and a turn swung a
+     * body pivoting on its head across whatever lay beside it. Following an
+     * animal along a coast lost the hunt nearly every time, to nothing the
+     * player did. So a head that sees land inside `COAST_LOOKAHEAD` turns
+     * away early, through the same telegraph as any other turn, so that it
+     * still reads as a turn.
+     */
+    escapeClock = Math.max(0, escapeClock - dt);
+    if (lead !== null && !escaping && escapeClock === 0 && !waterAhead(lead.position, lead.forward)) {
+      /*
+       * Telegraphed like any other turn, unless the land is closer than a
+       * telegraph and a turning circle at this speed. Then it turns NOW: a
+       * turn the player could read a second early is no use to an animal
+       * already on the beach by the time it begins.
+       */
+      const urgent = openWater(lead, 0) < speedNow() * (TURN_TELEGRAPH + 1 / HEAD_TURN_RATE);
+      const telegraph = urgent ? 0 : Math.min(headingClock, TURN_TELEGRAPH);
+      const escape = escapeTurn(lead, lead.bank, speedNow() * telegraph);
+      if (escape !== 0) {
+        // Replaces a drawn turn that is pending or half spent: that turn was
+        // chosen for a sea that had no coast in it.
+        pendingTurn = escape;
+        turnRemaining = 0;
+        escaping = true;
+        // A wheel about starts at once: a cornered animal has no second to
+        // spend on a telegraph.
+        tight = escapeTight;
+        headingClock = tight ? 0 : telegraph;
+        state.turnIn = headingClock;
+        emit({ kind: 'turn', sign: Math.sign(pendingTurn) });
+      } else {
+        escapeClock = ESCAPE_RETRY;
+      }
+    }
+
     if (headingClock <= TURN_TELEGRAPH && pendingTurn === 0 && turnRemaining === 0) {
       // Drawn here rather than at the moment of turning, so the bank and the
       // cue can both carry the sign of a turn that has not happened yet.
-      pendingTurn = (rng() * 2 - 1) * TURN_MAX;
-      if (pendingTurn === 0) pendingTurn = TURN_MAX * 0.5;
-      emit({ kind: 'turn', sign: Math.sign(pendingTurn) });
+      let drawn = (rng() * 2 - 1) * TURN_MAX;
+      if (drawn === 0) drawn = TURN_MAX * 0.5;
+      // A drawn turn that would point the head at land is not taken. The
+      // heading already held is kept when it is open, and otherwise the coast
+      // chooses, exactly as it would have a frame later.
+      const leadIn = speedNow() * Math.max(0, headingClock);
+      if (lead !== null && turnRoom(lead, drawn, leadIn, speedNow() / HEAD_TURN_RATE) < COAST_LOOKAHEAD) {
+        drawn = openWater(lead, 0) >= COAST_LOOKAHEAD ? 0 : escapeTurn(lead, drawn, leadIn);
+      }
+      if (drawn !== 0) {
+        pendingTurn = drawn;
+        emit({ kind: 'turn', sign: Math.sign(pendingTurn) });
+      } else {
+        // Held rather than turned. A fresh hold, so this is not asked again
+        // on every frame of the telegraph window.
+        headingClock = holdForLevel(state.level);
+        state.turnIn = headingClock;
+      }
     }
 
     if (headingClock <= 0 && pendingTurn !== 0) {
@@ -1393,7 +1721,22 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
          */
         const cross = _axis.crossVectors(head.forward, _toShadow).dot(head.position);
         const away = cross >= 0 ? -1 : 1;
-        rotateTangent(head, away * Math.min(FLEE_TURN * dt, Math.PI));
+        const step = away * Math.min(FLEE_TURN * dt, Math.PI);
+        /*
+         * Away from the hull, but not at a beach. The flee turns the head a
+         * few degrees every frame, so it is weighed from close in: open water
+         * measured from half a unit ahead, which sees land a unit or two off
+         * the beam that a probe seven units out swings straight past. A heading
+         * with less room than the one held is not taken; the other side is
+         * tried, and failing both the head holds and only the bolt runs. An
+         * escape already being spent is left alone, because it was weighed
+         * along its whole arc and a flee was not.
+         */
+        if (!escaping) {
+          const need = Math.min(COAST_LOOKAHEAD, openWater(head, 0));
+          if (openWater(head, step) >= need) rotateTangent(head, step);
+          else if (openWater(head, -step) >= need) rotateTangent(head, -step);
+        }
         state.bolt = Math.max(state.bolt, 0.6);
       }
     }
@@ -1402,10 +1745,33 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     // than applied in one frame. The body follows by construction below.
     if (turnRemaining !== 0 && head !== null) {
       const sign = Math.sign(turnRemaining);
-      const stepAngle = Math.min(Math.abs(turnRemaining), HEAD_TURN_RATE * dt) * sign;
-      rotateTangent(head, stepAngle);
-      turnRemaining -= stepAngle;
-      if (Math.abs(turnRemaining) < 1e-9) turnRemaining = 0;
+      const rate = HEAD_TURN_RATE * (tight ? TIGHT_TURN : 1);
+      const stepAngle = Math.min(Math.abs(turnRemaining), rate * dt) * sign;
+      /*
+       * A DRAWN turn is checked again as it is spent, not only when it was
+       * drawn. The head swims on through the telegraph, so the turn begins
+       * several units from where it was weighed. A step that leaves the head
+       * less open water than it has now, short of the whole look-ahead, ends
+       * the turn where it is. An escape is not checked: it was chosen for the
+       * room at the END of it, and a turn away from a coast passes through
+       * headings with less room on its way round.
+       */
+      let stop = false;
+      if (!escaping) {
+        const next = openWater(head, stepAngle);
+        stop = next < COAST_LOOKAHEAD && next < openWater(head, 0);
+      }
+      if (stop) {
+        turnRemaining = 0;
+      } else {
+        rotateTangent(head, stepAngle);
+        turnRemaining -= stepAngle;
+        if (Math.abs(turnRemaining) < 1e-9) turnRemaining = 0;
+      }
+      if (turnRemaining === 0) {
+        escaping = false;
+        tight = false;
+      }
     }
 
     // The bolt decays on its own clock, raised by a strike or by a hull inside
@@ -1422,29 +1788,58 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
     /*
      * The head swims; the body follows it.
      *
-     * Only rank 0 is transported. Every other segment is placed
-     * `BODY_SPACING` behind the one ahead of it, along that one's own great
-     * circle, which is what makes fourteen drifting blobs into one animal.
-     * Spacing is therefore exact by construction rather than maintained by a
-     * spring, and the parallel-transport invariant holds per segment because
-     * every position is produced by `stepAlong` and every tangent by
-     * `pointAt` at the position it belongs to.
+     * Only rank 0 is transported. The head's path is recorded every
+     * `TRAIL_STEP`, and every other segment is placed ON that path at its
+     * rank's distance behind the head, which is what makes fourteen drifting
+     * blobs into one animal, and is the train on rails `leviathanshadows.ts`
+     * waves for the eye. Every position is a normalised point of the path and
+     * every tangent is `pointAt` toward the segment ahead, at the position it
+     * belongs to, so the parallel-transport invariant holds per segment.
+     *
+     * On the path, and not astern along the head's heading, nor drawn after
+     * the segment in front. Astern made the body a rigid rod pivoting on its
+     * head, so every turn swung the tail through a twenty-two-unit arc across
+     * whatever lay beside the animal. Drawn after the segment in front, it
+     * cut up to three units inside every tight turn. Both put the mark on
+     * beaches the head had swum around. On the path, a head kept off land
+     * keeps every segment off it, and a turn travels down the body.
      */
     if (head !== null) {
       head.age += dt;
       transport(head, dt);
+      if (trailCount === 0 || head.position.distanceTo(trailAt(0)) * GLOBE_RADIUS >= TRAIL_STEP) {
+        trailPush(head.position);
+      }
       advanceSegment(head, dt, 0);
 
+      // Walk back along the path from the head: `_candidate` is the start of
+      // the current piece, `walked` how far back along the path that is.
+      _candidate.copy(head.position);
+      let walked = 0;
+      let next = trailAt(0).distanceTo(head.position) * GLOBE_RADIUS < 1e-6 ? 1 : 0;
       for (let i = 1; i < state.shadows.length; i++) {
         const ahead = state.shadows[i - 1];
         const shadow = state.shadows[i];
         shadow.age += dt;
 
-        // The point one spacing astern of the segment in front, which is where
-        // this one belongs. `-BODY_SPACING` along its forward is astern of it.
-        if (stepAlong(_candidate, ahead.position, ahead.forward, -BODY_SPACING * ARC)) {
-          shadow.position.copy(_candidate);
+        const want = i * BODY_SPACING;
+        let placed = false;
+        while (next < trailCount) {
+          const to = trailAt(next);
+          const piece = _candidate.distanceTo(to) * GLOBE_RADIUS;
+          if (walked + piece >= want && piece > 1e-9) {
+            shadow.position.copy(_candidate).lerp(to, (want - walked) / piece).normalize();
+            placed = true;
+            break;
+          }
+          walked += piece;
+          _candidate.copy(to);
+          next++;
         }
+        // Past the end of the record, which a seeded path is long enough to
+        // never be: held at the oldest point rather than left behind.
+        if (!placed) shadow.position.copy(_candidate);
+
         if (pointAt(_bearingDir, shadow.position, ahead.position)) {
           shadow.forward.copy(_bearingDir);
         }
@@ -1482,10 +1877,11 @@ export function createLeviathan(deps: LeviathanDeps): Leviathan {
      * gold for the same reason a scattered one does: the damage was real.
      */
     const target = marked();
+    agroundClock = target !== null && !sailable(target.position) ? agroundClock + dt : 0;
     if (
       target === null ||
       suppressed ||
-      !sailable(target.position) ||
+      agroundClock > AGROUND_SECONDS ||
       arcDistance(ship.position, target.position) > DESPAWN_RANGE
     ) {
       finish('sounded', 'lost');
