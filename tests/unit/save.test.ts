@@ -83,10 +83,36 @@ describe('save', () => {
           remaining: 180,
         },
       ],
+      destination: 'Neon Reach',
     };
     writeSave(data);
     const loaded = loadSave();
     expect(loaded).toEqual(data);
+  });
+
+  it('repairs a missing or unreadable destination to no course', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, gold: 5 }));
+    expect(loadSave().destination).toBeNull();
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, gold: 5, destination: 42 }));
+    const loaded = loadSave();
+    expect(loaded.destination).toBeNull();
+    expect(loaded.gold).toBe(5);
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, destination: '' }));
+    expect(loadSave().destination).toBeNull();
+  });
+
+  it('keeps a destination this build cannot place', () => {
+    fake.setItem(SAVE_KEY, JSON.stringify({ version: 1, destination: 'Atlantis' }));
+    expect(loadSave().destination).toBe('Atlantis');
+  });
+
+  it('writes a course through the records and reads it back', () => {
+    const records = createRecords();
+    records.course.set('Rustwharf');
+    expect(JSON.parse(fake.getItem(SAVE_KEY)!).destination).toBe('Rustwharf');
+    expect(createRecords().course.destination).toBe('Rustwharf');
+    records.course.set(null);
+    expect(JSON.parse(fake.getItem(SAVE_KEY)!).destination).toBeNull();
   });
 
   it('returns EMPTY_SAVE when nothing has been written', () => {

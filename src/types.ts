@@ -1125,6 +1125,14 @@ export interface SaveData {
    * the sea it measured is gone — see `docs/QUESTS_PLAN.md`, interpretation 4.
    */
   readonly quests: readonly ActiveQuest[];
+  /**
+   * The harbour the player has set a course for, by NAME, or null.
+   *
+   * By name for `knownHarbours`' reason: a course set last session points at
+   * the same harbour on whatever island this world put it. Absent or unreadable
+   * means no course, which is what a save written before courses existed had.
+   */
+  readonly destination: string | null;
 }
 
 /* ------------------------------------------------------------------ */

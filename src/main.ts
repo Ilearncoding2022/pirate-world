@@ -22,6 +22,8 @@ import { createLightning } from './lightning';
 import { createChart } from './chart';
 import { createDocks } from './docks';
 import { createShipBeam } from './shipbeam';
+import { pickCourse } from './course';
+import { createDoubleTap, pickHarbour } from './harbourpick';
 import { createPostFx } from './postfx';
 import { createRecords, loadChart, writeChart } from './save';
 import { createFishing } from './fishing';
@@ -1277,6 +1279,52 @@ async function startGame(): Promise<void> {
         };
       }),
     reputation: () => records.reputation.points,
+  });
+
+  /**
+   * A course pick on `name`, from a double-click on the world or the HARBOURS
+   * page: set it, switch to it, or clear it if it is already the course. A
+   * harbour never moored at is refused with a notice rather than silently, so
+   * the click does not read as broken (owner's call, 2026-09-13).
+   */
+  function applyCoursePick(name: string): void {
+    const pick = pickCourse(records.course.destination, name, records.known.names);
+    const label = name.toUpperCase();
+    if (pick.kind === 'uncharted') {
+      toast.push(`${label} UNCHARTED - DOCK THERE FIRST`, 'info');
+    } else if (pick.kind === 'clear') {
+      records.course.set(null);
+      toast.push(`COURSE FOR ${label} CLEARED`, 'info');
+    } else {
+      records.course.set(name);
+      toast.push(`COURSE SET FOR ${label}`, 'good');
+    }
+  }
+
+  /*
+   * Double-click -- or double-tap -- a harbour's beacon to set a course for it.
+   *
+   * On the canvas only, so a press on a HUD key never counts: the HUD sits over
+   * the canvas with pointer events off except on its buttons, and those take
+   * the press themselves. Refused whenever something else owns the screen, on
+   * the [FISH] key's list, because a pick under a card is a pick nobody saw.
+   */
+  const courseTap = createDoubleTap();
+  renderer.domElement.addEventListener('pointerdown', (event) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    if (!courseTap.tap(event.clientX, event.clientY, event.timeStamp)) return;
+    if (fishing.isOpen || fishBook.isOpen || shop.isOpen || fishCover.isOpen) return;
+    if (questCover.isOpen || menu.isOpen || battleUi.isOpen || battleCover.isOpen) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    const name = pickHarbour(
+      docks.markers(),
+      view.camera,
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+      rect.width,
+      rect.height,
+    );
+    if (name !== null) applyCoursePick(name);
   });
 
   /*
@@ -2585,6 +2633,11 @@ async function startGame(): Promise<void> {
     return energy.state.mode === 'docked' || blackout.active || hazards.state.phase !== 'free';
   }
 
+  /** The harbour the ship was moored at last frame, for the course's arrival. */
+  // Seeded with wherever the ship boots, so loading a save that is moored at
+  // its own destination does not announce an arrival nobody made.
+  let lastMooredAt: string | null = globe.towns.dockAt(ship.state.position)?.town.name ?? null;
+
   function frame(): void {
     const dt = Math.min(clock.getDelta(), 0.1);
 
@@ -2865,6 +2918,20 @@ async function startGame(): Promise<void> {
     const berth =
       energy.state.mode === 'docked' ? globe.towns.dockAt(ship.state.position) : null;
     if (berth) records.known.add(berth.town.name);
+
+    /*
+     * Arriving clears the course. On the frame the ship comes ALONGSIDE, not on
+     * every frame it sits there: a course set for the harbour the ship is
+     * already moored at would otherwise be cleared the frame after it was set.
+     */
+    const mooredAt = berth ? berth.town.name : null;
+    if (mooredAt !== lastMooredAt) {
+      lastMooredAt = mooredAt;
+      if (mooredAt !== null && records.course.destination === mooredAt) {
+        records.course.set(null);
+        toast.push(`ARRIVED AT ${mooredAt.toUpperCase()}`, 'good');
+      }
+    }
 
     /*
      * Contracts, on the same beat and off the same verdict.

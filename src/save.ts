@@ -31,6 +31,8 @@ import { createKnownHarbours } from './knownharbours';
 import { createHarbourStock } from './harbourstock';
 import type { Reputation } from './reputation';
 import { createReputation } from './reputation';
+import type { Course } from './course';
+import { createCourse } from './course';
 import { MAX_ACTIVE, REPUTATION_FLOOR } from './questconstants';
 
 /**
@@ -129,6 +131,7 @@ export const EMPTY_SAVE: SaveData = Object.freeze({
   // is ever chosen -- see the note there on why it cannot be drawn here.
   questSeed: 0,
   quests: Object.freeze([]),
+  destination: null,
 });
 
 /* ------------------------------------------------------------------ */
@@ -469,6 +472,19 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
       : 0;
 
   /**
+   * The course. Any non-empty string is kept, unknown names included, on the
+   * `knownHarbours` terms: a harbour this build cannot place is still the one
+   * the player was sailing for. Anything else is no course.
+   */
+  const rawDestination = record.destination;
+  let destination: string | null = null;
+  if (typeof rawDestination === 'string' && rawDestination.length > 0) {
+    destination = rawDestination;
+  } else if (rawDestination !== undefined && rawDestination !== null) {
+    notes.push(`destination ${JSON.stringify(rawDestination)}`);
+  }
+
+  /**
    * Contracts in hand. An unreadable entry costs one contract; an unreadable
    * LIST costs all of them, because there is nothing to iterate.
    */
@@ -546,6 +562,7 @@ function sanitize(parsed: unknown, notes: string[]): SaveData {
     reputation: reputation ?? 0,
     questSeed,
     quests,
+    destination,
   };
 }
 
@@ -707,6 +724,8 @@ export function createRecords(): {
   known: KnownHarbours;
   stock: HarbourStock;
   reputation: Reputation;
+  /** The harbour the player is sailing for, by name. See `course.ts`. */
+  course: Course;
   /**
    * The board seed for this session: the saved one, or a fresh draw on a file
    * that has never had one.
@@ -765,6 +784,7 @@ export function createRecords(): {
   const known = createKnownHarbours(save.knownHarbours);
   const stock = createHarbourStock(save.harbourStock);
   const reputation = createReputation(save.reputation);
+  const course = createCourse(save.destination);
 
   /*
    * The board seed, drawn here on a file that has none.
@@ -814,6 +834,7 @@ export function createRecords(): {
       // list. A `persist` triggered by a catch in the first second of a session
       // must not be the write that erases three contracts in hand.
       quests: questSource?.snapshot() ?? save.quests,
+      destination: course.destination,
     });
   }
 
@@ -851,6 +872,9 @@ export function createRecords(): {
   // Standing moves on a settled contract and nowhere else, so it writes
   // straight through like the two above rather than being throttled.
   reputation.onChange(persist);
+  // A course is set or cleared by hand, or cleared on arrival: a handful of
+  // writes a session, straight through.
+  course.onChange(persist);
 
   return {
     wallet,
@@ -869,6 +893,7 @@ export function createRecords(): {
     known,
     stock,
     reputation,
+    course,
     questSeed,
     questsSaved: save.quests,
     attachQuests(quests: QuestSource): void {
