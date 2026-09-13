@@ -589,6 +589,10 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   one bundle aboard, so the first hunt is free. A maelstrom, a fight, or simply
   sailing seventy units away all end a hunt, paying what it had earned — and
   the three endings look like three different things.
+  The animal **knows the coast**. Its body follows the exact path its head
+  swam, snaking through turns, and the head turns away from land it sees a
+  body's length ahead. Chase it along a shoreline or into a bay and it will
+  wheel about rather than beach itself, so a hunt is not lost to the map.
   It is also **the only thing in the game that makes a sound**: a groan when it
   surfaces, a tick that quickens as the needle nears green, a thud and a splash
   on the throw. There is a mute in the menu's controls pane.

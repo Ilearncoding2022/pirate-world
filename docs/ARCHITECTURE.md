@@ -320,7 +320,7 @@ shader.
 | `raftmesh.ts` | `buildRaft(name, yaw, radius?)`, `RAFT_PIECES`, `RAFT_NOMINAL_R`, `RAFT_COLOR` | one pile of lost timber, drawn the same way in both seas. Lifted unchanged out of `battlescene.ts` so the arena's flotsam and the ocean's salvage are one object rather than two tables that would drift apart on the first retune. Geometry and material are shared across every raft in the game |
 | `derelict.ts` | `createDerelicts(deps)`, `DerelictDeps`, `Derelicts`, `oddsFor(weather)`, `TOW_SPEED_SHARE`, `HOOK_RADIUS`, `TOW_DISTANCE`, the odds and band constants | the dead hull adrift and the tow: the same ten-second clock and weather sum as the salvage at a tenth of the odds (0.2% clear, 3% ceiling), **one at a time ever**, bound for a harbour drawn 120-350 units off, hooked by `Space` inside `HOOK_RADIUS` and then held rigidly `TOW_DISTANCE` astern. Owns `DerelictState`; publishes `hookReady` the way `energy.ts` publishes `berthReady`. It does not pay, does not slow the ship and does not decide when a tow is lost — `main.ts`, `ship.ts` and `energy.ts` do, off `towed` |
 | `derelicthull.ts` | `createDerelictHull(scene, cloneHull, postFx?)`, `DerelictHull` | the dead hull as something you can see, and the ring you hook it from: one clone from `ship.cloneHull()` with its neon zeroed, its planking darkened to a third and `rimglow.ts` installed at a tenth of a raider's strength — without which an unlit hull on dark water is unfindable. `aihulls.ts`'s opposite number in every visible respect |
-| `leviathan.ts` | `createLeviathan(deps)`, `LeviathanDeps`, `Leviathan`, `HuntLocker`, `damageAt`, `huntGoldFor`, the roll, shoal, gate and purse constants | the hunt sim: the roll, the shoal's drift and heading reroll, the mark, the range-and-arc gate, the dial, the damage, the scatter and the purse figure. Owns `HuntState`, mutated in place; DOM-free, scene-free and seeded, cut from `aiboats.ts`; see **The leviathan hunt** |
+| `leviathan.ts` | `createLeviathan(deps)`, `LeviathanDeps`, `Leviathan`, `HuntLocker`, `damageAt`, `huntGoldFor`, the roll, shoal, gate and purse constants | the hunt sim: the roll, the shoal's drift and heading reroll, the body riding the head's recorded path, the coast steering, the mark, the range-and-arc gate, the dial, the damage, the scatter and the purse figure. Owns `HuntState`, mutated in place; DOM-free, scene-free and seeded, cut from `aiboats.ts`; see **The leviathan hunt** |
 | `leviathanshadows.ts` | `createShadowField(scene, postFx?, path?)`, `ShadowField` | the body as things you can see, on the `low` tier: a pool of `SHOAL_COUNT` tapered teardrop planes with two procedurally drawn textures, placed on the globe from `HuntState` each frame. Stands down entirely when `path` is `'shader'`. No asset file, no mesh |
 | `huntsweep.ts` | `createSweep`, `arm`, `step`, `position`, `canPress`, `rateFor`, `multiplierFor`, `damageAt`, `bandFor`, `huntGoldFor`, `Sweep`, the dial and escalation constants | the needle and the money: the sweep that starts at the RED EDGE, the arm-up, the rate tied to how centred the mark is, `LEVEL_MULTIPLIER` and the purse. Pure functions over a two-field struct — no module state, no DOM, no `three` |
 | `leviathanwater.ts` | `createLeviathanWaterPlugin()`, `LeviathanWaterPlugin` | the body as a darkening term INSIDE the water shader, on `medium` and `high`: a tapered teardrop per segment in its own tangent frame, plus the mark's foam ring and a night rim held under `BLOOM_THRESHOLD`. A `WaterPlugin`, built before `createGlobe` and `bind`-ed after |
@@ -3854,7 +3854,7 @@ Two modules own every rule and eight draw or sound what they are told.
 
 | Module | Owns |
 |---|---|
-| `leviathan.ts` | The animal: the roll, the chained body, the turn, the flee, the gate, the endings, the purse's caller |
+| `leviathan.ts` | The animal: the roll, the chained body, the turn, the flee, the coast steering, the gate, the endings, the purse's caller |
 | `huntsweep.ts` | The needle and the money: the sweep, `damageAt`, `LEVEL_MULTIPLIER`, `huntGoldFor`. Pure functions, no state, no DOM, no `three` |
 | `leviathanshadows.ts` | The body as sprites — the `low` tier's path |
 | `leviathanwater.ts` | The body as a darkening term in the water shader — `medium` and `high` |
@@ -4013,8 +4013,8 @@ the game. `reputation.ts` records that the scale is earned before it is spent
 precisely so Phase 2 has a history to gate on, and flooding it before it means
 anything would set that baseline wrong. Gold only.
 
-### The five ways a hunt ends
-All five pay what was banked, and all five pay exactly once: the purse settles
+### The six ways a hunt ends
+All six pay what was banked, and all six pay exactly once: the purse settles
 on the transition INTO `settling`, so the fade that follows cannot pay twice.
 
 | Ending | Where |
@@ -4022,6 +4022,7 @@ on the transition INTO `settling`, so the fade that follows cannot pay twice.
 | Five targets banked, however feeble the fifth | `fire`, `settled` |
 | A press under `SOUND_BELOW` (10 damage), on any target but the last | `fire`, `sounded` with `reason: 'pinprick'` |
 | Sailed more than `DESPAWN_RANGE` from the mark | `update`, `reason: 'lost'` |
+| The mark aground for `AGROUND_SECONDS` without a break | `update`, `reason: 'lost'`. Rare, because the head steers off coasts; see **Keeping the animal off the coast** |
 | `suppressed()` went true: docked, a blackout, or a maelstrom | `update`, `reason: 'lost'` |
 | A fight started | `main.ts`'s `onContact` calls `leviathan.scatter()` |
 
@@ -4118,6 +4119,53 @@ the count of planes actually submitted. The real fix is a darkening term inside
 the water shader through the plugin contract `waterhazard.ts` already uses: a
 term inside the surface cannot be above or below it, and has no height to tune.
 
+### Keeping the animal off the coast
+A hunt ends once the mark is aground, so anything that puts the mark on land
+ends a hunt the player did nothing to lose. Until v0.27.0 that was nearly every
+hunt followed along a coast. A probe forced shoals at 55 water points within 35
+units of land and held a hull 40 units off the mark for three minutes each, on
+the game's own 2048x1024 height map. All 55 were lost to land. Two things were
+wrong, and they had to be fixed in this order.
+
+**The body was a rod.** Each segment was laid astern along the head's current
+heading, so the whole animal pivoted on its head and every turn swung the tail
+through a 21-unit arc. Steering the head cannot fix that. A second attempt drew
+each segment after the one in front, like a rope, and that cut up to three
+units inside every tight turn. The body now rides the head's **recorded path**:
+the head drops a point every `TRAIL_STEP` (0.25 units) into a fixed ring, and
+each segment is placed on that polyline at its rank's distance back. A head
+kept on water keeps every segment on water, and a turn travels down the body.
+
+**Then the head has to steer.** In priority order, all in `update`:
+
+| Mechanism | What it does |
+|---|---|
+| Escape | Land inside `COAST_LOOKAHEAD` (a body length) ahead triggers `escapeTurn`. It weighs every 15 degrees out to a reversal, both sides, along the arc the head would actually swim: straight through the telegraph, then round a circle of `speed / HEAD_TURN_RATE`, then open water from where the arc ends. It takes the smallest turn with full room, or else the turn with the most room |
+| Urgency | Land closer than a telegraph plus a turning circle skips the telegraph. The `turn` cue still fires |
+| Wheel about | If no turn at speed beats holding on, the animal drops to `TIGHT_SPEED` (a quarter) and turns at `TIGHT_TURN` (3x). The radius is a third of a unit, which gets it out of inlets narrower than its eight-unit turning circle |
+| Drawn turns | A random turn whose arc meets land is replaced by holding on, or by an escape. While spent, a drawn turn that loses open water stops where it is |
+| Flee | Weighs open water from half a unit out, because it turns a few degrees a frame and land right off the beam is what it swings into. It leaves an escape alone |
+
+None of it draws from the seeded stream, so a coast cannot reorder the draws
+behind it.
+
+**Judging a turn by its end heading was the trap.** The first escape picked a
+reversal whose final heading had open water, and swam it on the wrong side of a
+bay, through land four units off its beam. Checking the whole arc is what fixed
+it.
+
+**A sandbar is not a beach.** The 2048 map carries slivers of land a fraction of
+a unit wide that break the surface by a hair, narrower than any probe spacing
+the steering can afford. The hunt now ends only when the mark has been aground
+for `AGROUND_SECONDS` (1 s) without a break.
+
+**Measure at game resolution.** The unit tier builds the height map at 256x128,
+about five units a cell. At that size the slivers and the narrow inlets do not
+exist, and most of the real losses were invisible. The committed unit case runs
+at 256 for speed; the numbers above were taken at 2048 in a throwaway probe.
+With a hull held inside `FLEE_RADIUS` against a coast for minutes, 4 hunts in 55
+are still lost. A real player does not hold that position.
+
 ### What `?hunt=shoal` does
 Lays a shoal at `SHOAL_SPAWN_MIN` off the bow three simulated seconds in, and
 **re-lays it two seconds after every one ends**. That standing behaviour is the
@@ -4137,16 +4185,6 @@ hunt once the marked segment has been aground for `AGROUND_SECONDS`, and the
 mark starts at the tail, so a centre-only test put shoals on coasts that
 scattered straight away and reached the player as a notice about a shoal they
 never saw.
-
-Once laid, the body is kept off land by construction rather than by checks on
-it. Every segment rides the head's own recorded path, so the only thing that
-must stay on water is the head. The head watches `COAST_LOOKAHEAD` ahead, and
-on seeing land turns away through the usual telegraph. It weighs each
-candidate turn along the arc it would actually swim, not by its end heading.
-A drawn turn or a flee that would point it at land is refused, and in an inlet
-narrower than its turning circle it slows and wheels about in place. Followed
-along real coasts at game resolution, hunts lost to land went from every one
-to none.
 
 **`?hunt=armed`** is the same query with the shoal laid INSIDE the gate and the
 marked shadow moved onto the bow at the middle of the band, so the dial is live
