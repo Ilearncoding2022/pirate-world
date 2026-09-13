@@ -1,6 +1,6 @@
 # Roadmap and handoff
 
-Status of the project as of **v0.27.0** (2026-09-12), and what is worth doing
+Status of the project as of **v0.28.0** (2026-09-13), and what is worth doing
 next. This is a handoff document: it assumes you have read `README.md` for what
 the game is and `docs/ARCHITECTURE.md` for how it is built, and it exists so
 the next person does not have to re-derive which of the obvious improvements
@@ -16,10 +16,10 @@ of a market rather than of a codebase and say so where they start.
 
 | | |
 |---|---|
-| Version | 0.27.0 |
-| Source | 127 TypeScript modules, ~55 200 lines, plus 5 900 lines of CSS |
-| Tests | 60 unit files / 698 cases (~5 s), 13 browser cases (~7.8 min) |
-| Bundle | 1 006 KB JS (295 KB gzipped), 54 KB CSS, one chunk |
+| Version | 0.28.0 |
+| Source | 131 TypeScript modules, ~56 200 lines, plus 6 000 lines of CSS |
+| Tests | 63 unit files / 716 cases (~5 s), 13 browser cases (~7.7 min) |
+| Bundle | 1 018 KB JS (303 KB gzipped), 55 KB CSS, one chunk |
 | Assets | One 5.1 MB glTF hull, four WebP illustrations. Everything else procedural |
 | Dependencies | 2 runtime (`three`, `simplex-noise`), 7 dev |
 
