@@ -2335,6 +2335,22 @@ costs a heading. The old cross put a whole key height and two gaps — about
 70px — between W and S, which is a reach rather than a rock. The empty `.dpad__hub`
 that used to hold that cross open is gone with it.
 
+The whole pad is drawn at `--dpad-scale` (1.25) by a `transform` anchored at its
+bottom-left corner, for `--panel-scale`'s reason: it carries a dozen fixed pixel
+figures — the ship keys' 27px height, their radii, margins and gaps — that
+`--key-size` does not reach, and scaling keeps every one in proportion. The
+variable lives on `:root` beside `--key-size` because `.moor`'s narrow-screen
+offset has to clear the pad and cannot read a variable declared on it; that
+offset multiplies the pad's authored height by the scale.
+
+`[COIL]` and `[ANCHOR]` are 30% taller than the other ship keys, and the extra
+height is cancelled by a negative margin on the far side. The pad is pinned by
+its BOTTOM edge, so an ANCHOR row that really grew would lift every key above
+it; with the margin each row contributes exactly the track it did before, and
+the two buttons overhang the grid instead. Both heights are written against
+`--act-h`, which the compact block changes, so the compact pad follows without
+a second copy of the figure.
+
 
 ## HUD text sizing
 Browsers carry a **minimum font size** preference (Chrome: Settings →

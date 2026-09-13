@@ -643,7 +643,9 @@ by hand either: `assets/pirateship_beginner.glb` is built by
   back to the water you are steering over. The pad is a T rather than a cross —
   THRUST alone above PORT, REVERSE and STARBOARD — with thrust and reverse
   close enough to rock a thumb between, because they are the two ends of one
-  axis rather than two directions.
+  axis rather than two directions. The whole pad is drawn a quarter larger than
+  it was, and `[COIL]` and `[ANCHOR]` stand taller than `[FISH]` — COIL growing
+  up and away from the helm, ANCHOR down — with their counts in a larger type.
 
 ## Structure
 

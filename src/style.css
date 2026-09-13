@@ -61,6 +61,14 @@
      The glyph is the one size in the pad this does NOT reach: see
      `.dbtn__glyph`, which carries its own clamp and had to be moved by hand. */
   --key-size: clamp(46.2px, 4.95vw, 61.05px);
+  /* The whole pad -- helm keys, the ship keys around them, every label, gap,
+     border and radius -- drawn 25% over its authored size (owner's call,
+     2026-09-13). A transform on `.dpad` rather than a bigger `--key-size`, for
+     the reason `--panel-scale` gives: the pad carries a dozen fixed pixel
+     figures that `--key-size` does not reach, and scaling keeps every one of
+     them in proportion. Up here beside the key for the same reason the key is:
+     `.moor` has to clear the pad and cannot read a variable declared on it. */
+  --dpad-scale: 1.25;
 }
 
 * {
@@ -1026,14 +1034,18 @@ body {
    overlaps it, so it steps above instead of under a thumb.
 
    Measured off the pad rather than guessed, because the pad's height is two
-   key rows and its keys scale with the viewport: `26px` is its own bottom
+   key rows and its keys scale with the viewport: `36px` is its own bottom
    offset, `2 * var(--key-size)` its helm rows, `71px` the two ship keys, their
-   margins and the three row gaps, and `8px` the gap left between the two. A
-   hard number here was right for exactly one viewport and one pad layout, and
-   the pad has now changed shape twice. */
+   margins and the three row gaps, `7.3px` the part of the taller [COIL] that
+   hangs above the grid (30% of the compact 24.3px key), all of it times
+   `--dpad-scale` because the pad is drawn scaled, and `8px` the gap left
+   between the two. A hard number here was right for exactly one viewport and
+   one pad layout, and the pad has now changed shape twice. */
 @media (max-width: 720px) {
   .moor {
-    bottom: calc(var(--hud-pad) + 26px + 2 * var(--key-size) + 79px);
+    bottom: calc(
+      var(--hud-pad) + 36px + var(--dpad-scale) * (2 * var(--key-size) + 71px + 7.3px) + 8px
+    );
     font-size: 9.5px;
     letter-spacing: 0.1em;
   }
@@ -1310,8 +1322,14 @@ body {
   /* Lifted clear of the bottom edge (owner's call, 2026-09-09). The pad grew
      a row underneath it when [ANCHOR] moved in, and 4px of margin under a key
      a thumb has to reach past is not enough on a phone held one-handed. */
-  bottom: calc(var(--hud-pad) + 26px);
-  left: var(--hud-pad);
+  /* 36px and 10px: 10px up and 10px in from where the pad sat (owner's call,
+     2026-09-13). */
+  bottom: calc(var(--hud-pad) + 36px);
+  left: calc(var(--hud-pad) + 10px);
+  /* Anchored at the corner it is pinned to, so the pad grows up and to the
+     right and its bottom-left key stays exactly where the offsets put it. */
+  transform: scale(var(--dpad-scale));
+  transform-origin: bottom left;
   display: grid;
   /* The throttle's own gap, and the whole of "much closer": thrust and reverse
      are the two ends of one axis, so they are spaced to be rocked between
@@ -1510,7 +1528,11 @@ body {
  * factor because `.dock__btn` is a plain height and there is nothing to scale.
  */
 .dpad .dpad__act {
-  height: 27px;
+  /* A property rather than a bare height so [COIL] and [ANCHOR], which are
+     taller than this, can be written as a multiple of it and follow the
+     compact block below without a second copy of its figure. */
+  --act-h: 27px;
+  height: var(--act-h);
   /* Both of these are fractions of a helm key rather than fixed pixels, and
      that is what makes the alignment hold: the button is stretched to a key's
      column, so its content has to shrink with the column or spill out of it at
@@ -1740,6 +1762,40 @@ body {
   justify-self: stretch;
   align-self: start;
   margin-top: 4px;
+}
+
+/*
+ * [COIL] and [ANCHOR] are 30% taller than the other ship keys (owner's call,
+ * 2026-09-13), COIL growing upward and ANCHOR downward.
+ *
+ * The extra 30% is cancelled by a negative margin on the far side, so each row
+ * contributes exactly the track it did before. That is what holds the helm
+ * still: the pad is pinned by its BOTTOM edge, so an ANCHOR row that grew for
+ * real would have lifted every key above it, and a COIL row that grew would
+ * have moved nothing but the pad's own box. Instead the two buttons hang out
+ * past the grid's top and bottom edges, which the pad's offsets leave room for.
+ *
+ * Two classes, to beat `.dpad .dpad__act`'s height wherever the two rules end
+ * up in this file.
+ */
+.dpad .dpad__act--coil,
+.dpad .dpad__act--anchor {
+  height: calc(var(--act-h) * 1.3);
+}
+
+.dpad .dpad__act--coil {
+  margin-top: calc(var(--act-h) * -0.3);
+}
+
+.dpad .dpad__act--anchor {
+  margin-bottom: calc(var(--act-h) * -0.3);
+}
+
+/* Their counts, 30% over the dock's 0.85em. Still in `em`, so the size rides
+   `.dpad__act__inner`'s scale like everything else inside it. */
+.dpad__act--coil .dock__count,
+.dpad__act--anchor .dock__count {
+  font-size: calc(0.85em * 1.3);
 }
 
 /*
@@ -2082,7 +2138,7 @@ kbd {
   /* Height only. The padding is a fraction of `--key-size` now and has already
      shrunk with the key by the time this block applies. */
   .dpad .dpad__act {
-    height: 24.3px;
+    --act-h: 24.3px;
   }
   .dock__key {
     font-size: 9.5px;
