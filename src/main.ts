@@ -1000,7 +1000,8 @@ async function startGame(): Promise<void> {
     });
   }
 
-  const docks = createDocks(globe.towns);
+  // The known list, so a harbour never moored at stands short and dim until it is.
+  const docks = createDocks(globe.towns, records.known.names);
   scene.add(docks.object);
 
   const view = createFollowCamera(window.innerWidth / window.innerHeight);

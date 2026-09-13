@@ -4,8 +4,26 @@ import type { WorldEnv } from './env';
 import { GLOBE_RADIUS, tangentFrame } from './geo';
 import { LAYER_DEFAULT, LAYER_REFLECTED } from './layers';
 
+/**
+ * One harbour's beacon as a pick target: the foot of the mast on the water and
+ * the top of its name label, both in world space and both at the height the
+ * beacon is drawn at THIS frame -- an uncharted one stands a quarter as tall.
+ */
+export interface BeaconMarker {
+  readonly name: string;
+  readonly foot: THREE.Vector3;
+  readonly top: THREE.Vector3;
+}
+
 export interface Docks {
   object: THREE.Object3D;
+  /**
+   * Every harbour's beacon, foot and label top, as drawn now. Rebuilt on every
+   * call rather than cached, because it is read on a double-click and not on a
+   * frame, and a cached copy would be one more thing to keep in step with the
+   * charted ease below.
+   */
+  markers(): readonly BeaconMarker[];
   /**
    * `camera` is optional and is the name labels' only reader: they hold a
    * screen size, so how legible one is depends on how far the LENS is from it
@@ -81,6 +99,25 @@ const MAST_SIDES = 3;
 const LAMP_RADIUS = 1.5;
 
 /**
+ * An uncharted harbour's beacon: a quarter of the mast and a tenth of the lamp
+ * (owner's call, 2026-09-13).
+ *
+ * "Uncharted" is `knownharbours.ts`'s list and nothing else -- a harbour the
+ * ship has never moored at, in this world or any earlier one. A tenth of the
+ * lamp puts it well under the bloom threshold, so an uncharted beacon is a
+ * short post with a dim cap rather than a point of light; the collar under it
+ * keeps the berth's colour so the state still reads up close.
+ *
+ * The mast is lowered in the vertex shader rather than rebuilt, so the moment
+ * a harbour becomes known costs a uniform write, and `CHART_EASE` spreads that
+ * write over a beat so the beacon visibly rises instead of popping.
+ */
+export const UNCHARTED_HEIGHT = 0.25;
+export const UNCHARTED_LAMP = 0.1;
+/** Seconds for a newly charted beacon to rise to full height and brightness. */
+const CHART_EASE = 1.2;
+
+/**
  * Breathing rate of the idle ring and the lamp, in radians per second.
  *
  * About one cycle every five seconds. Slow enough to read as a beacon rather
@@ -121,6 +158,15 @@ export const LABEL_FADE_FAR = 140;
  * text with a glow bleeding through it.
  */
 const LABEL_LIFT = MAST_HEIGHT + LAMP_RADIUS * 2.8;
+
+/**
+ * The label's lift for a beacon `level` of the way from uncharted (0) to known
+ * (1). The label rides the lamp down with the mast, so an uncharted harbour's
+ * name does not float six units over a stub.
+ */
+function labelLift(level: number): number {
+  return LABEL_LIFT - (1 - (UNCHARTED_HEIGHT + (1 - UNCHARTED_HEIGHT) * level)) * MAST_HEIGHT;
+}
 
 /**
  * The label's height as a fraction of the viewport's, and the padding around
@@ -271,9 +317,17 @@ const BEACON_VERTEX = [
   'attribute float aDock;',
   'attribute float aLamp;',
   'attribute float aUp;',
+  // The berth's own up, exactly. Lowering along the normalised position would
+  // shear the lamp: its vertices sit a lamp-radius off the axis either side.
+  'attribute vec3 aAxis;',
+  // How charted each berth is, 0..1, eased. DOCK_COUNT arrives as a define.
+  'uniform float uCharted[DOCK_COUNT];',
+  'uniform float uMastHeight;',
+  'uniform float uUnchartedHeight;',
   'varying float vDock;',
   'varying float vLamp;',
   'varying float vUp;',
+  'varying float vCharted;',
   'varying vec3 vNormal;',
   'varying vec3 vDir;',
   'void main() {',
@@ -281,10 +335,17 @@ const BEACON_VERTEX = [
   '  vLamp = aLamp;',
   '  vUp = aUp;',
   '  vNormal = normal;',
+  '  float charted = uCharted[int(aDock + 0.5)];',
+  '  vCharted = charted;',
+  '  // Everything above the foot comes down by the missing share of the mast,',
+  '  // the lamp included (its vertices all carry aUp = 1), so an uncharted',
+  '  // beacon is the same shape on a shorter stick.',
+  '  float lower = (1.0 - mix(uUnchartedHeight, 1.0, charted)) * uMastHeight * aUp;',
+  '  vec3 p = position - aAxis * lower;',
   '  // The mast stands on its own radius, so the surface direction under it is',
   '  // just the normalised position -- good enough for the day/night term.',
-  '  vDir = normalize(position);',
-  '  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);',
+  '  vDir = normalize(p);',
+  '  gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);',
   '}',
 ].join('\n');
 
@@ -299,9 +360,11 @@ const BEACON_FRAGMENT = [
   'uniform vec3 uMastDay;',
   'uniform vec3 uMastNight;',
   'uniform vec3 uSunDirection;',
+  'uniform float uUnchartedLamp;',
   'varying float vDock;',
   'varying float vLamp;',
   'varying float vUp;',
+  'varying float vCharted;',
   'varying vec3 vNormal;',
   'varying vec3 vDir;',
   'void main() {',
@@ -316,6 +379,9 @@ const BEACON_FRAGMENT = [
   '    // the bloom threshold in postfx.ts, and that glow is what makes a beacon',
   '    // a point of light from a few hundred units instead of a smear.',
   '    col = tint * mix(1.25 + 0.35 * breathe, 1.90, berthed);',
+  '    // An uncharted harbour\'s lamp at a tenth: under the bloom threshold, so',
+  '    // it is a dim cap on a stub rather than a light.',
+  '    col *= mix(uUnchartedLamp, 1.0, vCharted);',
   '  } else {',
   '    // Lambert with a high floor, brightening toward the lamp. A correctly',
   '    // dark unlit side would vanish into the night sea, and the mast has to',
@@ -403,7 +469,7 @@ function makeLabelTexture(name: string): { texture: THREE.CanvasTexture; aspect:
  * uniform, so "the ship arrived" costs one uniform write rather than a geometry
  * rebuild or a material swap.
  */
-export function createDocks(towns: Towns): Docks {
+export function createDocks(towns: Towns, known?: ReadonlySet<string>): Docks {
   const group = new THREE.Group();
   group.name = 'docks';
 
@@ -411,6 +477,17 @@ export function createDocks(towns: Towns): Docks {
   /** Berth to its index in the shaders' `aDock` attribute. */
   const dockIndex = new Map<Dock, number>();
   for (let i = 0; i < docks.length; i++) dockIndex.set(docks[i], i);
+
+  /**
+   * How charted each berth is, 0 (never moored at) to 1 (known), eased toward
+   * `known` every frame. Starts AT the target, so a boot does not raise every
+   * remembered beacon out of the sea at once. A caller that passes no `known`
+   * set gets every beacon at full height, which is what the world looked like
+   * before there was such a thing as uncharted.
+   */
+  const isKnown = (d: number): boolean => known === undefined || known.has(docks[d].town.name);
+  const charted = new Float32Array(Math.max(1, docks.length));
+  for (let d = 0; d < docks.length; d++) charted[d] = isKnown(d) ? 1 : 0;
 
   const north = new THREE.Vector3();
   const east = new THREE.Vector3();
@@ -512,6 +589,7 @@ export function createDocks(towns: Towns): Docks {
   const beaconDock = new Float32Array(docks.length * beaconVerts);
   const beaconLamp = new Float32Array(docks.length * beaconVerts);
   const beaconUp = new Float32Array(docks.length * beaconVerts);
+  const beaconAxis = new Float32Array(docks.length * beaconVerts * 3);
   const beaconIndex: number[] = [];
 
   const lampAxes = [north, east, vertex];
@@ -542,6 +620,9 @@ export function createDocks(towns: Towns): Docks {
       beaconDock[w] = d;
       beaconLamp[w] = lamp;
       beaconUp[w] = up;
+      beaconAxis[w * 3] = dock.dir.x;
+      beaconAxis[w * 3 + 1] = dock.dir.y;
+      beaconAxis[w * 3 + 2] = dock.dir.z;
       return w++;
     }
 
@@ -618,6 +699,7 @@ export function createDocks(towns: Towns): Docks {
   beaconGeo.setAttribute('aDock', new THREE.BufferAttribute(beaconDock, 1));
   beaconGeo.setAttribute('aLamp', new THREE.BufferAttribute(beaconLamp, 1));
   beaconGeo.setAttribute('aUp', new THREE.BufferAttribute(beaconUp, 1));
+  beaconGeo.setAttribute('aAxis', new THREE.BufferAttribute(beaconAxis, 3));
   beaconGeo.setIndex(beaconIndex);
   beaconGeo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), GLOBE_RADIUS * 1.2);
 
@@ -633,7 +715,14 @@ export function createDocks(towns: Towns): Docks {
       uMastDay: { value: new THREE.Color(MAST_DAY_COLOR) },
       uMastNight: { value: new THREE.Color(MAST_NIGHT_COLOR) },
       uSunDirection: { value: new THREE.Vector3(0.62, 0.42, 0.66).normalize() },
+      uCharted: { value: charted },
+      uMastHeight: { value: MAST_HEIGHT },
+      uUnchartedHeight: { value: UNCHARTED_HEIGHT },
+      uUnchartedLamp: { value: UNCHARTED_LAMP },
     },
+    // A uniform array needs a compile-time length, and a world with no berths
+    // still has to compile.
+    defines: { DOCK_COUNT: Math.max(1, docks.length) },
     vertexShader: BEACON_VERTEX,
     fragmentShader: BEACON_FRAGMENT,
     transparent: false,
@@ -670,9 +759,10 @@ export function createDocks(towns: Towns): Docks {
    * whole of the range logic: a label is either legible or absent, never a
    * two-pixel smear that the eye reads as dirt on the lens.
    */
-  const labels: { sprite: THREE.Sprite; material: THREE.SpriteMaterial }[] = [];
+  const labels: { sprite: THREE.Sprite; material: THREE.SpriteMaterial; dock: number }[] = [];
 
-  for (const dock of docks) {
+  for (let d = 0; d < docks.length; d++) {
+    const dock = docks[d];
     const name = dock.town.name;
     if (name === '') continue;
     const drawn = makeLabelTexture(name);
@@ -712,7 +802,7 @@ export function createDocks(towns: Towns): Docks {
     sprite.position
       .copy(dock.dir)
       .multiplyScalar(GLOBE_RADIUS + RING_LIFT)
-      .addScaledVector(dock.dir, LABEL_LIFT);
+      .addScaledVector(dock.dir, labelLift(charted[d]));
     sprite.scale.set(LABEL_SCREEN_HEIGHT * drawn.aspect, LABEL_SCREEN_HEIGHT, 1);
     /*
      * The one line that keeps the harbour's name out of the water.
@@ -731,7 +821,7 @@ export function createDocks(towns: Towns): Docks {
     // `update` never flashes 36 names at full strength.
     sprite.visible = false;
     group.add(sprite);
-    labels.push({ sprite, material });
+    labels.push({ sprite, material, dock: d });
   }
 
   /** Scratch for the camera's world position; never allocated per frame. */
@@ -741,8 +831,21 @@ export function createDocks(towns: Towns): Docks {
 
   return {
     object: group,
+    markers(): readonly BeaconMarker[] {
+      const out: BeaconMarker[] = [];
+      for (let d = 0; d < docks.length; d++) {
+        const dir = docks[d].dir;
+        const foot = dir.clone().multiplyScalar(GLOBE_RADIUS + RING_LIFT);
+        out.push({
+          name: docks[d].town.name,
+          foot,
+          top: foot.clone().addScaledVector(dir, labelLift(charted[d])),
+        });
+      }
+      return out;
+    },
     update(
-      _dt: number,
+      dt: number,
       env: WorldEnv,
       ship: ShipState,
       energy: EnergyState,
@@ -762,6 +865,29 @@ export function createDocks(towns: Towns): Docks {
         u.uActive.value = active;
         u.uCharging.value = charging;
         u.uSunDirection.value.copy(env.sunDirection);
+      }
+
+      /*
+       * The charted ease. A harbour joins `known` on the frame the ship moors,
+       * and its beacon rises and brightens over `CHART_EASE` from there. Linear
+       * rather than exponential, so it arrives rather than creeping the last
+       * percent forever, and 36 comparisons a frame against a Set is nothing.
+       * The labels ride the same level, so they are moved only on the frames
+       * something is actually easing.
+       */
+      const step = dt > 0 ? dt / CHART_EASE : 0;
+      for (let d = 0; d < docks.length; d++) {
+        const target = isKnown(d) ? 1 : 0;
+        const level = charted[d];
+        if (level === target) continue;
+        charted[d] = target > level ? Math.min(target, level + step) : Math.max(target, level - step);
+        for (const label of labels) {
+          if (label.dock !== d) continue;
+          label.sprite.position
+            .copy(docks[d].dir)
+            .multiplyScalar(GLOBE_RADIUS + RING_LIFT)
+            .addScaledVector(docks[d].dir, labelLift(charted[d]));
+        }
       }
 
       /*
